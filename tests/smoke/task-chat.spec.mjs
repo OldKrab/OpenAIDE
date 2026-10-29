@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { encodedPng } from "./fixtures/png.mjs";
 import { startFullStackHarness } from "./full-stack-harness.mjs";
 
 test.describe.configure({ mode: "serial" });
@@ -1311,6 +1312,48 @@ test("sends an attachment-only first message through the real resolver boundary"
   await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toBeVisible();
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 });
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`reserves stored images' height before they load at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openPreparedNewTask(page);
+    await page.getByRole("button", { name: "Add context" }).click();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("menuitem", { name: /Attach images/ }).click(),
+    ]);
+    await chooser.setFiles({ name: "wide.png", mimeType: "image/png", buffer: encodedPng(400, 100) });
+    await expect(page.getByLabel("Attached context").getByLabel("Open wide.png")).toBeVisible();
+    await page.getByRole("textbox", { name: "Message" }).fill("smoke:agent-image");
+    await page.getByLabel("Send message").click();
+    await expect(page.getByLabel("Task chat").getByLabel("Open Agent image")).toBeVisible();
+
+    // Reload so both images load from App Server again; record each loading frame as it mounts.
+    await page.addInitScript(() => {
+      window.__loadingImageHeights = {};
+      new MutationObserver(() => {
+        for (const frame of document.querySelectorAll(".chat-stored-image[data-image-state=loading]")) {
+          const heights = window.__loadingImageHeights[frame.ariaLabel] ??= [];
+          heights.push(frame.getBoundingClientRect().height);
+        }
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.reload();
+    const chat = page.getByLabel("Task chat");
+    // The sent image is 4:1 and the Agent image 1:2, each at most 240px tall.
+    for (const [label, aspect] of [["Image", 4], ["Agent image", 0.5]]) {
+      const opened = chat.getByLabel(`Open ${label}`);
+      await expect(opened.locator("img")).toBeVisible();
+      await expect.poll(() => opened.locator("img").evaluate((image) => image.complete)).toBe(true);
+      const loaded = await opened.evaluate((frame) => frame.getBoundingClientRect().height);
+      const imageBox = await opened.locator("img").boundingBox();
+      expect(Math.abs(imageBox.height - Math.min(imageBox.width / aspect, 240))).toBeLessThanOrEqual(1);
+      const loading = await page.evaluate((key) => window.__loadingImageHeights[key], `Loading ${label}`);
+      expect(loading?.length).toBeGreaterThan(0);
+      for (const height of loading) expect(Math.abs(height - loaded)).toBeLessThanOrEqual(1);
+    }
+  });
+}
 
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);

@@ -19,6 +19,8 @@ use crate::protocol::model::{
     AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ChatTiming, CompactionStatus,
     NormalizedMessage, ObservedSpan, QuestionAction, QuestionState,
 };
+use crate::storage::chat_images::ImageReference;
+use openaide_app_server_protocol::snapshot::ImageDimensions;
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
     let (role, status, parts) = project_message(&message.message);
@@ -185,19 +187,15 @@ fn project_user_attachment(index: usize, attachment: &Attachment) -> MessagePart
     if attachment.kind == "image" {
         let media_type = attachment_payload_string(attachment, "mimeType");
         let reference = match crate::storage::chat_images::attachment_image_id(attachment) {
-            Some(image_id) => Some((
+            Some(image_id) => Some(ImageReference {
                 image_id,
-                attachment_payload_u64(attachment, "sizeBytes").unwrap_or_default(),
-            )),
+                size_bytes: attachment_payload_u64(attachment, "sizeBytes").unwrap_or_default(),
+                dimensions: crate::storage::chat_images::attachment_dimensions(attachment),
+            }),
             None => crate::storage::chat_images::inline_attachment_reference(attachment),
         };
-        if let (Some(media_type), Some((image_id, size_bytes))) = (media_type, reference) {
-            return MessagePart::Image {
-                media_type,
-                image_id,
-                size_bytes,
-                uri: None,
-            };
+        if let (Some(media_type), Some(reference)) = (media_type, reference) {
+            return project_image(media_type, reference, None);
         }
     }
     MessagePart::Attachment {
@@ -208,6 +206,22 @@ fn project_user_attachment(index: usize, attachment: &Attachment) -> MessagePart
 /// Returns `None` only for an Image without a stored reference, which the
 /// commit and hydration invariants rule out; Chat then omits it rather than
 /// naming bytes that do not exist.
+fn project_image(
+    media_type: String,
+    reference: ImageReference,
+    uri: Option<String>,
+) -> MessagePart {
+    MessagePart::Image {
+        media_type,
+        image_id: reference.image_id,
+        size_bytes: reference.size_bytes,
+        dimensions: reference
+            .dimensions
+            .map(|(width, height)| ImageDimensions { width, height }),
+        uri,
+    }
+}
+
 fn project_agent_message_part(content: &AgentMessagePart) -> Option<MessagePart> {
     Some(match content {
         AgentMessagePart::Text { text } => MessagePart::Text { text: text.clone() },
@@ -216,20 +230,21 @@ fn project_agent_message_part(content: &AgentMessagePart) -> Option<MessagePart>
             data,
             image_id,
             size_bytes,
+            width,
+            height,
             uri,
         } => {
             // A draft holds the Agent's bytes until the journal writer stores them.
-            let (image_id, size_bytes) = match image_id {
-                Some(image_id) => (image_id.clone(), size_bytes.unwrap_or_default()),
+            let reference = match image_id {
+                Some(image_id) => ImageReference {
+                    image_id: image_id.clone(),
+                    size_bytes: size_bytes.unwrap_or_default(),
+                    dimensions: width.zip(*height),
+                },
                 None => crate::storage::chat_images::inline_reference(data)
                     .filter(|_| !data.is_empty())?,
             };
-            MessagePart::Image {
-                media_type: media_type.clone(),
-                image_id,
-                size_bytes,
-                uri: uri.clone(),
-            }
+            project_image(media_type.clone(), reference, uri.clone())
         }
         AgentMessagePart::Resource {
             uri,

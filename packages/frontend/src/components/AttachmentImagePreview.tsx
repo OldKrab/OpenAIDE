@@ -69,8 +69,14 @@ export function storedChatImageReference(attachment: Attachment): StoredChatImag
   const imageId = payloadString(attachment.payload, "imageId");
   const mediaType = payloadString(attachment.payload, "mimeType");
   if (!imageId || !mediaType) return undefined;
-  const sizeBytes = (attachment.payload as Record<string, unknown>).sizeBytes;
-  return { imageId, mediaType, ...(typeof sizeBytes === "number" ? { sizeBytes } : {}) };
+  const payload = attachment.payload as Record<string, unknown>;
+  return {
+    imageId,
+    mediaType,
+    ...payloadNumber(payload, "sizeBytes"),
+    ...payloadNumber(payload, "width"),
+    ...payloadNumber(payload, "height"),
+  };
 }
 
 /** An image the client still holds itself, such as a local preview before App Server stores it. */
@@ -82,6 +88,11 @@ export function chatImagePreview(attachment: Attachment): AttachmentImagePreview
   const mimeType = payloadString(attachment.payload, "mimeType") ?? payloadString(attachment.payload, "mime");
   if (!data || !mimeType?.startsWith("image/")) return undefined;
   return { label: attachment.label, url: `data:${mimeType};base64,${data}` };
+}
+
+function payloadNumber<Key extends string>(payload: Record<string, unknown>, key: Key) {
+  const value = payload[key];
+  return typeof value === "number" ? { [key]: value } as Record<Key, number> : {};
 }
 
 function payloadString(payload: unknown, key: string) {

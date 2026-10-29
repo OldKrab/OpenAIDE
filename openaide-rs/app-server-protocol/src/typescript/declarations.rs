@@ -118,25 +118,25 @@ use crate::snapshot::{
     AgentSignInPhase, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
     AgentSummary, AttachmentKind, AttachmentSnapshot, BackgroundCommandOutcome,
     BackgroundCommandSnapshot, ChatItem, ChatItemStatus, ChatItemTiming, ChatRole, ChatSnapshot,
-    ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot, LiveSessionDataState,
-    MessagePart, NativeSessionReference, NativeSessionSummary, NewTaskDefaultsSnapshot,
-    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
-    ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion, QuestionMessageAction,
-    QuestionMessageState, QueuedMessageAttachmentSnapshot, QueuedMessageSnapshot, RecoveryAction,
-    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    SubagentActivitySnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
-    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
-    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
-    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
-    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
-    TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot, ToolPresentationSnapshot,
-    ToolSearchTargetSnapshot,
+    ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot, ImageDimensions,
+    LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
+    QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
+    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, SubagentCapabilitiesSnapshot,
+    SubagentCatalogEntrySnapshot, SubagentCatalogSnapshot, SubagentDetailSnapshot,
+    SubagentHistoryAvailability, SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
+    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
+    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -741,6 +741,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ToolPermissionDecisionSnapshot>(output, config);
     push_decl::<AttachmentSnapshot>(output, config);
     push_decl::<AttachmentKind>(output, config);
+    push_decl::<ImageDimensions>(output, config);
     push_decl::<RecoverySnapshot>(output, config);
     push_decl::<RecoveryAction>(output, config);
     push_decl::<SettingsSnapshot>(output, config);

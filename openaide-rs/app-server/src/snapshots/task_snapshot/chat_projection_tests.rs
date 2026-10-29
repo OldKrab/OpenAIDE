@@ -23,6 +23,8 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                         "imageId": image_id,
                         "mimeType": "image/png",
                         "sizeBytes": 5,
+                        "width": 4,
+                        "height": 3,
                     })),
                 },
                 Attachment {
@@ -48,12 +50,17 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                 media_type: "image/png".to_string(),
                 image_id: image_id.clone(),
                 size_bytes: 5,
+                dimensions: Some(openaide_app_server_protocol::snapshot::ImageDimensions {
+                    width: 4,
+                    height: 3,
+                }),
                 uri: None,
             },
             MessagePart::Image {
                 media_type: "image/png".to_string(),
                 image_id: pending_id.clone(),
                 size_bytes: 5,
+                dimensions: None,
                 uri: None,
             },
         ]
@@ -73,6 +80,8 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                     data: String::new(),
                     image_id: Some(image_id.clone()),
                     size_bytes: Some(5),
+                    width: None,
+                    height: None,
                     uri: None,
                 },
                 AgentMessagePart::Image {
@@ -80,6 +89,8 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                     data: "aW1hZ2U=".to_string(),
                     image_id: None,
                     size_bytes: None,
+                    width: None,
+                    height: None,
                     uri: None,
                 },
                 AgentMessagePart::Image {
@@ -87,6 +98,8 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                     data: String::new(),
                     image_id: None,
                     size_bytes: None,
+                    width: None,
+                    height: None,
                     uri: None,
                 },
             ],
@@ -101,12 +114,14 @@ fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes
                 media_type: "image/png".to_string(),
                 image_id,
                 size_bytes: 5,
+                dimensions: None,
                 uri: None,
             },
             MessagePart::Image {
                 media_type: "image/png".to_string(),
                 image_id: pending_id,
                 size_bytes: 5,
+                dimensions: None,
                 uri: None,
             },
         ]

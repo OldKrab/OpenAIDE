@@ -1,12 +1,8 @@
 /* Loading and unavailable states of a stored Chat image (ADR-0075), drawn in the frame
    the loaded image uses so the message keeps its shape while the bytes arrive. */
 .chat-stored-image {
+  position: relative;
   min-width: 0;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 6px;
-  padding: 4px;
   color: var(--oa-muted);
   cursor: default;
   font-size: 12px;
@@ -14,10 +10,46 @@
   text-align: center;
 }
 
-/* Single and Agent frames size to their image, so the placeholder holds one height. */
-.chat-attachment-list[data-layout="single"] .chat-stored-image,
-.chat-agent-content-image.chat-stored-image {
+/* Single and Agent frames size to their image. A known image size shapes the spacer
+   exactly like the loaded `<img>` (full width, at most 240px tall); otherwise the
+   placeholder holds one height. Pair and many frames have fixed sizes. A single
+   attachment's list sizes to its content, where the loaded `<img>` contributes its
+   pixel width, so the spacer contributes the same width. */
+.chat-attachment-list[data-layout="single"] .chat-stored-image:not([data-image-sized]),
+.chat-agent-content-image.chat-stored-image:not([data-image-sized]) {
   height: 160px;
+}
+
+.chat-stored-image-space {
+  display: none;
+}
+
+.chat-attachment-list[data-layout="single"] .chat-stored-image-space,
+.chat-agent-content-image .chat-stored-image-space {
+  width: 100%;
+  max-height: 240px;
+  display: block;
+}
+
+.chat-attachment-list[data-layout="single"] .chat-stored-image-space {
+  width: var(--chat-image-width, 100%);
+  max-width: 100%;
+}
+
+/* An unavailable image still shows its status when the image is a thin strip. */
+.chat-attachment-list[data-layout="single"] .chat-stored-image[data-image-state="failed"],
+.chat-agent-content-image.chat-stored-image[data-image-state="failed"] {
+  min-height: 84px;
+}
+
+.chat-stored-image-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  padding: 4px;
 }
 
 .chat-stored-image:hover {

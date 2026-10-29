@@ -633,6 +633,7 @@ describe("App Server Protocol state mapping", () => {
                 mediaType: "image/png",
                 imageId: "b".repeat(64),
                 sizeBytes: 5,
+                dimensions: { width: 640, height: 480 },
               },
             ],
           },
@@ -661,6 +662,8 @@ describe("App Server Protocol state mapping", () => {
       imageId: "b".repeat(64),
       mimeType: "image/png",
       sizeBytes: 5,
+      width: 640,
+      height: 480,
     });
   });
 
@@ -679,6 +682,7 @@ describe("App Server Protocol state mapping", () => {
               mediaType: "image/png",
               imageId: "c".repeat(64),
               sizeBytes: 5,
+              dimensions: { width: 320, height: 200 },
               uri: "memory://diagram.png",
             }],
           },
@@ -712,6 +716,8 @@ describe("App Server Protocol state mapping", () => {
           media_type: "image/png",
           image_id: "c".repeat(64),
           size_bytes: 5,
+          width: 320,
+          height: 200,
           uri: "memory://diagram.png",
         }],
       },

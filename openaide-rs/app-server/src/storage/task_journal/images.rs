@@ -37,18 +37,22 @@ pub(super) fn externalize_operations(
     Ok(moved)
 }
 
-/// Moves a hydrated Chat's inline images into files. Returns false when there
-/// were none. The caller then publishes a compacted generation; until it does,
-/// the previous generation stays authoritative and the next hydration retries.
-pub(super) fn externalize_projection(
+/// Moves a hydrated Chat's inline images into files and records the display
+/// size of references stored before App Server kept it. Returns false when
+/// nothing changed. The caller then publishes a compacted generation; until it
+/// does, the previous generation stays authoritative and the next hydration retries.
+pub(super) fn migrate_projection(
     task_dir: &Path,
     projection: &mut TaskProjection,
 ) -> Result<bool, RuntimeError> {
-    if !chat_images::has_inline_images(&projection.messages) {
+    if !chat_images::has_inline_images(&projection.messages)
+        && !chat_images::has_references_without_dimensions(&projection.messages)
+    {
         return Ok(false);
     }
-    chat_images::externalize_messages(task_dir, &mut projection.messages)?;
-    Ok(true)
+    let moved = chat_images::externalize_messages(task_dir, &mut projection.messages)?;
+    let described = chat_images::add_missing_dimensions(task_dir, &mut projection.messages);
+    Ok(moved + described > 0)
 }
 
 /// Removes image files neither this Chat nor a Subagent history of the Task

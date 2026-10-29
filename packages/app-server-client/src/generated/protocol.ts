@@ -1652,7 +1652,11 @@ export type TimeSpanSnapshot = { startedAt: string, endedAt?: string | null, };
 
 export type CompactionStatusSnapshot = "inProgress" | "completed" | "failed" | "cancelled" | "unknown";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, imageId: string, sizeBytes: number, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, } | { "kind": "completedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "closedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "compaction", status: CompactionStatusSnapshot, summary?: string | null, error?: string | null, };
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, imageId: string, sizeBytes: number,
+/**
+ * Absent when App Server could not read the image's header.
+ */
+dimensions?: ImageDimensions | null, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, } | { "kind": "completedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "closedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "compaction", status: CompactionStatusSnapshot, summary?: string | null, error?: string | null, };
 
 export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error";
 
@@ -1699,6 +1703,8 @@ export type AttachmentSnapshot = { attachmentId: AttachmentId, kind: AttachmentK
 previewImageId?: string | null, };
 
 export type AttachmentKind = "fileReference" | "embeddedSnapshot";
+
+export type ImageDimensions = { width: number, height: number, };
 
 export type RecoverySnapshot = { message: string, actions: Array<RecoveryAction>, };
 

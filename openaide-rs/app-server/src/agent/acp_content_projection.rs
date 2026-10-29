@@ -18,6 +18,8 @@ pub(super) fn project_content_block(
                     data: image.data,
                     image_id: None,
                     size_bytes: None,
+                    width: None,
+                    height: None,
                     uri: image.uri,
                 }
             } else {

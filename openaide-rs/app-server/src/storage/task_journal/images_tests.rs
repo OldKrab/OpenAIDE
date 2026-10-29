@@ -114,3 +114,106 @@ fn a_sent_image_is_stored_before_its_frame_and_the_frame_holds_a_reference() {
         .count();
     assert_eq!(images, 1);
 }
+
+#[test]
+fn stored_references_gain_their_image_size_when_the_task_opens() {
+    let root = TempDir::new().unwrap();
+    let task_id = "task_image_sizes";
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(
+            super::super::store::tests::task_projection(task_id),
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+    let task_dir = root.path().join("task-store-v1/tasks").join(task_id);
+    let user_image =
+        chat_images::store(&task_dir, &crate::media::tests::encoded_png(4, 3)).unwrap();
+    let agent_image =
+        chat_images::store(&task_dir, &crate::media::tests::encoded_png(2, 5)).unwrap();
+    // References as the first release of ADR-0075 stored them: no width or height.
+    let snapshot_path = task_dir.join("chat.snapshot");
+    let mut released: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    released["messages"] = serde_json::json!([
+        {
+            "sequence": 1,
+            "chat": {
+                "cursor": "1",
+                "identity": "user-1",
+                "message_type": "user",
+                "message_id": "user-1",
+                "message": {
+                    "kind": "user",
+                    "id": "user-1",
+                    "text": "",
+                    "created_at": "0",
+                    "attachments": [{
+                        "kind": "image",
+                        "label": "shot.png",
+                        "payload": { "imageId": user_image, "mimeType": "image/png", "sizeBytes": 1 }
+                    }]
+                }
+            }
+        },
+        {
+            "sequence": 2,
+            "chat": {
+                "cursor": "2",
+                "identity": "agent-1",
+                "message_type": "agent_message",
+                "message_id": "agent-1",
+                "message": {
+                    "kind": "agent_message",
+                    "id": "agent-1",
+                    "role": "agent",
+                    "created_at": "0",
+                    "parts": [{
+                        "kind": "image",
+                        "media_type": "image/png",
+                        "image_id": agent_image,
+                        "size_bytes": 1
+                    }]
+                }
+            }
+        }
+    ]);
+    std::fs::write(&snapshot_path, serde_json::to_vec(&released).unwrap()).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store.load(task_id).expect("stored references load");
+
+    let NormalizedMessage::User { attachments, .. } = &loaded.messages[0].chat.message else {
+        panic!("expected the user message");
+    };
+    assert_eq!(
+        chat_images::attachment_dimensions(&attachments[0]),
+        Some((4, 3))
+    );
+    let NormalizedMessage::AgentMessage { parts, .. } = &loaded.messages[1].chat.message else {
+        panic!("expected the agent message");
+    };
+    assert!(matches!(
+        parts[0],
+        AgentMessagePart::Image {
+            width: Some(2),
+            height: Some(5),
+            ..
+        }
+    ));
+    // The sizes are durable, so the next open reads no image header.
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+    let snapshot = metadata["chatSnapshot"].as_str().unwrap();
+    let published: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(task_dir.join(snapshot)).unwrap()).unwrap();
+    assert!(!chat_images::has_references_without_dimensions(
+        &serde_json::from_value::<Vec<crate::storage::records::StoredMessage>>(
+            published["messages"].clone()
+        )
+        .unwrap()
+    ));
+    store.shutdown().unwrap();
+}
