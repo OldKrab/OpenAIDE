@@ -154,8 +154,6 @@ impl Runtime {
         agent_registry: AgentRegistryHandle,
     ) -> RuntimeResult<Self> {
         let storage_fatal_events = store.take_task_storage_fatal_events();
-        // Off the startup path: upgrades Subagent journals older writers left.
-        store.start_subagent_history_sweep();
         Ok(Self {
             service: TaskService::open_with_task_update_notifier_and_agent_registry(
                 store.clone(),

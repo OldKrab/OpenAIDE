@@ -6,7 +6,8 @@
 
 mod artifact;
 mod catalog;
-mod frame;
+/// Shared with the Subagent Chat streams the worker writes (ADR-0076).
+pub(crate) mod frame;
 mod images;
 mod model;
 mod projection;

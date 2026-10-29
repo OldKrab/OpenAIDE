@@ -1,6 +1,7 @@
 //! Subagent catalogs and histories of a Task (ADR-0046). The Task journal worker
-//! writes them in the Task's queue order (ADR-0076): a streamed change is a write
-//! the caller does not wait for, and a lifecycle change is a barrier.
+//! writes them in the Task's queue order, each history as a Chat stream
+//! (ADR-0076): a streamed change is a write the caller does not wait for, and a
+//! lifecycle change is a barrier.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,20 +15,20 @@ use crate::storage::task_journal::{CommitReceipt, TaskWrite};
 
 use super::Store;
 
-mod history;
+mod legacy;
 mod state;
-mod sweep;
+mod stream;
 mod writes;
-#[cfg(test)]
-use history::COMPACT_AFTER_FRAMES;
-use history::{HistoryChange, HistoryFile, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE};
 pub(crate) use state::SubagentState;
 pub use state::{CommittedSubagentBatch, CommittedSubagentRevision};
+use stream::{HistoryChange, SubagentChat, STREAM_HEAD_FILE};
 pub(crate) use writes::{SubagentOperation, SubagentWrite};
 
 const SUBAGENTS_DIR: &str = "subagents";
 const CATALOG_FILE: &str = "catalog.json";
-const SCHEMA_VERSION: u16 = 1;
+/// Version 2 marks a Task whose histories may be Chat streams, so an App Server
+/// that reads only ADR-0046 histories rejects the catalog without changing it.
+const CATALOG_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -380,7 +381,7 @@ impl Store {
 /// Describes what `change` did to `history`, which held `message_count` messages
 /// before it.
 fn committed_change(
-    history: &HistoryFile,
+    history: &SubagentChat,
     change: &HistoryChange,
     message_count: usize,
 ) -> Option<CommittedSubagentChange> {
@@ -392,9 +393,9 @@ fn committed_change(
             .map(|stored| &stored.chat)
     };
     Some(match change {
-        HistoryChange::AppendText(append) => CommittedSubagentChange::AppendText {
-            message_id: find(&append.identity)?.message_id.clone(),
-            text: append.text.clone(),
+        HistoryChange::AppendText { identity, text } => CommittedSubagentChange::AppendText {
+            message_id: find(identity)?.message_id.clone(),
+            text: text.clone(),
         },
         HistoryChange::Upsert(identity) => {
             let message = find(identity)?.clone();
@@ -410,8 +411,8 @@ fn committed_change(
 
 /// Returns which of `image_ids` any Subagent history of the Task still names, so
 /// the Chat compaction sweep keeps those image files (ADR-0075). It scans the
-/// stored bytes instead of parsing them, and runs only for old files Chat no
-/// longer references.
+/// stored bytes of every history file, in either format, instead of parsing
+/// them, and runs only for old files Chat no longer references.
 pub(crate) fn subagent_image_references(
     task_dir: &Path,
     image_ids: &[String],
@@ -427,11 +428,16 @@ pub(crate) fn subagent_image_references(
         if !entry.file_type()?.is_dir() {
             continue;
         }
-        for file in [HISTORY_SNAPSHOT_FILE, HISTORY_JOURNAL_FILE] {
-            match fs::read(entry.path().join(file)) {
+        for file in fs::read_dir(entry.path())? {
+            let file = file?;
+            if file.file_name() == STREAM_HEAD_FILE || !file.file_type()?.is_file() {
+                continue;
+            }
+            match fs::read(file.path()) {
                 Ok(bytes) => {
                     crate::storage::chat_images::ids_mentioned_in(&bytes, image_ids, &mut found)
                 }
+                // A concurrent compaction removed an old generation.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
@@ -446,7 +452,7 @@ fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(CatalogFile {
-                schema_version: SCHEMA_VERSION,
+                schema_version: CATALOG_SCHEMA_VERSION,
                 ..Default::default()
             })
         }
@@ -457,12 +463,18 @@ fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {
     Ok(catalog)
 }
 
-fn write_catalog(root: &Path, catalog: &CatalogFile) -> Result<(), RuntimeError> {
-    crate::storage::atomic::write_json(&root.join(CATALOG_FILE), catalog)
+/// Writes the catalog at the current schema version, which it then holds.
+fn write_catalog(root: &Path, catalog: &mut CatalogFile) -> Result<(), RuntimeError> {
+    let previous = std::mem::replace(&mut catalog.schema_version, CATALOG_SCHEMA_VERSION);
+    let written = crate::storage::atomic::write_json(&root.join(CATALOG_FILE), catalog);
+    if written.is_err() {
+        catalog.schema_version = previous;
+    }
+    written
 }
 
 fn validate_schema(version: u16) -> Result<(), RuntimeError> {
-    if version == SCHEMA_VERSION {
+    if (1..=CATALOG_SCHEMA_VERSION).contains(&version) {
         Ok(())
     } else {
         Err(RuntimeError::Storage(

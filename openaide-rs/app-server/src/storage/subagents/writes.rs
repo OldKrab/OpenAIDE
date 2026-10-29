@@ -10,7 +10,7 @@ use crate::protocol::model::{
 use crate::storage::cursor;
 use crate::storage::records::StoredMessage;
 
-use super::history::{advance_history_meta, HistoryChange, HistoryFile, TextAppend};
+use super::stream::{advance_history_meta, HistoryChange, SubagentChat};
 use super::{
     SubagentCapabilitiesRecord, SubagentDetailRecord, SubagentRecord, SubagentStatusRecord,
 };
@@ -140,7 +140,7 @@ pub(super) fn apply_to_record(record: &mut SubagentRecord, operation: SubagentOp
 
 /// Applies a history operation in memory and returns the change to journal.
 pub(super) fn apply_to_history(
-    history: &mut HistoryFile,
+    history: &mut SubagentChat,
     operation: SubagentOperation,
 ) -> Result<HistoryChange, RuntimeError> {
     match operation {
@@ -166,7 +166,7 @@ pub(super) fn apply_to_history(
 }
 
 fn append_message(
-    history: &mut HistoryFile,
+    history: &mut SubagentChat,
     mut message: NormalizedMessage,
     upsert: bool,
 ) -> HistoryChange {
@@ -187,7 +187,7 @@ fn append_message(
 }
 
 fn append_message_part(
-    history: &mut HistoryFile,
+    history: &mut SubagentChat,
     message: NormalizedMessage,
 ) -> Result<HistoryChange, RuntimeError> {
     let identity = message.identity();
@@ -216,11 +216,10 @@ fn append_message_part(
                         text: chunk.clone(),
                     });
                 }
-                HistoryChange::AppendText(TextAppend {
+                HistoryChange::AppendText {
                     identity,
-                    role: *role,
                     text: chunk,
-                })
+                }
             } else {
                 parts.push(part);
                 HistoryChange::Upsert(identity)
@@ -251,7 +250,7 @@ fn append_message_part(
 }
 
 fn push_message(
-    history: &mut HistoryFile,
+    history: &mut SubagentChat,
     identity: String,
     message: NormalizedMessage,
 ) -> HistoryChange {
@@ -276,7 +275,7 @@ fn push_message(
 }
 
 fn record_permission_outcome(
-    history: &mut HistoryFile,
+    history: &mut SubagentChat,
     tool_call_id: &str,
     outcome: ToolPermissionOutcome,
 ) -> Result<HistoryChange, RuntimeError> {
