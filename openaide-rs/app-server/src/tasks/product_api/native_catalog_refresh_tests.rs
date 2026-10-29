@@ -5,6 +5,7 @@ use crate::agent::AgentProbeRequest;
 use crate::protocol::model::{
     AgentAuthMethodSummary, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus,
 };
+use crate::tasks::product_api::list_sessions::MAX_CONCURRENT_AGENT_LISTINGS;
 use openaide_app_server_protocol::snapshot::TaskNavigationRefreshState;
 
 #[test]
@@ -65,6 +66,75 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
     assert_eq!(entered, expected,
         "one slow history must not serialize every Agent/workspace and keep sidebar Refresh disabled");
     assert!(!api.native_session_catalog().refreshing());
+}
+
+#[test]
+fn sidebar_refresh_caps_each_agents_concurrent_listings() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace_count = MAX_CONCURRENT_AGENT_LISTINGS + 2;
+    for index in 0..workspace_count {
+        store
+            .write_task(&task_record(
+                &format!("task-{index}"),
+                temp.path()
+                    .join(format!("workspace-{index}"))
+                    .to_str()
+                    .unwrap(),
+            ))
+            .unwrap();
+    }
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let agent = Arc::new(MixedCatalogRuntime {
+        authenticated: AtomicBool::new(true),
+        listing_gate: Some(gate.clone()),
+        listing_entered: Some(entered_tx),
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        notifier,
+    )
+    .unwrap();
+    api.request_native_session_catalog_refresh();
+    let capped = MAX_CONCURRENT_AGENT_LISTINGS * BUILT_IN_AGENT_METADATA.len();
+    let mut entered_by_agent = HashMap::<String, usize>::new();
+    for _ in 0..capped {
+        let Ok(agent_id) = entered_rx.recv_timeout(crate::test_sync::WATCHDOG) else {
+            break;
+        };
+        *entered_by_agent.entry(agent_id).or_default() += 1;
+    }
+    // Every admitted listing holds at the gate, so no slot can free up meanwhile.
+    crate::test_sync::observe_absence();
+    while let Ok(agent_id) = entered_rx.try_recv() {
+        *entered_by_agent.entry(agent_id).or_default() += 1;
+    }
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+    loop {
+        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
+        if matches!(
+            update.kind,
+            TaskUpdateKind::NavigationRefreshStateChanged {
+                refresh: TaskNavigationRefreshState::Idle
+            }
+        ) {
+            break;
+        }
+    }
+    assert_eq!(entered_by_agent.len(), BUILT_IN_AGENT_METADATA.len());
+    assert!(
+        entered_by_agent
+            .values()
+            .all(|&entered| entered == MAX_CONCURRENT_AGENT_LISTINGS),
+        "each Agent runs at most its cap of listings at once: {entered_by_agent:?}"
+    );
 }
 
 #[test]
@@ -188,7 +258,7 @@ struct MixedCatalogRuntime {
     calls: Mutex<HashMap<(String, String), usize>>,
     advertises_auth_method: bool,
     listing_gate: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>,
-    listing_entered: Option<std::sync::mpsc::Sender<()>>,
+    listing_entered: Option<std::sync::mpsc::Sender<String>>,
 }
 
 impl AgentRuntime for MixedCatalogRuntime {
@@ -224,7 +294,7 @@ impl AgentRuntime for MixedCatalogRuntime {
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         if let Some(entered) = &self.listing_entered {
-            entered.send(()).unwrap();
+            entered.send(request.agent_id.clone()).unwrap();
         }
         if let Some(gate) = &self.listing_gate {
             drop(

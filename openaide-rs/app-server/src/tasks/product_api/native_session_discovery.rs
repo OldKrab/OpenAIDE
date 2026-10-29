@@ -119,14 +119,14 @@ impl TaskProductApi {
             .collect::<Vec<_>>();
         let mut outcomes = Vec::with_capacity(agents.len() * selected_workspaces.len());
         let mut first_error = None;
-        let contexts = agents
+        // Workspace-major, so consecutive contexts alternate Agents: workers that take
+        // the next context rarely wait on an Agent already at its listing cap.
+        let contexts = selected_workspaces
             .iter()
-            .flat_map(|agent| {
-                selected_workspaces
+            .flat_map(|(project_id, workspace_root)| {
+                agents
                     .iter()
-                    .map(move |(project_id, workspace_root)| {
-                        (&agent.id, project_id, workspace_root)
-                    })
+                    .map(move |agent| (&agent.id, project_id, workspace_root))
             })
             .collect::<Vec<_>>();
         let next_context = std::sync::atomic::AtomicUsize::new(0);
