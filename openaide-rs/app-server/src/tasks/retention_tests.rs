@@ -5,13 +5,13 @@ use crate::client_lifecycle::AppServerTime;
 use crate::projects::StorageProjectResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{IsolationKind, TaskStatus};
+use crate::server_requests::ServerRequestDraft;
 use crate::storage::records::{
     QueuedMessageRecord, TaskLifecycle, TaskPreparationRecord, TaskRecord,
 };
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
 use crate::tasks::product_api::TaskProductApi;
-use crate::{server_requests::ServerRequestDraft, state_sync::TaskSubscriptionPresence};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 
@@ -62,7 +62,6 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
     std::fs::create_dir_all(&workspace).unwrap();
     let store = Store::open(root.path().join("state")).unwrap();
     let server_requests = crate::server_requests::ServerRequestRuntime::new();
-    let presence = TaskSubscriptionPresence::default();
     let api = TaskProductApi::new_with_server_requests(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -71,8 +70,8 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
         TaskUpdateNotifier::disabled(),
         server_requests.clone(),
     )
-    .unwrap()
-    .with_task_subscription_presence(presence.clone());
+    .unwrap();
+    let presence = api.task_subscription_presence();
 
     let old = crate::time::activity_millis("2026-07-01T00:00:00Z").unwrap();
     let now = crate::time::activity_millis("2026-08-07T00:00:00Z").unwrap();

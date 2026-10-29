@@ -220,6 +220,7 @@ impl TaskProductApi {
         let native_catalog =
             crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone())?;
         let session_operations = crate::tasks::task_operation::TaskOperationCoordinator::default();
+        let task_subscription_presence = TaskSubscriptionPresence::default();
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
@@ -231,7 +232,8 @@ impl TaskProductApi {
             ),
         )
         .with_native_catalog(native_catalog.clone())
-        .with_agent_statuses(agent_statuses);
+        .with_agent_statuses(agent_statuses)
+        .with_subscription_presence(task_subscription_presence.clone());
         let turn_acceptance = turn_runner.turn_acceptance();
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
@@ -265,7 +267,7 @@ impl TaskProductApi {
             native_catalog_refresh: Default::default(),
             storage_maintenance: Default::default(),
             scheduled_queue: Default::default(),
-            task_subscription_presence: Default::default(),
+            task_subscription_presence,
             native_adoption: Arc::new(Mutex::new(())),
             server_requests,
             task_notifier: notifier,
@@ -279,14 +281,10 @@ impl TaskProductApi {
         Ok(api)
     }
 
-    /// Connects Task-view presence from the protocol subscription owner to
-    /// background recovery without making Frontend timestamps authoritative.
-    pub(crate) fn with_task_subscription_presence(
-        mut self,
-        task_subscription_presence: TaskSubscriptionPresence,
-    ) -> Self {
-        self.task_subscription_presence = task_subscription_presence;
-        self
+    /// The presence the protocol subscription owner reports into. Retention and
+    /// recovery read it, and Subagent publication skips histories nobody watches.
+    pub(crate) fn task_subscription_presence(&self) -> TaskSubscriptionPresence {
+        self.task_subscription_presence.clone()
     }
 
     pub(super) fn publish_history_sync(
