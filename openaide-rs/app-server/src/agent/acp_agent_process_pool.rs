@@ -253,6 +253,9 @@ impl AcpAgentProcessPool {
         let operation_id = request.operation_id.clone();
         let started_at = Instant::now();
         let mut attempts = 0;
+        // The last attempt's dispatch timings, reported with the terminal event.
+        let mut lock_wait_ms = 0;
+        let mut dispatch_ms = 0;
         logging::info(
             "acp_session_list_started",
             serde_json::json!({
@@ -267,7 +270,7 @@ impl AcpAgentProcessPool {
                 // before the reply. Independent history reads share one live Agent process.
                 let queued_at = Instant::now();
                 let dispatch = lock_listing_dispatch(process_operation, self.list_timeout)?;
-                let lock_wait_ms = queued_at.elapsed().as_millis();
+                lock_wait_ms = queued_at.elapsed().as_millis();
                 let dispatch_started = Instant::now();
                 let (process, _operation) = self.get_or_launch_process(&agent_id)?;
                 let (reply_tx, reply_rx) = std::sync::mpsc::channel();
@@ -278,14 +281,7 @@ impl AcpAgentProcessPool {
                     reply_tx,
                 });
                 drop(dispatch);
-                logging::info(
-                    "acp_session_list_dispatched",
-                    serde_json::json!({
-                        "operation": "agent/list_sessions/page", "operation_id": operation_id,
-                        "agent_id": agent_id, "attempt": attempt, "lock_wait_ms": lock_wait_ms,
-                        "dispatch_ms": dispatch_started.elapsed().as_millis(), "sent": sent.is_ok(),
-                    }),
-                );
+                dispatch_ms = dispatch_started.elapsed().as_millis();
                 if sent.is_err() {
                     self.remove_process_if_current(&agent_id, &process);
                     if attempt == 1 {
@@ -344,6 +340,7 @@ impl AcpAgentProcessPool {
             "agent_id": agent_id, "attempt": attempts,
             "outcome": if result.is_ok() { "completed" } else { "failed" },
             "duration_ms": started_at.elapsed().as_millis(),
+            "lock_wait_ms": lock_wait_ms, "dispatch_ms": dispatch_ms,
             "error_kind": result.as_ref().err().map(RuntimeError::reason),
         });
         if result.is_ok() {

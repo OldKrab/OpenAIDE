@@ -62,6 +62,50 @@ impl AgentRuntime for IndexedHistoryAgent {
 }
 
 #[test]
+fn healthy_history_refresh_logs_only_the_context_summary() {
+    let diagnostic_logs = crate::logging::capture_test_logs();
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let workspace = temp.path().join("workspace");
+    store
+        .write_task(&task_record("quiet-refresh", workspace.to_str().unwrap()))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(RecordingAgent::default()),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.refresh_native_session_catalogs().unwrap();
+
+    // Captured logs are process-wide, so keep only this Project's refresh.
+    let project_id = project_id_for_workspace(workspace.to_str().unwrap());
+    let logs = diagnostic_logs.snapshot();
+    let context_ids = logs
+        .iter()
+        .filter(|entry| {
+            entry["event"] == "native_session_context_refresh_completed"
+                && entry["fields"]["project_id"] == project_id.as_str()
+        })
+        .map(|entry| entry["fields"]["operation_id"].clone())
+        .collect::<Vec<_>>();
+    assert!(!context_ids.is_empty());
+    let page_events = logs
+        .iter()
+        .filter(|entry| context_ids.contains(&entry["fields"]["context_id"]))
+        .map(|entry| entry["event"].clone())
+        .collect::<Vec<_>>();
+    assert!(page_events.is_empty(), "healthy pages logged {page_events:?}");
+    assert!(!logs.iter().any(|entry| {
+        entry["event"] == "native_session_history_reconciled"
+            && entry["fields"]["project_id"] == project_id.as_str()
+    }));
+}
+
+#[test]
 fn complete_history_refresh_removes_missing_open_archived_and_unadopted_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
