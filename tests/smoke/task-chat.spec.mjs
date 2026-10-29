@@ -516,6 +516,7 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
       const samples = [{
         at: 0,
         indicatorTop: currentIndicatorTop(),
+        indicatorTransitioning: indicatorIsTransitioning(),
         scrollTop: initialScrollTop,
         visibleRows: visibleChatRowCount(messageList),
       }];
@@ -527,6 +528,7 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
           samples.push({
             at: performance.now() - startedAt,
             indicatorTop: currentIndicatorTop(),
+            indicatorTransitioning: indicatorIsTransitioning(),
             scrollTop: messageList.scrollTop,
             visibleRows: visibleChatRowCount(messageList),
           });
@@ -569,6 +571,11 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
     function currentIndicatorTop() {
       return document.querySelector(".user-message-current-indicator")?.getBoundingClientRect().top;
     }
+
+    function indicatorIsTransitioning() {
+      return document.querySelector(".user-message-current-indicator")?.getAnimations()
+        .some((animation) => animation.transitionProperty === "transform") ?? false;
+    }
   }, { index: markerIndex, selector });
 }
 
@@ -584,11 +591,16 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions, hasRail = t
   expect(paintedPositions).toBeGreaterThanOrEqual(minimumPaintedPositions);
   expect(intermediateSamples.filter(({ visibleRows }) => visibleRows === 0),
     "Every intermediate navigation frame must contain Chat rows").toEqual([]);
-  // Initial, final, and at least two intermediate positions prove the
-  // selector animates without coupling the assertion to CI frame cadence.
-  if (hasRail) expect(new Set(navigation.samples
-    .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
-    .filter(Boolean)).size).toBeGreaterThanOrEqual(4);
+  if (hasRail) {
+    // A running transform transition proves the selector animates. Painted
+    // positions only confirm one intermediate frame: the easing covers most of
+    // the distance early, so a long throttled frame can skip the rest.
+    expect(navigation.samples.some(({ indicatorTransitioning }) => indicatorTransitioning),
+      "The current-message indicator must move by its transform transition").toBe(true);
+    expect(new Set(navigation.samples
+      .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
+      .filter(Boolean)).size).toBeGreaterThanOrEqual(3);
+  }
   return paintedPositions;
 }
 
