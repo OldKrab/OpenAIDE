@@ -209,8 +209,8 @@ pub(super) fn ensure_task_loaded(
     Ok(true)
 }
 
-/// Moves a Chat's inline images into files and publishes a compacted generation
-/// that holds only references (ADR-0075). A failure leaves the previous
+/// Moves a Chat's inline images into files, records missing image dimensions,
+/// and publishes a compacted generation that holds only references (ADR-0075). A failure leaves the previous
 /// generation authoritative, so the Task fails to load and the next open retries.
 fn migrate_inline_images(
     task_dir: &std::path::Path,
@@ -220,7 +220,7 @@ fn migrate_inline_images(
     let started_at = std::time::Instant::now();
     let mut migrated = projection.clone();
     let result =
-        super::super::images::externalize_projection(task_dir, &mut migrated).and_then(|moved| {
+        super::super::images::migrate_projection(task_dir, &mut migrated).and_then(|moved| {
             if moved {
                 split::compact(
                     task_dir,

@@ -7453,6 +7453,7 @@ fn send_commits_inline_image_as_image_chat_content() {
         image_id,
         size_bytes,
         uri,
+        ..
     } = &accepted.task.chat.items[0].parts[1]
     else {
         panic!("expected Image part");
@@ -7548,6 +7549,7 @@ fn send_commits_inline_image_without_an_empty_text_part() {
         image_id,
         size_bytes,
         uri,
+        ..
     } = &accepted.task.chat.items[0].parts[0]
     else {
         panic!("expected inline Image message part");

@@ -95,6 +95,34 @@ describe("stored Chat images", () => {
     await act(async () => tree.unmount());
   });
 
+  it("reserves the loaded image's shape while it loads, so the Chat does not shift", async () => {
+    const response = deferred<string>();
+    const sized: Attachment = { ...storedImage, payload: { ...storedImage.payload as object, width: 640, height: 480 } };
+    const tree = await renderRows([userMessage("u1", "", [sized])], vi.fn(() => response.promise));
+
+    const frame = tree.root.findByProps({ "aria-label": "Loading Image" });
+    expect(frame.props["data-image-sized"]).toBe("");
+    expect(frame.findByProps({ className: "chat-stored-image-space" }).props.style).toEqual({
+      aspectRatio: "640 / 480",
+      "--chat-image-width": "640px",
+    });
+
+    await act(async () => response.resolve(IMAGE_DATA));
+
+    const image = tree.root.findByProps({ "aria-label": "Open Image" }).findByType("img");
+    expect([image.props.width, image.props.height]).toEqual([640, 480]);
+    await act(async () => tree.unmount());
+  });
+
+  it("keeps one placeholder height for a reference without an image size", async () => {
+    const tree = await renderRows([userMessage("u1", "", [storedImage])], vi.fn(() => new Promise<string>(() => {})));
+
+    const frame = tree.root.findByProps({ "aria-label": "Loading Image" });
+    expect(frame.props["data-image-sized"]).toBeUndefined();
+    expect(frame.findAllByProps({ className: "chat-stored-image-space" })).toHaveLength(0);
+    await act(async () => tree.unmount());
+  });
+
   it("shows an unavailable state with Retry that requests the image again", async () => {
     const loadImage = vi.fn()
       .mockImplementationOnce(async () => { throw new Error("notFound"); })

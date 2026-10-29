@@ -1,7 +1,12 @@
 import { Download, Eye, FolderOpen, type LucideIcon } from "lucide-react";
 import { attachmentImageLayout, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { FileKindIcon } from "./ComposerFileMentions";
-import { StoredChatImagePlaceholder, useStoredChatImage, type StoredChatImageReference } from "./StoredChatImage";
+import {
+  storedChatImageSize,
+  StoredChatImagePlaceholder,
+  useStoredChatImage,
+  type StoredChatImageReference,
+} from "./StoredChatImage";
 
 export interface UserMessageAttachmentItem {
   id: string;
@@ -61,9 +66,11 @@ export function UserMessageAttachments({
 function ImageAttachmentButton({
   image,
   onOpenImage,
+  size,
 }: {
   image: AttachmentImagePreviewSource;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
+  size?: { width: number; height: number };
 }) {
   return (
     <button
@@ -73,7 +80,13 @@ function ImageAttachmentButton({
       onClick={() => onOpenImage(image)}
       type="button"
     >
-      <img className="chat-image-preview" src={image.url} alt={`${image.label} preview`} />
+      <img
+        alt={`${image.label} preview`}
+        className="chat-image-preview"
+        height={size?.height}
+        src={image.url}
+        width={size?.width}
+      />
       <AttachmentAction action="preview" />
     </button>
   );
@@ -90,10 +103,11 @@ function StoredImageAttachment({
   reference: StoredChatImageReference;
 }) {
   const state = useStoredChatImage(reference);
+  const size = storedChatImageSize(reference);
   if (state.status !== "ready") {
-    return <StoredChatImagePlaceholder className="chat-image-attachment" label={label} state={state} />;
+    return <StoredChatImagePlaceholder className="chat-image-attachment" label={label} size={size} state={state} />;
   }
-  return <ImageAttachmentButton image={{ label, url: state.url }} onOpenImage={onOpenImage} />;
+  return <ImageAttachmentButton image={{ label, url: state.url }} onOpenImage={onOpenImage} size={size} />;
 }
 
 function AttachmentAction({ action }: { action: "download" | "preview" | "reveal" }) {

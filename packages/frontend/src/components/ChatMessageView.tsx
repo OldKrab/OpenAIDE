@@ -9,7 +9,7 @@ import {
   storedChatImageReference,
   type AttachmentImagePreviewSource,
 } from "./AttachmentImagePreview";
-import { StoredChatImagePlaceholder, useStoredChatImage } from "./StoredChatImage";
+import { storedChatImageSize, StoredChatImagePlaceholder, useStoredChatImage } from "./StoredChatImage";
 import { CompactionView } from "./CompactionView";
 import { SentClock, StoppedTurnDuration, TurnDuration, formatClockTime, settledSpanSeconds } from "./timeMarks";
 import { ChatActivityView } from "./ChatActivityView";
@@ -371,9 +371,17 @@ function AgentContentImage({
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
 }) {
   const label = content.uri ? resourceLabel(content.uri) : "Agent image";
-  const state = useStoredChatImage({ imageId: content.image_id, mediaType: content.media_type, sizeBytes: content.size_bytes });
+  const reference = {
+    imageId: content.image_id,
+    mediaType: content.media_type,
+    sizeBytes: content.size_bytes,
+    width: content.width,
+    height: content.height,
+  };
+  const state = useStoredChatImage(reference);
+  const size = storedChatImageSize(reference);
   if (state.status !== "ready") {
-    return <StoredChatImagePlaceholder className="chat-agent-content-image" label={label} state={state} />;
+    return <StoredChatImagePlaceholder className="chat-agent-content-image" label={label} size={size} state={state} />;
   }
   return (
     <button
@@ -382,7 +390,7 @@ function AgentContentImage({
       onClick={() => onOpenImage({ label, url: state.url })}
       type="button"
     >
-      <img alt={label} src={state.url} />
+      <img alt={label} height={size?.height} src={state.url} width={size?.width} />
     </button>
   );
 }

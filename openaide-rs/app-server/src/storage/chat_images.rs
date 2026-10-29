@@ -120,6 +120,8 @@ pub(crate) fn externalize_message(
                     data,
                     image_id,
                     size_bytes,
+                    width,
+                    height,
                     ..
                 } = part
                 else {
@@ -129,8 +131,10 @@ pub(crate) fn externalize_message(
                     continue;
                 }
                 let bytes = decode(data)?;
-                *image_id = Some(store(task_dir, &bytes)?);
-                *size_bytes = Some(bytes.len() as u64);
+                let reference = describe(store(task_dir, &bytes)?, &bytes);
+                *image_id = Some(reference.image_id);
+                *size_bytes = Some(reference.size_bytes);
+                (*width, *height) = split(reference.dimensions);
                 data.clear();
                 moved += 1;
             }
@@ -265,31 +269,161 @@ fn externalize_attachment(
         return Ok(false);
     };
     let bytes = decode(&data)?;
-    let image_id = store(task_dir, &bytes)?;
+    let reference = describe(store(task_dir, &bytes)?, &bytes);
     let payload = attachment
         .payload
         .as_mut()
         .and_then(serde_json::Value::as_object_mut)
         .expect("inline image payload is an object");
     payload.remove("data");
-    payload.insert("imageId".to_string(), image_id.into());
-    payload.insert("sizeBytes".to_string(), (bytes.len() as u64).into());
+    payload.insert("imageId".to_string(), reference.image_id.into());
+    payload.insert("sizeBytes".to_string(), reference.size_bytes.into());
+    insert_dimensions(payload, reference.dimensions);
     Ok(true)
 }
 
-/// The reference a draft's inline image will have once stored: its id and size.
+fn insert_dimensions(
+    payload: &mut serde_json::Map<String, serde_json::Value>,
+    dimensions: Option<(u32, u32)>,
+) {
+    if let Some((width, height)) = dimensions {
+        payload.insert("width".to_string(), width.into());
+        payload.insert("height".to_string(), height.into());
+    }
+}
+
+/// What Chat keeps of a stored image besides its media type (ADR-0075).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImageReference {
+    pub(crate) image_id: String,
+    pub(crate) size_bytes: u64,
+    /// Display width and height; `None` when the header is unreadable.
+    pub(crate) dimensions: Option<(u32, u32)>,
+}
+
+fn describe(image_id: String, bytes: &[u8]) -> ImageReference {
+    ImageReference {
+        image_id,
+        size_bytes: bytes.len() as u64,
+        dimensions: crate::media::display_dimensions(std::io::Cursor::new(bytes)),
+    }
+}
+
+fn split(dimensions: Option<(u32, u32)>) -> (Option<u32>, Option<u32>) {
+    dimensions.map_or((None, None), |(width, height)| (Some(width), Some(height)))
+}
+
+/// The display size recorded in an image attachment reference.
+pub(crate) fn attachment_dimensions(attachment: &Attachment) -> Option<(u32, u32)> {
+    let payload = attachment.payload.as_ref()?;
+    let read = |key| {
+        payload
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+    };
+    Some((read("width")?, read("height")?))
+}
+
+/// Records the display size of stored references written before App Server
+/// kept it, reading only each file's header. A reference whose file is missing
+/// or unreadable stays as it is. Returns how many references changed.
+pub(crate) fn add_missing_dimensions(task_dir: &Path, messages: &mut [StoredMessage]) -> usize {
+    let mut read = std::collections::HashMap::<String, Option<(u32, u32)>>::new();
+    let mut lookup = |image_id: &str| {
+        *read
+            .entry(image_id.to_string())
+            .or_insert_with(|| stored_dimensions(task_dir, image_id))
+    };
+    let mut changed = 0;
+    for stored in messages {
+        match &mut stored.chat.message {
+            NormalizedMessage::User { attachments, .. } => {
+                for attachment in attachments {
+                    let Some(image_id) = attachment_image_id(attachment) else {
+                        continue;
+                    };
+                    if attachment_dimensions(attachment).is_some() {
+                        continue;
+                    }
+                    let Some(dimensions) = lookup(&image_id) else {
+                        continue;
+                    };
+                    if let Some(payload) = attachment
+                        .payload
+                        .as_mut()
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        insert_dimensions(payload, Some(dimensions));
+                        changed += 1;
+                    }
+                }
+            }
+            NormalizedMessage::AgentMessage { parts, .. } => {
+                for part in parts {
+                    let AgentMessagePart::Image {
+                        image_id: Some(image_id),
+                        width: width @ None,
+                        height,
+                        ..
+                    } = part
+                    else {
+                        continue;
+                    };
+                    let Some(dimensions) = lookup(image_id) else {
+                        continue;
+                    };
+                    (*width, *height) = split(Some(dimensions));
+                    changed += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    changed
+}
+
+/// True when a stored reference lacks the display size its file can provide.
+pub(crate) fn has_references_without_dimensions(messages: &[StoredMessage]) -> bool {
+    messages.iter().any(|stored| match &stored.chat.message {
+        NormalizedMessage::User { attachments, .. } => attachments.iter().any(|attachment| {
+            attachment_image_id(attachment).is_some() && attachment_dimensions(attachment).is_none()
+        }),
+        NormalizedMessage::AgentMessage { parts, .. } => parts.iter().any(|part| {
+            matches!(
+                part,
+                AgentMessagePart::Image {
+                    image_id: Some(_),
+                    width: None,
+                    ..
+                }
+            )
+        }),
+        _ => false,
+    })
+}
+
+fn stored_dimensions(task_dir: &Path, image_id: &str) -> Option<(u32, u32)> {
+    if !is_image_id(image_id) {
+        return None;
+    }
+    let file = fs::File::open(task_dir.join(IMAGES_DIR).join(image_id)).ok()?;
+    crate::media::display_dimensions(std::io::BufReader::new(file))
+}
+
+/// The reference a draft's inline image will have once stored.
 ///
 /// Mutations publish Chat items drafted before the journal writer stores their
 /// images, so projection derives the same content-hash id without touching the
 /// Task directory. `None` means the data is not valid base64; the commit that
 /// stores it fails, so nothing is published.
-pub(crate) fn inline_reference(data: &str) -> Option<(String, u64)> {
+pub(crate) fn inline_reference(data: &str) -> Option<ImageReference> {
     let bytes = decode(data).ok()?;
-    Some((hex(&Sha256::digest(&bytes)), bytes.len() as u64))
+    Some(describe(hex(&Sha256::digest(&bytes)), &bytes))
 }
 
 /// The pending reference of an image attachment that still holds its bytes.
-pub(crate) fn inline_attachment_reference(attachment: &Attachment) -> Option<(String, u64)> {
+pub(crate) fn inline_attachment_reference(attachment: &Attachment) -> Option<ImageReference> {
     inline_reference(&inline_image_payload(attachment)?)
 }
 

@@ -55,6 +55,8 @@ fn agent_image(bytes: &[u8]) -> StoredMessage {
             data: base64(bytes),
             image_id: None,
             size_bytes: None,
+            width: None,
+            height: None,
             uri: None,
         }],
         created_at: "0".to_string(),
@@ -226,4 +228,43 @@ fn storing_again_protects_an_old_file_from_the_sweep() {
         remove_unreferenced(dir.path(), &HashSet::new(), |_| Ok(HashSet::new())).unwrap(),
         0
     );
+}
+
+#[test]
+fn a_stored_image_records_the_size_it_displays_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = crate::media::tests::encoded_png(4, 3);
+    let mut messages = vec![
+        user("look", vec![image_attachment(&png)]),
+        agent_image(&png),
+    ];
+
+    externalize_messages(dir.path(), &mut messages).unwrap();
+
+    let NormalizedMessage::User { attachments, .. } = &messages[0].chat.message else {
+        unreachable!()
+    };
+    assert_eq!(attachment_dimensions(&attachments[0]), Some((4, 3)));
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[1].chat.message else {
+        unreachable!()
+    };
+    assert!(matches!(
+        parts[0],
+        AgentMessagePart::Image {
+            width: Some(4),
+            height: Some(3),
+            ..
+        }
+    ));
+    assert!(!has_references_without_dimensions(&messages));
+}
+
+#[test]
+fn a_reference_whose_file_has_no_readable_header_is_left_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut messages = vec![user("look", vec![image_attachment(b"not an image")])];
+    externalize_messages(dir.path(), &mut messages).unwrap();
+    assert!(has_references_without_dimensions(&messages));
+
+    assert_eq!(add_missing_dimensions(dir.path(), &mut messages), 0);
 }

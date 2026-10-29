@@ -269,6 +269,7 @@ function attachmentsFromParts(parts: MessagePart[]): Attachment[] | undefined {
           imageId: part.imageId,
           mimeType: part.mediaType,
           sizeBytes: part.sizeBytes,
+          ...part.dimensions,
         } satisfies StoredImageAttachmentPayload,
       }];
     }
@@ -306,6 +307,7 @@ function agentMessageParts(parts: MessagePart[]): AgentMessagePart[] {
         media_type: part.mediaType,
         image_id: part.imageId,
         size_bytes: part.sizeBytes,
+        ...part.dimensions,
         uri: part.uri ?? undefined,
       }];
     }

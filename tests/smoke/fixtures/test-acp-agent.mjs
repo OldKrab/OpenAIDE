@@ -2,6 +2,7 @@
 
 import readline from "node:readline";
 import { released } from "./gate.mjs";
+import { encodedPng } from "./png.mjs";
 
 const sessions = new Map();
 const history = new Map();
@@ -226,6 +227,17 @@ async function runPrompt(message) {
       });
       textUpdate(sessionId, "agent_message_chunk", "Main delegation result", `main-${promptNumber}`);
     }
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+
+  if (text.includes("smoke:agent-image")) {
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: `agent-image-${promptNumber}`,
+      content: { type: "image", mimeType: "image/png", data: encodedPng(60, 120).toString("base64") },
+    });
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
     session.activePrompts.delete(String(message.id));
     return;

@@ -1,5 +1,5 @@
 import { ImageOff } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { chatImageCache, type ChatImageCache } from "../state/chatImageCache";
 
 /** A stored Chat image as a Chat message names it (ADR-0075): no bytes, only identity. */
@@ -7,7 +7,17 @@ export type StoredChatImageReference = {
   imageId: string;
   mediaType: string;
   sizeBytes?: number;
+  /** Display size in pixels, when App Server could read it from the image. */
+  width?: number;
+  height?: number;
 };
+
+/** The `width` and `height` an `<img>` or placeholder reserves, or nothing when unknown. */
+export function storedChatImageSize(reference: StoredChatImageReference) {
+  const { width, height } = reference;
+  if (!width || !height) return undefined;
+  return { width, height };
+}
 
 type ChatImageSource = {
   cache: ChatImageCache;
@@ -90,48 +100,64 @@ export function useStoredChatImage(reference: StoredChatImageReference): StoredC
 /**
  * The loading and unavailable states of a stored image, in the frame its loaded image
  * uses, so the rest of the message renders normally and the row keeps its footprint.
+ * With the image's size known, the frame holds a spacer shaped like the loaded image,
+ * so the Chat does not shift when the bytes arrive; without it, one placeholder height.
  */
 export function StoredChatImagePlaceholder({
   className,
   label,
+  size,
   state,
 }: {
   className: string;
   label: string;
+  size?: { width: number; height: number };
   state: Exclude<StoredChatImageState, { status: "ready" }>;
 }) {
-  // TODO: reserve the exact footprint once image references carry pixel dimensions; with
-  // only a byte size, the frame keeps one placeholder height until the image arrives.
+  const space = size ? (
+    <span
+      aria-hidden="true"
+      className="chat-stored-image-space"
+      style={{ aspectRatio: `${size.width} / ${size.height}`, "--chat-image-width": `${size.width}px` } as CSSProperties}
+    />
+  ) : null;
   if (state.status === "loading") {
     return (
       <span
         aria-busy="true"
         aria-label={`Loading ${label}`}
         className={`${className} chat-stored-image`}
+        data-image-sized={size ? "" : undefined}
         data-image-state="loading"
         role="img"
-      />
+      >
+        {space}
+      </span>
     );
   }
   return (
     <span
       aria-label={`${label} unavailable`}
       className={`${className} chat-stored-image`}
+      data-image-sized={size ? "" : undefined}
       data-image-state="failed"
       role="group"
     >
-      <ImageOff aria-hidden="true" size={16} />
-      <span>Image unavailable</span>
-      {state.retry ? (
-        <button
-          aria-label={`Retry loading ${label}`}
-          className="chat-stored-image-retry"
-          onClick={state.retry}
-          type="button"
-        >
-          Retry
-        </button>
-      ) : null}
+      {space}
+      <span className="chat-stored-image-status">
+        <ImageOff aria-hidden="true" size={16} />
+        <span>Image unavailable</span>
+        {state.retry ? (
+          <button
+            aria-label={`Retry loading ${label}`}
+            className="chat-stored-image-retry"
+            onClick={state.retry}
+            type="button"
+          >
+            Retry
+          </button>
+        ) : null}
+      </span>
     </span>
   );
 }

@@ -52,6 +52,8 @@
 
 .chat-agent-content-image img {
   width: 100%;
+  /* The width and height attributes give only the aspect ratio, reserved before decoding. */
+  height: auto;
   max-height: 240px;
   border-radius: var(--oa-radius-sm);
   display: block;

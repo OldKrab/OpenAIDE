@@ -630,3 +630,68 @@ fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
         "the migrated history is durable"
     );
 }
+
+#[test]
+fn a_subagent_image_reference_gains_its_size_on_load() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = store
+        .record_subagent_spawn(
+            "task_1",
+            "root-session",
+            "child-session",
+            "Researcher".to_string(),
+            "Inspect".to_string(),
+            SubagentCapabilitiesRecord::default(),
+            Vec::new(),
+        )
+        .unwrap();
+    store
+        .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
+        .unwrap();
+    drop(store);
+    let task_dir = temp.path().join("task-store-v1/tasks/task_1");
+    let image_id =
+        crate::storage::chat_images::store(&task_dir, &crate::media::tests::encoded_png(6, 2))
+            .unwrap();
+    // A reference as the first release of ADR-0075 stored it: no width or height.
+    let snapshot_path = task_dir
+        .join("subagents")
+        .join(&record.subagent_id)
+        .join("history.snapshot");
+    let mut history: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    history["messages"][0]["chat"]["message"]["parts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "kind": "image",
+            "media_type": "image/png",
+            "image_id": image_id,
+            "size_bytes": 1,
+        }));
+    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let loaded = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+
+    let NormalizedMessage::AgentMessage { parts, .. } = &loaded.messages[0].chat.message else {
+        panic!("expected the child reply");
+    };
+    assert!(matches!(
+        parts[1],
+        AgentMessagePart::Image {
+            width: Some(6),
+            height: Some(2),
+            ..
+        }
+    ));
+    let published: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    assert_eq!(
+        published["messages"][0]["chat"]["message"]["parts"][1]["width"], 6,
+        "the size is durable"
+    );
+}
