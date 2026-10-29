@@ -86,8 +86,15 @@ async function readTask(timeoutMs) {
 
 async function cleanupTask() {
   if (!taskId || cleanup === "none") return;
-  await request("task/cancel", { taskId, ...(turnId ? { turnId } : {}) }, 10_000).catch(() => {});
-  await request("task/setArchived", { taskId, archived: true }, 10_000).catch(() => {});
+  await request("task/cancel", { taskId, ...(turnId ? { turnId } : {}) }, 10_000)
+    .catch((error) => reportCleanupFailure("task/cancel", error));
+  await request("task/archive", { taskId }, 10_000)
+    .catch((error) => reportCleanupFailure("task/archive", error));
+}
+
+/** Cleanup never fails the smoke, but a failed step is reported so a wrong call shows. */
+function reportCleanupFailure(method, error) {
+  console.error(`OpenAIDE local web smoke cleanup: ${method} failed: ${errorMessage(error)}`);
 }
 
 async function request(method, params, timeoutMs = 15_000) {

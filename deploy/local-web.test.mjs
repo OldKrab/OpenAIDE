@@ -448,7 +448,8 @@ test("local web can run an opt-in send-path smoke check after start", () => {
   assert.doesNotMatch(smoke, /taskRevision/);
   assert.match(smoke, /"task\/send"/);
   assert.match(smoke, /"task\/cancel"/);
-  assert.match(smoke, /"task\/setArchived"/);
+  assert.match(smoke, /"task\/archive", \{ taskId \}/);
+  assert.doesNotMatch(smoke, /setArchived/);
 });
 
 test("local web supports durable user systemd daemon mode", () => {
