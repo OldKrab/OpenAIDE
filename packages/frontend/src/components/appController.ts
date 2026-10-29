@@ -418,6 +418,8 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
       tasks: decorateTaskWorkspaces(state.taskLists.open ?? (state.showArchived ? [] : state.tasks), state),
     },
     workspaceSetup,
+    // TODO: these intents are rebuilt on every render, so Settings worktree effects keyed on
+    // them re-read worktrees and linked Tasks on each App render; give them a stable identity.
     intents: {
       newTask: {
         changePrompt: (prompt) => dispatch({ type: "prompt", prompt }),

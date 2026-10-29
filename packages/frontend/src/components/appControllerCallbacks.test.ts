@@ -1176,6 +1176,20 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("keeps the file viewer connection identity across callback rebuilds", () => {
+    // The Task page keys its file-existence cache on this connection; a fresh
+    // wrapper per render re-requested every Chat file link.
+    const backendConnection = { request: vi.fn() as unknown as BackendConnection["request"] };
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const first = callbacks({ backendConnection, state }).task.fileViewer;
+    const second = callbacks({ backendConnection, state }).task.fileViewer;
+
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+  });
+
   it("requests deeper Project discovery for the Load more target", async () => {
     const request = vi.fn(async () => ({ accepted: true }));
 
