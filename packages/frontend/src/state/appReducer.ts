@@ -315,7 +315,16 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "appServer:error":
       return { ...state, appServerError: action.message, appServerProblem: action.problem, taskListError: action.message };
     case "appServer:ready":
-      return { ...state, appServerError: undefined, appServerProblem: undefined };
+      // A recovered session may resume without a new task list, so clear the list error
+      // the connection failure set; a list's own read error stays.
+      return {
+        ...state,
+        appServerError: undefined,
+        appServerProblem: undefined,
+        taskListError: state.appServerError !== undefined && state.taskListError === state.appServerError
+          ? undefined
+          : state.taskListError,
+      };
     case "appServer:replica":
       return applyAppServerReplica(state, action.epoch, action.stateRootId);
     case "tasks": {

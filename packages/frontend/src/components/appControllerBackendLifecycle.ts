@@ -144,6 +144,8 @@ export function useAppControllerBackendLifecycle({
     replicaIdentity,
   } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
   const backendInitialized = useRef(false);
+  /** False while the session recovers or after its recovery gave up. */
+  const backendSessionUp = useRef(true);
   /** Runs a waiting retry of the first initialize at once; false when none is waiting. */
   const retryInitializeNow = useRef<(() => boolean) | undefined>(undefined);
   const [backendInitializationReady, setBackendInitializationReady] = useState(false);
@@ -194,7 +196,7 @@ export function useAppControllerBackendLifecycle({
       return;
     }
     if (pendingGlobalSubscriptionBaselines.current.size > 0) return;
-    if (backendInitialized.current) {
+    if (backendInitialized.current && backendSessionUp.current) {
       setBackendReady(true);
       setBackendConnectionState({ status: "ready" });
     }
@@ -204,6 +206,12 @@ export function useAppControllerBackendLifecycle({
     if (initialBootstrap.surface === "invalid") return;
     let active = true;
     let initializeRetry: AppServerInitializeRetry | undefined;
+    // What the last failed initialize or lost session showed, so a retry that learns
+    // nothing new keeps it. One connection owns both, so they share the page.
+    let lastProblem: ConnectionProblem | undefined;
+    // Session status changes seen; a probe answer is stale once another arrives.
+    let sessionStatusChanges = 0;
+    let sessionProblemShown = false;
     const serverRequestBridge = backendConnection?.handleRequest
       ? startAppServerServerRequestBridge({
           backendConnection: { handleRequest: backendConnection.handleRequest },
@@ -258,13 +266,19 @@ export function useAppControllerBackendLifecycle({
     });
     const stopSessionStatus = backendConnection?.handleSessionStatus((next) => {
       if (!active) return;
+      const statusChange = ++sessionStatusChanges;
+      const sessionProblem = next.status === "unavailable"
+        ? carryConnectionProblem(lastProblem, classifyConnectionProblem(next.error))
+        : undefined;
       sendWebviewTelemetry(postHostMessage, "app_server_session_status_changed", {
         surface: initialBootstrap.surface,
         status: next.status,
         generation: next.generation,
         ...(next.status === "recovering" ? { reason: next.reason } : {}),
         ...(next.status === "unavailable" ? { error_name: errorName(next.error) } : {}),
+        ...(sessionProblem ? { problem_kind: sessionProblem.kind } : {}),
       });
+      backendSessionUp.current = next.status === "ready";
       if (next.status === "recovering") {
         setBackendSessionReady(false);
         setBackendReady(false);
@@ -272,14 +286,36 @@ export function useAppControllerBackendLifecycle({
           status: "reconnecting",
           message: "Connection interrupted. Reconnecting automatically.",
         });
-      } else if (next.status === "unavailable") {
+      } else if (sessionProblem) {
         setBackendSessionReady(false);
         setBackendReady(false);
-        setBackendConnectionState({
-          status: "unavailable",
-          message: next.error instanceof Error ? next.error.message : "Unable to restore App Server session.",
-        });
+        const message = next.status === "unavailable" && next.error instanceof Error
+          ? next.error.message
+          : "Unable to restore App Server session.";
+        lastProblem = sessionProblem;
+        setBackendConnectionState({ status: "unavailable", message });
+        // Recovery has given up: the session shows the same page a failed first connect
+        // does, with the transport text kept for its details.
+        if (backendInitialized.current) {
+          sessionProblemShown = true;
+          dispatch({ type: "appServer:error", message, problem: sessionProblem });
+          void probeRefusingServer(
+            backendConnection?.probe ? () => backendConnection.probe!() : undefined,
+            sessionProblem,
+            (event, fields) => sendWebviewTelemetry(postHostMessage, event, { surface: initialBootstrap.surface, ...fields }),
+          ).then((probed) => {
+            if (probed && active && statusChange === sessionStatusChanges) {
+              lastProblem = probed;
+              dispatch({ type: "appServer:error", message, problem: probed });
+            }
+          });
+        }
       } else if (next.status === "ready" && backendInitialized.current) {
+        lastProblem = undefined;
+        if (sessionProblemShown) {
+          sessionProblemShown = false;
+          dispatch({ type: "appServer:ready" });
+        }
         setBackendSessionReady(true);
         if (
           pendingGlobalSubscriptionBaselines.current.size === 0
@@ -328,8 +364,6 @@ export function useAppControllerBackendLifecycle({
     }, () => {
       if (backendConnection) {
         let initializeAttempts = 0;
-        // What the last failed attempt showed, so a retry that learns nothing new keeps it.
-        let lastProblem: ConnectionProblem | undefined;
         const attemptInitialize = () => {
           const initializeStartedAt = Date.now();
           const attempt = ++initializeAttempts;
@@ -622,6 +656,12 @@ export function useAppControllerBackendLifecycle({
     newTaskController,
     newTaskId,
   });
+  // The connection reads as ready only when every owner agrees: initialized, the session
+  // up, and no subscription baseline missing or failed.
+  const connectionSettled = () => backendInitialized.current
+    && backendSessionUp.current
+    && failedSubscriptionBaselines.current.size === 0
+    && pendingGlobalSubscriptionBaselines.current.size === 0;
   const taskRouteLifecycle = useTaskRouteLifecycle({
     acceptSnapshotRequest,
     backendConnection,
@@ -629,6 +669,7 @@ export function useAppControllerBackendLifecycle({
     backendReady,
     backendStateGeneration,
     bootstrap,
+    connectionSettled,
     createSnapshotRequestId,
     dispatch,
     failedSubscriptionBaselines,
@@ -640,12 +681,14 @@ export function useAppControllerBackendLifecycle({
     stateSubscriptionContext,
   });
 
-  // The connection's Retry also starts over a first initialize that failed.
+  // The connection's Retry also starts over a first initialize that failed, or a
+  // session whose recovery gave up, on any surface.
   const routeRetryTaskOpen = taskRouteLifecycle.retryTaskOpen;
   const retryTaskOpen = useCallback(() => {
     if (retryInitializeNow.current?.()) return;
+    if (backendConnection?.retryRecovery?.()) return;
     routeRetryTaskOpen();
-  }, [routeRetryTaskOpen]);
+  }, [backendConnection, routeRetryTaskOpen]);
 
   return {
     acceptSnapshotRequest,
