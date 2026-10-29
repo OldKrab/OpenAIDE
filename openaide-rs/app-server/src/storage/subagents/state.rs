@@ -4,21 +4,17 @@
 //! Readers see committed state; one lock also serializes every disk access.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
 use crate::protocol::errors::RuntimeError;
 
-use super::history::{
-    append_history_frame, durable_create_empty, encode_change_frame, journal_budget,
-    load_upgraded_history, HistoryChange, HistoryFile, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE,
-    HISTORY_SCHEMA_VERSION, HISTORY_SNAPSHOT_FILE,
-};
+use super::stream::{self, StreamFiles, StreamOperation, SubagentChat};
 use super::writes::{apply_to_history, apply_to_record, SubagentOperation, SubagentWrite};
 use super::{
-    committed_change, load_catalog, write_catalog, CatalogFile, CommittedSubagentChange,
-    SubagentCatalogProjection, SubagentRecord, SubagentStatusRecord, SUBAGENTS_DIR,
+    committed_change, legacy, load_catalog, write_catalog, CatalogFile, CommittedSubagentChange,
+    SubagentCatalogProjection, SubagentRecord, SubagentStatusRecord, CATALOG_SCHEMA_VERSION,
+    SUBAGENTS_DIR,
 };
 
 #[derive(Default)]
@@ -36,9 +32,8 @@ struct TaskSubagents {
 }
 
 struct OpenHistory {
-    file: HistoryFile,
-    snapshot_bytes: u64,
-    journal_bytes: u64,
+    chat: SubagentChat,
+    files: StreamFiles,
 }
 
 /// What one worker batch committed, for publication.
@@ -59,11 +54,10 @@ pub struct CommittedSubagentRevision {
     pub change: Option<CommittedSubagentChange>,
 }
 
-/// Frames and outcomes waiting for one history's single write in a batch.
+/// Operations and outcomes waiting for one history's single frame in a batch.
 #[derive(Default)]
 struct PendingHistory {
-    frames: Vec<u8>,
-    snapshot: bool,
+    operations: Vec<StreamOperation>,
     writes: Vec<usize>,
     revisions: Vec<usize>,
 }
@@ -97,7 +91,7 @@ impl SubagentState {
         }
         let compacted = persist_histories(task, &root, task_id, &mut batch, &mut outcomes);
         if batch.catalog_persist {
-            if let Err(error) = write_catalog(&root, &task.catalog) {
+            if let Err(error) = write_catalog(&root, &mut task.catalog) {
                 log_failure(task_id, None, "catalog", &error);
                 // The disk keeps the last catalog it accepted, and memory follows
                 // it. The revision stays above every published one, because a
@@ -170,54 +164,25 @@ impl SubagentState {
         task_id: &str,
         subagent_id: &str,
         require_available: bool,
-    ) -> Result<HistoryFile, RuntimeError> {
-        let tasks = self.tasks.lock().expect("Subagent state poisoned");
-        let cached = tasks.get(task_id);
-        if require_available {
-            let disk_catalog;
-            let catalog = match cached {
-                Some(task) => &task.catalog,
-                None => {
-                    disk_catalog = load_catalog(root)?;
-                    &disk_catalog
-                }
-            };
-            let record = catalog
-                .entries
-                .iter()
-                .find(|entry| entry.subagent_id == subagent_id)
-                .ok_or_else(|| RuntimeError::TaskNotFound("subagent_id".to_string()))?;
-            if !record.history_available {
-                return Err(RuntimeError::Storage(
-                    "Subagent history is unavailable".to_string(),
-                ));
-            }
+    ) -> Result<SubagentChat, RuntimeError> {
+        let mut tasks = self.tasks.lock().expect("Subagent state poisoned");
+        let task = cached_task(&mut tasks, root, task_id)?;
+        let record = task
+            .catalog
+            .entries
+            .iter()
+            .find(|entry| entry.subagent_id == subagent_id)
+            .ok_or_else(|| RuntimeError::TaskNotFound("subagent_id".to_string()))?;
+        if require_available && !record.history_available {
+            return Err(RuntimeError::Storage(
+                "Subagent history is unavailable".to_string(),
+            ));
         }
-        if let Some(open) = cached.and_then(|task| task.histories.get(subagent_id)) {
-            return Ok(open.file.clone());
+        if let Some(open) = task.histories.get(subagent_id) {
+            return Ok(open.chat.clone());
         }
-        let task_dir = root.parent().unwrap_or(root);
-        Ok(load_upgraded_history(task_dir, &root.join(subagent_id))?.0)
-    }
-
-    /// Upgrades a history on disk unless a live Subagent holds it in memory,
-    /// whose writer owns its files. Returns whether it was rewritten.
-    pub(super) fn upgrade_unopened(&self, history_dir: &Path) -> Result<bool, RuntimeError> {
-        let tasks = self.tasks.lock().expect("Subagent state poisoned");
-        let subagent_root = history_dir.parent().unwrap_or(history_dir);
-        let task_dir = subagent_root.parent().unwrap_or(subagent_root);
-        let name = |path: &Path| {
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-        };
-        let open = name(task_dir)
-            .and_then(|task_id| tasks.get(&task_id))
-            .zip(name(history_dir))
-            .is_some_and(|(task, subagent_id)| task.histories.contains_key(&subagent_id));
-        if open {
-            return Ok(false);
-        }
-        Ok(load_upgraded_history(task_dir, history_dir)?.1)
+        // A stopped Subagent's history is read from disk and not kept open.
+        Ok(open_history(task, root, subagent_id)?.chat)
     }
 
     /// Drops one Task's state after its files were removed.
@@ -242,11 +207,12 @@ struct BatchState {
     catalog_changed: bool,
     /// The catalog changed in a way worth a durable write: anything but a history
     /// revision, which the history itself records. The persisted catalog's
-    /// revisions may therefore trail its histories until the next such write; a
-    /// restarted App Server serves fresh baselines, so no client compares them.
-    // TODO(ADR-0076): Take each entry's history revision from its stream when the
-    // catalog loads, once the stream format makes that a metadata read; until then
-    // a reloaded catalog can report an older history revision than its history.
+    /// revisions may therefore trail its histories until the next such write; an
+    /// opened history corrects its entry, and a restarted App Server serves fresh
+    /// baselines, so no client compares them.
+    // TODO(ADR-0076): Record the revision in the stream head if the catalog must
+    // be exact before a history opens; only replaying the stream knows it now,
+    // and a head write per batch would double each batch's syncs.
     catalog_persist: bool,
     stopped: HashSet<String>,
     /// Changes dropped with a history that failed later in the batch.
@@ -282,13 +248,14 @@ fn apply_write(
     if let SubagentOperation::Spawn { .. } = &write.operation {
         return spawn(task, task_dir, root, write, batch);
     }
-    let record = task
+    let position = task
         .catalog
         .entries
-        .iter_mut()
-        .find(|entry| entry.native_session_id == write.native_session_id)
+        .iter()
+        .position(|entry| entry.native_session_id == write.native_session_id)
         .ok_or_else(|| RuntimeError::TaskNotFound("subagent native session".to_string()))?;
     if !write.changes_history() {
+        let record = &mut task.catalog.entries[position];
         apply_to_record(record, write.operation.clone());
         if is_terminal(record.status) {
             batch.stopped.insert(record.subagent_id.clone());
@@ -298,22 +265,23 @@ fn apply_write(
         bump_catalog(&mut task.catalog.revision, batch, true);
         return Ok(());
     }
-    let subagent_id = record.subagent_id.clone();
-    let open = match task.histories.entry(subagent_id.clone()) {
-        std::collections::hash_map::Entry::Occupied(open) => open.into_mut(),
-        std::collections::hash_map::Entry::Vacant(vacant) => {
-            match open_history(task_dir, &root.join(&subagent_id)) {
-                Ok(open) => vacant.insert(open),
-                Err(error) => {
-                    if record.history_available {
-                        record.history_available = false;
-                        bump_catalog(&mut task.catalog.revision, batch, true);
-                    }
-                    return Err(error);
+    let subagent_id = task.catalog.entries[position].subagent_id.clone();
+    if !task.histories.contains_key(&subagent_id) {
+        match open_history(task, root, &subagent_id) {
+            Ok(open) => {
+                task.histories.insert(subagent_id.clone(), open);
+            }
+            Err(error) => {
+                let record = &mut task.catalog.entries[position];
+                if record.history_available {
+                    record.history_available = false;
+                    bump_catalog(&mut task.catalog.revision, batch, true);
                 }
+                return Err(error);
             }
         }
-    };
+    }
+    let open = task.histories.get_mut(&subagent_id).expect("opened above");
     let revision = match apply_history_write(open, task_dir, write, &subagent_id, batch) {
         Ok(revision) => revision,
         Err(error) => {
@@ -332,6 +300,7 @@ fn apply_write(
         .expect("queued by apply_history_write")
         .writes
         .push(index);
+    let record = &mut task.catalog.entries[position];
     record.history_revision = revision;
     let mut persist = !record.history_available;
     record.history_available = true;
@@ -343,8 +312,8 @@ fn apply_write(
     Ok(())
 }
 
-/// Applies one history write to an open history, queues its frame or a
-/// snapshot, and records the revision. Returns the new revision.
+/// Applies one history write to an open history, queues its journal operation,
+/// and records the revision. Returns the new revision.
 fn apply_history_write(
     open: &mut OpenHistory,
     task_dir: &Path,
@@ -352,48 +321,26 @@ fn apply_history_write(
     subagent_id: &str,
     batch: &mut BatchState,
 ) -> Result<u64, RuntimeError> {
-    let history = &mut open.file;
-    let message_count = history.messages.len();
-    let change = apply_to_history(history, write.operation.clone())?;
+    let chat = &mut open.chat;
+    let message_count = chat.messages.len();
+    let change = apply_to_history(chat, write.operation.clone())?;
     // A changed message may carry new image bytes; they become files before the
-    // frame or snapshot that references them (ADR-0075).
-    if !matches!(change, HistoryChange::AppendText(_)) {
-        crate::storage::chat_images::externalize_messages(task_dir, &mut history.messages)?;
+    // frame that references them (ADR-0075).
+    if !matches!(change, stream::HistoryChange::AppendText { .. }) {
+        crate::storage::chat_images::externalize_messages(task_dir, &mut chat.messages)?;
     }
-    let committed = committed_change(history, &change, message_count);
-    history.revision = history.revision.saturating_add(1);
-    history.journal_frames = history.journal_frames.saturating_add(1);
+    let operation = StreamOperation::describe(chat, &change)?;
+    let committed = committed_change(chat, &change, message_count);
+    chat.revision = chat.revision.saturating_add(1);
     let pending = batch.pending.entry(subagent_id.to_string()).or_default();
-    if !pending.snapshot {
-        // A schema 1 history is published once as schema 2 before its journal
-        // takes a frame that schema 1 readers do not know.
-        let frame = if history.schema_version == HISTORY_SCHEMA_VERSION
-            && history.journal_frames < COMPACT_AFTER_FRAMES
-        {
-            encode_change_frame(history, change)?
-        } else {
-            None
-        };
-        match frame {
-            Some(frame)
-                if open.journal_bytes + (pending.frames.len() + frame.len()) as u64
-                    <= journal_budget(open.snapshot_bytes) =>
-            {
-                pending.frames.extend_from_slice(&frame)
-            }
-            _ => {
-                pending.snapshot = true;
-                pending.frames.clear();
-            }
-        }
-    }
+    pending.operations.push(operation);
     pending.revisions.push(batch.revisions.len());
     batch.revisions.push(CommittedSubagentRevision {
         subagent_id: subagent_id.to_string(),
-        revision: history.revision,
+        revision: chat.revision,
         change: committed,
     });
-    Ok(history.revision)
+    Ok(chat.revision)
 }
 
 fn spawn(
@@ -427,23 +374,14 @@ fn spawn(
         .find(|entry| entry.native_session_id == parent_native_session_id)
         .map(|entry| entry.subagent_id.clone());
     let subagent_id = format!("subagent_{}", uuid::Uuid::new_v4().simple());
-    let mut history = HistoryFile::default();
-    history.message_meta.task_id = task_dir
+    let mut chat = SubagentChat::default();
+    chat.message_meta.task_id = task_dir
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let history_dir = root.join(&subagent_id);
-    crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
-    durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
-    let snapshot_bytes = fs::metadata(history_dir.join(HISTORY_SNAPSHOT_FILE))?.len();
-    task.histories.insert(
-        subagent_id.clone(),
-        OpenHistory {
-            file: history,
-            snapshot_bytes,
-            journal_bytes: 0,
-        },
-    );
+    let files = stream::publish_generation(&root.join(&subagent_id), &chat)?;
+    task.histories
+        .insert(subagent_id.clone(), OpenHistory { chat, files });
     catalog.next_spawn_order = catalog.next_spawn_order.saturating_add(1);
     catalog.entries.push(SubagentRecord {
         subagent_id,
@@ -463,18 +401,62 @@ fn spawn(
     Ok(())
 }
 
-fn open_history(task_dir: &Path, history_dir: &Path) -> Result<OpenHistory, RuntimeError> {
-    let (file, _) = load_upgraded_history(task_dir, history_dir)?;
-    let bytes = |name| fs::metadata(history_dir.join(name)).map(|metadata| metadata.len());
-    Ok(OpenHistory {
-        file,
-        snapshot_bytes: bytes(HISTORY_SNAPSHOT_FILE)?,
-        journal_bytes: bytes(HISTORY_JOURNAL_FILE).unwrap_or_default(),
-    })
+/// Opens a history from disk, migrating an ADR-0046 history to a stream first,
+/// and corrects its catalog entry's revision in memory.
+fn open_history(
+    task: &mut TaskSubagents,
+    root: &Path,
+    subagent_id: &str,
+) -> Result<OpenHistory, RuntimeError> {
+    let dir = root.join(subagent_id);
+    let (format, opened) = if stream::exists(&dir) {
+        ("stream", stream::load(&dir))
+    } else if legacy::exists(&dir) {
+        // An older App Server must reject this Task's catalog before any of its
+        // histories leaves the format it knows (ADR-0029).
+        let catalog = if task.catalog.schema_version < CATALOG_SCHEMA_VERSION {
+            write_catalog(root, &mut task.catalog)
+        } else {
+            Ok(())
+        };
+        let task_dir = root.parent().unwrap_or(root);
+        (
+            "legacy",
+            catalog.and_then(|()| legacy::migrate(task_dir, &dir)),
+        )
+    } else {
+        (
+            "missing",
+            Err(RuntimeError::Storage(
+                "Subagent history is missing".to_string(),
+            )),
+        )
+    };
+    let (chat, files) = opened.inspect_err(|error| {
+        crate::logging::warn(
+            "subagent_history_open_failed",
+            serde_json::json!({
+                "task_id": root.parent().and_then(Path::file_name).map(|name| name.to_string_lossy()),
+                "subagent_id": subagent_id,
+                "format": format,
+                "error_kind": error.reason(),
+            }),
+        );
+    })?;
+    if let Some(record) = task
+        .catalog
+        .entries
+        .iter_mut()
+        .find(|entry| entry.subagent_id == subagent_id)
+    {
+        record.history_revision = chat.revision;
+    }
+    Ok(OpenHistory { chat, files })
 }
 
-/// Writes each changed history once: its frames with one sync, or a snapshot when
-/// the journal is due for compaction. Returns how many histories were compacted.
+/// Writes each changed history once: one frame with one sync, then a new
+/// generation when the journal reaches ADR-0029's thresholds. Returns how many
+/// histories were compacted.
 fn persist_histories(
     task: &mut TaskSubagents,
     root: &Path,
@@ -497,33 +479,54 @@ fn persist_histories(
             continue;
         };
         let history_dir = root.join(&subagent_id);
-        let written = if pending.snapshot {
-            compacted += 1;
-            write_snapshot(open, &history_dir)
-        } else if pending.frames.is_empty() {
-            Ok(())
-        } else {
-            append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &pending.frames)
-                .map(|()| open.journal_bytes += pending.frames.len() as u64)
-        };
-        let Err(error) = written else {
+        let written = stream::append(
+            &history_dir,
+            &mut open.files,
+            &open.chat,
+            pending.operations,
+        );
+        if let Err(error) = written {
+            log_failure(task_id, Some(&subagent_id), "history", &error);
+            task.histories.remove(&subagent_id);
+            if let Some(record) = task
+                .catalog
+                .entries
+                .iter_mut()
+                .find(|entry| entry.subagent_id == subagent_id)
+            {
+                record.history_available = false;
+                batch.catalog_persist = true;
+            }
+            for index in pending.writes {
+                outcomes[index] = Err(error.clone());
+            }
+            unpublished.extend(pending.revisions);
             continue;
-        };
-        log_failure(task_id, Some(&subagent_id), "history", &error);
-        task.histories.remove(&subagent_id);
-        if let Some(record) = task
-            .catalog
-            .entries
-            .iter_mut()
-            .find(|entry| entry.subagent_id == subagent_id)
-        {
-            record.history_available = false;
-            batch.catalog_persist = true;
         }
-        for index in pending.writes {
-            outcomes[index] = Err(error.clone());
+        if !open.files.compaction_due() {
+            continue;
         }
-        unpublished.extend(pending.revisions);
+        let frame_count = open.files.journal_frames();
+        match stream::publish_generation(&history_dir, &open.chat) {
+            Ok(files) => {
+                open.files = files;
+                compacted += 1;
+            }
+            Err(error) => {
+                // The committed frames stay readable; which generation the head
+                // names after a failed publication is known only to the disk.
+                crate::logging::warn(
+                    "subagent_stream_compaction_failed",
+                    serde_json::json!({
+                        "task_id": task_id,
+                        "subagent_id": subagent_id,
+                        "journal_frame_count": frame_count,
+                        "error_kind": error.reason(),
+                    }),
+                );
+                task.histories.remove(&subagent_id);
+            }
+        }
     }
     if !unpublished.is_empty() {
         let mut index = 0;
@@ -533,17 +536,6 @@ fn persist_histories(
         });
     }
     compacted
-}
-
-fn write_snapshot(open: &mut OpenHistory, history_dir: &Path) -> Result<(), RuntimeError> {
-    open.file.schema_version = HISTORY_SCHEMA_VERSION;
-    open.file.journal_frames = 0;
-    let snapshot_path = history_dir.join(HISTORY_SNAPSHOT_FILE);
-    crate::storage::atomic::write_json(&snapshot_path, &open.file)?;
-    durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
-    open.snapshot_bytes = fs::metadata(&snapshot_path)?.len();
-    open.journal_bytes = 0;
-    Ok(())
 }
 
 fn bump_catalog(revision: &mut u64, batch: &mut BatchState, persist: bool) {

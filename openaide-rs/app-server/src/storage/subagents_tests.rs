@@ -3,35 +3,21 @@ use tempfile::tempdir;
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage};
 use crate::storage::Store;
 
-use super::{SubagentCapabilitiesRecord, SubagentStatusRecord, COMPACT_AFTER_FRAMES};
+use super::{stream, SubagentCapabilitiesRecord, SubagentStatusRecord};
 
 #[test]
 fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
+    let record = spawn_researcher(&store);
     let seed = "x".repeat(1024 * 1024);
     store
         .append_subagent_message_part("task_1", "child-session", child_text(&seed))
         .unwrap()
         .wait()
         .unwrap();
-    let journal = temp
-        .path()
-        .join("task-store-v1/tasks/task_1/subagents")
-        .join(&record.subagent_id)
-        .join("history.journal");
-    let before = std::fs::metadata(&journal).unwrap().len();
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let before = journal_len(&dir);
     for _ in 0..31 {
         store
             .append_subagent_message_part("task_1", "child-session", child_text(&"y".repeat(256)))
@@ -39,7 +25,7 @@ fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
             .wait()
             .unwrap();
     }
-    let written = std::fs::metadata(&journal).unwrap().len() - before;
+    let written = journal_len(&dir) - before;
     assert!(written < 32 * 1024, "8KiB of output wrote {written} bytes");
     drop(store);
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -55,37 +41,22 @@ fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
 }
 
 #[test]
-fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_history() {
+fn a_schema_one_history_migrates_to_a_stream_that_accepts_mixed_updates() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
-    let history_dir = temp
-        .path()
-        .join("task-store-v1/tasks/task_1/subagents")
-        .join(&record.subagent_id);
+    let record = spawn_researcher(&store);
     drop(store);
-    std::fs::write(
-        history_dir.join("history.journal"),
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(include_bytes!("fixtures/subagent-history-v2.snapshot")).unwrap();
+    snapshot["schemaVersion"] = 1.into();
+    write_legacy_history(
+        &dir,
+        &serde_json::to_vec(&snapshot).unwrap(),
         include_bytes!("fixtures/subagent-history-v1.journal"),
-    )
-    .unwrap();
+    );
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
-    let journal_len = || {
-        std::fs::metadata(history_dir.join("history.journal"))
-            .unwrap()
-            .len()
-    };
     for index in 0..62 {
         if index == 31 {
             reopened
@@ -103,10 +74,6 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
                 .unwrap()
                 .wait()
                 .unwrap();
-            assert!(
-                journal_len() > 0,
-                "a message change is journaled, not published as the snapshot"
-            );
         }
         reopened
             .append_subagent_message_part("task_1", "child-session", child_text("!"))
@@ -114,10 +81,9 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
             .wait()
             .unwrap();
     }
-    assert!(
-        journal_len() > 0,
-        "streamed text since the snapshot is journaled"
-    );
+    assert!(!dir.join("history.snapshot").exists());
+    assert!(!dir.join("history.journal").exists());
+    assert_eq!(stream::journaled_operations(&dir).len(), 63);
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("?"))
         .unwrap()
@@ -144,63 +110,132 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
 }
 
 #[test]
-fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
+fn a_released_schema_two_history_migrates_once_with_its_messages_and_plan() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
-    let history_dir = temp
-        .path()
-        .join("task-store-v1/tasks/task_1/subagents")
-        .join(&record.subagent_id);
-    let mut old_journal = Vec::new();
-    // Creating the message and the streamed appends after it fill the journal
-    // until the last change compacts it.
-    for index in 0..COMPACT_AFTER_FRAMES {
-        if index == COMPACT_AFTER_FRAMES - 1 {
-            old_journal = std::fs::read(history_dir.join("history.journal")).unwrap();
-        }
-        store
-            .append_subagent_message_part("task_1", "child-session", child_text("x"))
-            .unwrap()
-            .wait()
-            .unwrap();
-    }
+    let record = spawn_researcher(&store);
     drop(store);
-    // Compaction published the last revision but process death left the previous
-    // journal generation in place. The snapshot already owns this prefix.
-    std::fs::write(history_dir.join("history.journal"), old_journal).unwrap();
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    write_legacy_history(
+        &dir,
+        include_bytes!("fixtures/subagent-history-v2.snapshot"),
+        include_bytes!("fixtures/subagent-history-v2.journal"),
+    );
+    let catalog_path = dir.parent().unwrap().join("catalog.json");
+    let catalog_schema = || {
+        let catalog: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&catalog_path).unwrap()).unwrap();
+        catalog["schemaVersion"].as_u64().unwrap()
+    };
+    // As an App Server that wrote only ADR-0046 histories left the catalog.
+    let mut catalog: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&catalog_path).unwrap()).unwrap();
+    catalog["schemaVersion"] = 1.into();
+    std::fs::write(&catalog_path, serde_json::to_vec(&catalog).unwrap()).unwrap();
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let history = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+
+    assert_eq!(history.revision, 4);
+    assert!(matches!(
+        &history.messages[..],
+        [agent, user]
+            if matches!(&agent.chat.message, NormalizedMessage::AgentMessage { parts, .. }
+                if parts == &[AgentMessagePart::Text { text: "Hello world".to_string() }])
+            && matches!(&user.chat.message, NormalizedMessage::User { text, .. }
+                if text == "Check the result")
+    ));
+    assert_eq!(
+        history.current_plan.unwrap().entries[0].content,
+        "Run the suite"
+    );
+    assert_eq!(
+        catalog_schema(),
+        2,
+        "an older App Server rejects the Task's catalog"
+    );
+    assert!(dir.join("stream.json").is_file());
+    assert!(!dir.join("history.snapshot").exists());
+    assert!(!dir.join("history.journal").exists());
+    let snapshot = std::fs::read(stream::snapshot_path(&dir)).unwrap();
+    reopened
+        .append_subagent_message_part("task_1", "child-session", child_text("!"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    drop(reopened);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let history = reopened
+        .subagent_history("task_1", &record.subagent_id)
+        .unwrap();
+    assert_eq!(history.revision, 5);
+    assert!(matches!(
+        &history.messages[0].chat.message,
+        NormalizedMessage::AgentMessage { parts, .. }
+            if parts == &[AgentMessagePart::Text { text: "Hello world!".to_string() }]
+    ));
+    assert_eq!(
+        std::fs::read(stream::snapshot_path(&dir)).unwrap(),
+        snapshot,
+        "the migrated history is not migrated again"
+    );
+}
+
+#[test]
+fn interrupted_compaction_files_are_ignored_and_removed_by_the_next_compaction() {
+    let temp = tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = spawn_researcher(&store);
+    store
+        .append_subagent_message_part("task_1", "child-session", child_text("x"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    drop(store);
+    // A crash between writing a generation and publishing it, or between
+    // publishing it and removing the previous one, leaves unnamed files.
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let stale = ["chat.snapshot.stale", "chat.journal.stale"];
+    for name in stale {
+        std::fs::write(dir.join(name), b"not a generation").unwrap();
+    }
+
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
     assert_eq!(
         reopened
             .subagent_history("task_1", &record.subagent_id)
             .unwrap()
             .revision,
-        COMPACT_AFTER_FRAMES
+        1
     );
-    reopened
-        .append_subagent_message_part("task_1", "child-session", child_text("!"))
+    for _ in 1..stream::COMPACT_AFTER_FRAMES {
+        reopened
+            .append_subagent_message_part("task_1", "child-session", child_text("x"))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    assert!(
+        stream::journaled_operations(&dir).is_empty(),
+        "the full journal became a new generation"
+    );
+    for name in stale {
+        assert!(!dir.join(name).exists(), "{name} is removed");
+    }
+    drop(reopened);
+    let history = Store::open(temp.path().to_path_buf())
         .unwrap()
-        .wait()
-        .unwrap();
-    let history = reopened
         .subagent_history("task_1", &record.subagent_id)
         .unwrap();
-    assert_eq!(history.revision, COMPACT_AFTER_FRAMES + 1);
+    assert_eq!(history.revision, stream::COMPACT_AFTER_FRAMES);
     assert!(matches!(
         &history.messages[0].chat.message,
         NormalizedMessage::AgentMessage { parts, .. }
             if parts == &[AgentMessagePart::Text {
-                text: format!("{}!", "x".repeat(COMPACT_AFTER_FRAMES as usize)),
+                text: "x".repeat(stream::COMPACT_AFTER_FRAMES as usize),
             }]
     ));
 }
@@ -209,17 +244,7 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
 fn a_message_update_journals_only_that_message() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
+    let record = spawn_researcher(&store);
     store
         .append_subagent_message_part(
             "task_1",
@@ -229,19 +254,11 @@ fn a_message_update_journals_only_that_message() {
         .unwrap()
         .wait()
         .unwrap();
-    let history_dir = temp
-        .path()
-        .join("task-store-v1/tasks/task_1/subagents")
-        .join(&record.subagent_id);
-    let snapshot = std::fs::read(history_dir.join("history.snapshot")).unwrap();
-    let journal_len = || {
-        std::fs::metadata(history_dir.join("history.journal"))
-            .unwrap()
-            .len()
-    };
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    let snapshot = std::fs::read(stream::snapshot_path(&dir)).unwrap();
     // Each upsert stands for a tool status update to a Subagent with a large history.
     for status in 0..8 {
-        let before = journal_len();
+        let before = journal_len(&dir);
         store
             .append_subagent_message(
                 "task_1",
@@ -257,11 +274,11 @@ fn a_message_update_journals_only_that_message() {
             .unwrap()
             .wait()
             .unwrap();
-        let written = journal_len() - before;
+        let written = journal_len(&dir) - before;
         assert!(written < 4096, "a small update wrote {written} bytes");
     }
     assert_eq!(
-        std::fs::read(history_dir.join("history.snapshot")).unwrap(),
+        std::fs::read(stream::snapshot_path(&dir)).unwrap(),
         snapshot,
         "the large history is not rewritten"
     );
@@ -279,30 +296,58 @@ fn a_message_update_journals_only_that_message() {
     ));
 }
 
-/// Publishes the message frames a journal holds as the snapshot, as compaction
-/// would, so a test can write an older history shape into one file.
-fn fold_journal_into_snapshot(history_dir: &std::path::Path) {
-    let snapshot_path = history_dir.join("history.snapshot");
-    let journal_path = history_dir.join("history.journal");
-    let mut history: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-    for line in std::fs::read_to_string(&journal_path).unwrap().lines() {
-        let frame: serde_json::Value = serde_json::from_str(line).unwrap();
-        let message = frame["upsert"].clone();
-        assert!(message.is_object(), "the test journal holds message frames");
-        let messages = history["messages"].as_array_mut().unwrap();
-        match messages
-            .iter_mut()
-            .find(|stored| stored["chat"]["identity"] == message["chat"]["identity"])
-        {
-            Some(stored) => *stored = message,
-            None => messages.push(message),
-        }
-        history["revision"] = frame["revision"].clone();
-        history["messageMeta"] = frame["messageMeta"].clone();
+/// Replaces a history's files with an ADR-0046 snapshot and journal.
+fn write_legacy_history(dir: &std::path::Path, snapshot: &[u8], journal: &[u8]) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        std::fs::remove_file(entry.unwrap().path()).unwrap();
     }
-    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
-    std::fs::write(&journal_path, b"").unwrap();
+    std::fs::write(dir.join("history.snapshot"), snapshot).unwrap();
+    std::fs::write(dir.join("history.journal"), journal).unwrap();
+}
+
+/// An ADR-0046 schema 2 snapshot holding `messages` at revision 1.
+fn legacy_snapshot(messages: serde_json::Value) -> Vec<u8> {
+    let count = messages.as_array().unwrap().len();
+    serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": 2,
+        "revision": 1,
+        "journalFrames": 0,
+        "messages": messages,
+        "messageMeta": {
+            "task_id": "task_1",
+            "version": 1,
+            "message_count": count,
+            "local_history_updated_at": "1",
+            "first_cursor": "m:1",
+            "last_cursor": format!("m:{count}"),
+        },
+        "currentPlan": null,
+    }))
+    .unwrap()
+}
+
+/// A stored child reply as an ADR-0046 snapshot holds it.
+fn legacy_child_reply(parts: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "sequence": 1,
+        "chat": {
+            "cursor": "m:1",
+            "identity": "message-1",
+            "message_type": "agent_message",
+            "message_id": "message-1",
+            "message": {
+                "kind": "agent_message",
+                "id": "message-1",
+                "role": "agent",
+                "parts": parts,
+                "created_at": "1",
+            },
+        },
+    })
+}
+
+fn journal_len(dir: &std::path::Path) -> u64 {
+    std::fs::metadata(stream::journal_path(dir)).map_or(0, |metadata| metadata.len())
 }
 
 fn child_text(text: &str) -> NormalizedMessage {
@@ -322,33 +367,22 @@ fn incomplete_subagent_append_preserves_accepted_history_and_allows_new_output()
 
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
+    let record = spawn_researcher(&store);
     store
         .append_subagent_message_part("task_1", "child-session", child_text("accepted"))
         .unwrap()
         .wait()
         .unwrap();
     drop(store);
-    let path = temp
-        .path()
-        .join("task-store-v1/tasks/task_1/subagents")
-        .join(&record.subagent_id)
-        .join("history.journal");
+    // A frame length announcing more payload than the crash left behind.
+    let path = stream::journal_path(&history_dir(temp.path(), &record.subagent_id));
+    let mut torn = 64_u64.to_le_bytes().to_vec();
+    torn.extend_from_slice(b"{\"format_version\":1");
     std::fs::OpenOptions::new()
         .append(true)
         .open(path)
         .unwrap()
-        .write_all(b"{\"revision\":2,\"appendText\":{\"identity\":\"message-1\",\"role\":\"agent\",\"text\":\"uncommitted")
+        .write_all(&torn)
         .unwrap();
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -527,55 +561,50 @@ fn subagent_user_chunks_form_one_prompt_in_history() {
 fn legacy_codex_causal_root_prompt_is_hidden_from_child_history() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
-    store
-        .append_subagent_message(
-            "task_1",
-            "child-session",
-            NormalizedMessage::User {
-                id: "acp:child-session:user:collab:root-message:prompt".to_string(),
-                text: "Launch a subagent".to_string(),
-                created_at: "2026-08-27T00:00:00Z".to_string(),
-                attachments: Vec::new(),
-            },
-            false,
-        )
-        .unwrap()
-        .wait()
-        .unwrap();
-    store
-        .append_subagent_message(
-            "task_1",
-            "child-session",
-            NormalizedMessage::Activity {
-                id: format!("{}:codex:started", record.subagent_id),
-                title: "Main Agent started this subagent".to_string(),
-                status: crate::protocol::model::ActivityStatus::Completed,
-                created_at: "2026-08-27T00:00:00Z".to_string(),
-                collapsed: true,
-                steps: vec![crate::protocol::model::ActivityStep::Text {
-                    text: "Prompt unavailable".to_string(),
-                    level: Some("info".to_string()),
-                }],
-            },
-            false,
-        )
-        .unwrap()
-        .wait()
-        .unwrap();
-
-    // Loading normalizes what an older writer left.
+    let record = spawn_researcher(&store);
     drop(store);
+    let identity = format!("{}:codex:started", record.subagent_id);
+    // What an older codex-acp and App Server left in an ADR-0046 history.
+    write_legacy_history(
+        &history_dir(temp.path(), &record.subagent_id),
+        &legacy_snapshot(serde_json::json!([
+            {
+                "sequence": 1,
+                "chat": {
+                    "cursor": "m:1",
+                    "identity": "acp:child-session:user:collab:root-message:prompt",
+                    "message_type": "user",
+                    "message_id": "acp:child-session:user:collab:root-message:prompt",
+                    "message": {
+                        "kind": "user",
+                        "id": "acp:child-session:user:collab:root-message:prompt",
+                        "text": "Launch a subagent",
+                        "created_at": "2026-08-27T00:00:00Z",
+                    },
+                },
+            },
+            {
+                "sequence": 2,
+                "chat": {
+                    "cursor": "m:2",
+                    "identity": identity,
+                    "message_type": "activity",
+                    "message_id": identity,
+                    "message": {
+                        "kind": "activity",
+                        "id": identity,
+                        "title": "Main Agent started this subagent",
+                        "status": "completed",
+                        "created_at": "2026-08-27T00:00:00Z",
+                        "collapsed": true,
+                        "steps": [{ "kind": "text", "text": "Prompt unavailable", "level": "info" }],
+                    },
+                },
+            },
+        ])),
+        b"",
+    );
+
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let history = store
         .subagent_history("task_1", &record.subagent_id)
@@ -644,37 +673,18 @@ fn subagent_history_pages_before_the_selected_cursor() {
 fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
-    store
-        .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
-        .unwrap()
-        .wait()
-        .unwrap();
-    let task_dir = temp.path().join("task-store-v1/tasks/task_1");
-    let history_dir = task_dir.join("subagents").join(&record.subagent_id);
-    // A history written before ADR-0075 kept the image bytes inline.
-    let snapshot_path = history_dir.join("history.snapshot");
+    let record = spawn_researcher(&store);
     drop(store);
-    fold_journal_into_snapshot(&history_dir);
-    let mut history: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-    history["messages"][0]["chat"]["message"]["parts"]
-        .as_array_mut()
-        .unwrap()
-        .push(
-            serde_json::json!({ "kind": "image", "media_type": "image/png", "data": "aW1hZ2U=" }),
-        );
-    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    // A history written before ADR-0075 kept the image bytes inline.
+    write_legacy_history(
+        &dir,
+        &legacy_snapshot(serde_json::json!([legacy_child_reply(serde_json::json!([
+            { "kind": "text", "text": "Rendered:" },
+            { "kind": "image", "media_type": "image/png", "data": "aW1hZ2U=" },
+        ]))])),
+        b"",
+    );
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
     let loaded = reopened
@@ -697,7 +707,7 @@ fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
         reopened.read_chat_image("task_1", image_id).unwrap(),
         Some(b"image".to_vec())
     );
-    let published = std::fs::read_to_string(&snapshot_path).unwrap();
+    let published = std::fs::read_to_string(stream::snapshot_path(&dir)).unwrap();
     assert!(
         !published.contains("aW1hZ2U="),
         "the migrated history is durable"
@@ -708,43 +718,22 @@ fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
 fn a_subagent_image_reference_gains_its_size_on_load() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = store
-        .record_subagent_spawn(
-            "task_1",
-            "root-session",
-            "child-session",
-            "Researcher".to_string(),
-            "Inspect".to_string(),
-            SubagentCapabilitiesRecord::default(),
-            Vec::new(),
-        )
-        .unwrap();
-    store
-        .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
-        .unwrap()
-        .wait()
-        .unwrap();
+    let record = spawn_researcher(&store);
     drop(store);
     let task_dir = temp.path().join("task-store-v1/tasks/task_1");
     let image_id =
         crate::storage::chat_images::store(&task_dir, &crate::media::tests::encoded_png(6, 2))
             .unwrap();
     // A reference as the first release of ADR-0075 stored it: no width or height.
-    let history_dir = task_dir.join("subagents").join(&record.subagent_id);
-    fold_journal_into_snapshot(&history_dir);
-    let snapshot_path = history_dir.join("history.snapshot");
-    let mut history: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-    history["messages"][0]["chat"]["message"]["parts"]
-        .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!({
-            "kind": "image",
-            "media_type": "image/png",
-            "image_id": image_id,
-            "size_bytes": 1,
-        }));
-    std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+    let dir = history_dir(temp.path(), &record.subagent_id);
+    write_legacy_history(
+        &dir,
+        &legacy_snapshot(serde_json::json!([legacy_child_reply(serde_json::json!([
+            { "kind": "text", "text": "Rendered:" },
+            { "kind": "image", "media_type": "image/png", "image_id": image_id, "size_bytes": 1 },
+        ]))])),
+        b"",
+    );
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
     let loaded = reopened
@@ -763,7 +752,7 @@ fn a_subagent_image_reference_gains_its_size_on_load() {
         }
     ));
     let published: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(stream::snapshot_path(&dir)).unwrap()).unwrap();
     assert_eq!(
         published["messages"][0]["chat"]["message"]["parts"][1]["width"], 6,
         "the size is durable"
@@ -856,18 +845,10 @@ fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
         )
         .unwrap();
     let dir = history_dir(temp.path(), &record.subagent_id);
-    let journal = std::fs::read_to_string(dir.join("history.journal")).unwrap();
-    let kinds = journal
-        .lines()
-        .map(|line| {
-            let frame: serde_json::Value = serde_json::from_str(line).unwrap();
-            ["upsert", "setPlan", "appendText"]
-                .into_iter()
-                .find(|kind| frame.get(*kind).is_some())
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(kinds, ["upsert", "setPlan", "upsert"]);
+    assert_eq!(
+        stream::journaled_operations(&dir),
+        [["upsert_message"], ["set_plan"], ["upsert_message"]]
+    );
     drop(store);
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -907,61 +888,45 @@ fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
 }
 
 #[test]
-fn a_schema_one_history_becomes_schema_two_before_its_first_message_frame() {
+fn a_newer_stream_or_catalog_schema_is_refused_unchanged() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let record = spawn_researcher(&store);
     drop(store);
     let dir = history_dir(temp.path(), &record.subagent_id);
-    let snapshot_path = dir.join("history.snapshot");
-    let set_schema = |version: u16| {
-        let mut history: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-        history["schemaVersion"] = version.into();
-        std::fs::write(&snapshot_path, serde_json::to_vec(&history).unwrap()).unwrap();
+    let bump_schema = |path: &std::path::Path| {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        value["schemaVersion"] = 3.into();
+        std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+        std::fs::read(path).unwrap()
     };
-    let schema = || {
-        let history: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
-        history["schemaVersion"].as_u64().unwrap()
-    };
-    let journal_len = || {
-        std::fs::metadata(dir.join("history.journal"))
-            .unwrap()
-            .len()
-    };
-    // As an App Server that wrote only full-history and text frames left it.
-    set_schema(1);
 
-    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
-    reopened
-        .append_subagent_message_part("task_1", "child-session", child_text("first"))
-        .unwrap()
-        .wait()
-        .unwrap();
-    assert_eq!(schema(), 2, "the snapshot is republished as schema 2");
-    assert_eq!(journal_len(), 0, "before any message frame is journaled");
-    reopened
-        .append_subagent_message_part("task_1", "child-session", child_text(" second"))
-        .unwrap()
-        .wait()
-        .unwrap();
-    assert!(journal_len() > 0, "a schema 2 history journals its changes");
-    drop(reopened);
-
-    // A later schema is refused, as a schema 1 App Server refuses schema 2.
-    set_schema(3);
-    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
-    let error = reopened
+    let head = bump_schema(&dir.join("stream.json"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let error = store
         .subagent_history("task_1", &record.subagent_id)
         .unwrap_err();
     assert!(error
         .to_string()
-        .contains("Unsupported Subagent history schema"));
+        .contains("Unsupported Subagent stream schema"));
+    assert!(store
+        .append_subagent_message_part("task_1", "child-session", child_text("lost"))
+        .unwrap()
+        .wait()
+        .is_err());
+    assert_eq!(std::fs::read(dir.join("stream.json")).unwrap(), head);
+    drop(store);
+
+    let catalog_path = dir.parent().unwrap().join("catalog.json");
+    let catalog = bump_schema(&catalog_path);
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    assert!(store.subagent_catalog("task_1").is_err());
+    assert_eq!(std::fs::read(&catalog_path).unwrap(), catalog);
 }
 
 #[test]
-fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
+fn a_journal_past_the_byte_threshold_starts_a_new_generation() {
     let temp = tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let record = spawn_researcher(&store);
@@ -971,14 +936,10 @@ fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
         .unwrap()
         .wait()
         .unwrap();
-    assert!(
-        std::fs::metadata(dir.join("history.journal"))
-            .unwrap()
-            .len()
-            > 0
-    );
+    assert_eq!(stream::journaled_operations(&dir).len(), 1);
+    let snapshot = stream::snapshot_path(&dir);
 
-    // Larger than the 1 MiB budget a small snapshot allows its journal.
+    // Past 1 MiB and larger than the snapshot it follows.
     store
         .append_subagent_message(
             "task_1",
@@ -994,12 +955,8 @@ fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
         .unwrap()
         .wait()
         .unwrap();
-    assert_eq!(
-        std::fs::metadata(dir.join("history.journal"))
-            .unwrap()
-            .len(),
-        0
-    );
+    assert!(stream::journaled_operations(&dir).is_empty());
+    assert!(!snapshot.exists(), "the previous generation is removed");
     drop(store);
     let history = Store::open(temp.path().to_path_buf())
         .unwrap()

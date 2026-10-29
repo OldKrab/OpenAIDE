@@ -31,8 +31,9 @@ changes, never per chunk; the current history revision comes from the stream.
 
 Existing Subagent histories migrate lazily under ADR-0029's schema rules: the first
 access replays the ADR-0046 snapshot and journal once, publishes validated stream
-files, and only then removes the old files. An older App Server rejects the new
-format without modifying it. The ADR-0046 frame format, its compaction, and its
+files, and only then removes the old files. The Task's Subagent catalog moves to
+schema 2 before its first history migrates, so an older App Server rejects that
+catalog without modifying it instead of reporting migrated histories as lost. The ADR-0046 frame format, its compaction, and its
 startup sweep are removed once migration is in place.
 
 ## Considered Options

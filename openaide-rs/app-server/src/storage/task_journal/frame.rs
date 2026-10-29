@@ -11,7 +11,7 @@ use crate::protocol::errors::RuntimeError;
 
 const MAGIC: &[u8; 8] = b"OAIDETJ\0";
 const FORMAT_VERSION: u16 = 1;
-pub(super) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
+pub(crate) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
 const FRAME_LENGTH_LEN: usize = size_of::<u64>();
 const FRAME_CHECKSUM_LEN: usize = size_of::<u32>();
 const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
@@ -120,7 +120,7 @@ impl FaultInjector {
     }
 }
 
-pub(super) trait FramedRecord: Serialize + DeserializeOwned {
+pub(crate) trait FramedRecord: Serialize + DeserializeOwned {
     /// Decodes one checksummed payload at its durable compatibility boundary.
     fn decode(payload: &[u8]) -> Result<Self, RuntimeError> {
         serde_json::from_slice(payload).map_err(|error| json_error("frame_decode", error))
@@ -130,7 +130,7 @@ pub(super) trait FramedRecord: Serialize + DeserializeOwned {
     fn sequence(&self) -> u64;
 }
 
-pub(super) struct ReplayedFrames<T> {
+pub(crate) struct ReplayedFrames<T> {
     pub frames: Vec<T>,
     frame_ends: Vec<u64>,
     pub frame_count: usize,
@@ -164,8 +164,7 @@ pub(super) fn framed_file_len<T: Serialize>(frames: &[T]) -> Result<u64, Runtime
 
 /// Creates the first canonical journal frame and confirms both file contents
 /// and the new directory entry before the Task can be published.
-#[cfg(test)]
-pub(super) fn create<T: FramedRecord>(path: &Path, frame: &T) -> Result<(), RuntimeError> {
+pub(crate) fn create<T: FramedRecord>(path: &Path, frame: &T) -> Result<(), RuntimeError> {
     create_with_faults(path, frame, JournalKind::Task, &FaultInjector::disabled())
 }
 
@@ -239,8 +238,7 @@ pub(super) fn create_directory_durably(
 
 /// Appends and confirms one complete batch before its receipt or publication
 /// can resolve.
-#[cfg(test)]
-pub(super) fn append<T: FramedRecord>(path: &Path, frame: &T) -> Result<(), RuntimeError> {
+pub(crate) fn append<T: FramedRecord>(path: &Path, frame: &T) -> Result<(), RuntimeError> {
     append_with_faults(path, frame, JournalKind::Task, &FaultInjector::disabled())
 }
 
@@ -353,7 +351,7 @@ fn create_compacted_file<T: FramedRecord>(
 
 /// Replays complete verified frames. Only an incomplete final frame is removed;
 /// checksum, sequence, and payload failures remain visible to the caller.
-pub(super) fn replay<T: FramedRecord>(path: &Path) -> Result<ReplayedFrames<T>, RuntimeError> {
+pub(crate) fn replay<T: FramedRecord>(path: &Path) -> Result<ReplayedFrames<T>, RuntimeError> {
     replay_internal(path, true)
 }
 

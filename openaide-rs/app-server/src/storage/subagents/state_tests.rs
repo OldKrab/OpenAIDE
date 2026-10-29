@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::tempdir;
 
+use super::super::stream;
 use super::super::{
     CommittedSubagentChange, SubagentCapabilitiesRecord, SubagentOperation, SubagentRecord,
     SubagentStatusRecord, SubagentWrite,
@@ -86,13 +87,11 @@ fn one_batch_applies_chunks_in_order_and_appends_each_history_once() {
             (3, Some(CommittedSubagentChange::AppendText { text: c, .. })),
         ] if b == "b" && c == "c"
     ));
-    let journal = std::fs::read_to_string(
-        subagent_root(temp.path())
-            .join(&record.subagent_id)
-            .join("history.journal"),
-    )
-    .unwrap();
-    assert_eq!(journal.lines().count(), 3, "one frame per revision");
+    assert_eq!(
+        stream::journaled_operations(&subagent_root(temp.path()).join(&record.subagent_id)),
+        [["upsert_message", "append_text", "append_text"]],
+        "one frame for the batch"
+    );
 
     // A later chunk changes only the history; the catalog file keeps its revision.
     let persisted = disk_catalog_revision(temp.path());
@@ -116,10 +115,7 @@ fn a_failed_history_leaves_the_rest_of_its_batch_committed() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let broken = spawn(&store, "broken");
     let healthy = spawn(&store, "healthy");
-    let journal = subagent_root(temp.path())
-        .join(&broken.subagent_id)
-        .join("history.journal");
-    std::fs::remove_file(&journal).unwrap();
+    let journal = stream::journal_path(&subagent_root(temp.path()).join(&broken.subagent_id));
     std::fs::create_dir(&journal).unwrap();
 
     let writes = [
