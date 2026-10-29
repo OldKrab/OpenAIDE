@@ -20,6 +20,19 @@ fn sanitizes_sensitive_runtime_log_fields() {
 }
 
 #[test]
+fn keeps_boolean_values_under_sensitive_keys() {
+    let value = sanitize_value(json!({
+        "error_recoverable": true,
+        "error": false,
+        "token": 123456,
+    }));
+
+    assert_eq!(value["error_recoverable"], true);
+    assert_eq!(value["error"], false);
+    assert_eq!(value["token"], "[redacted]");
+}
+
+#[test]
 fn rotating_log_keeps_only_the_configured_complete_generations() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("runtime.jsonl");

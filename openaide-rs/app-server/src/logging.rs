@@ -134,7 +134,8 @@ fn sanitize_value(value: Value) -> Value {
             values
                 .into_iter()
                 .map(|(key, value)| {
-                    if is_sensitive_key(&key) {
+                    // A boolean cannot carry free-form text, such as `error_recoverable`.
+                    if is_sensitive_key(&key) && !value.is_boolean() {
                         // Free-form diagnostic values cannot be made safe with keyword
                         // replacement: arbitrary user text may contain no recognizable marker.
                         (key, Value::String("[redacted]".to_string()))

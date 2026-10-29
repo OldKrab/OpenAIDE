@@ -51,6 +51,7 @@ impl RpcGateway {
         let (message_kind, method, request_id, client_request_id) =
             inbound_diagnostic_fields(&message);
         let (scope_kind, scope_task_id) = subscription_diagnostic_fields(&message);
+        let task_id = request_task_id(&message);
         let should_log = method.as_deref() != Some(CLIENT_HEARTBEAT);
         // A watching App Shell repeats this read all day; only failures are worth a line.
         // Forwarded client events are their own log lines; the request around them adds nothing.
@@ -68,6 +69,7 @@ impl RpcGateway {
                     "method": method.clone(),
                     "request_id": request_id.clone(),
                     "client_request_id": client_request_id.clone(),
+                    "task_id": task_id.clone(),
                     "scope_kind": scope_kind.clone(),
                     "scope_task_id": scope_task_id.clone(),
                 }),
@@ -90,6 +92,7 @@ impl RpcGateway {
                     "message_kind": message_kind,
                     "method": method,
                     "request_id": request_id,
+                    "task_id": task_id,
                     "scope_kind": scope_kind,
                     "scope_task_id": scope_task_id,
                     "outcome_kind": outcome_kind,
@@ -513,6 +516,14 @@ fn subscription_diagnostic_fields(
         _ => None,
     };
     (kind, task_id)
+}
+
+/// The Task a request acts on, so its lifecycle can be followed by Task id.
+fn request_task_id(message: &InboundProtocolMessage) -> Option<String> {
+    let InboundProtocolMessage::ClientRequest { params, .. } = message else {
+        return None;
+    };
+    params.get("taskId")?.as_str().map(str::to_owned)
 }
 
 fn gateway_outcome_diagnostic_fields(
