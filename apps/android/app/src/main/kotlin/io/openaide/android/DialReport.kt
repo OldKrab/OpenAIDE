@@ -61,7 +61,9 @@ internal class DialReport(
         fun errorReason(message: String?): String? {
             val text = message?.lowercase() ?: return null
             return when {
-                "alpn" in text -> "alpn"
+                // TLS alert 120 (no_application_protocol): the computer offers no ALPN this app
+                // speaks, so it runs another protocol major. The text never says "ALPN".
+                "alpn" in text || "error 120" in text || "known protocol" in text -> "alpn"
                 "address" in text || "discovery" in text -> "no_address"
                 "relay" in text -> "relay"
                 "timed out" in text || "timeout" in text -> "timed_out"

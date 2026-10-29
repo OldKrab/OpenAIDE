@@ -36,7 +36,13 @@ class DialReportTest {
     }
 
     @Test fun libraryErrorTextMapsToFixedWords() {
-        assertEquals("alpn", DialReport.errorReason("peer doesn't support any known protocol (ALPN)"))
+        // The text iroh reports when the computer runs another protocol major.
+        assertEquals(
+            "alpn",
+            DialReport.errorReason(
+                "aborted by peer: the cryptographic handshake failed: error 120: peer doesn't support any known protocol",
+            ),
+        )
         assertEquals("no_address", DialReport.errorReason("No addressing information available"))
         assertEquals("relay", DialReport.errorReason("relay connection failed"))
         assertEquals("timed_out", DialReport.errorReason("operation timed out"))
