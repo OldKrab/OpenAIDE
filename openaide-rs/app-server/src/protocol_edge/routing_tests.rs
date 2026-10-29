@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::subscription_diagnostic_fields;
+use super::{request_task_id, subscription_diagnostic_fields};
 use crate::protocol_edge::messages::InboundProtocolMessage;
 
 fn request(method: &str, params: serde_json::Value) -> InboundProtocolMessage {
@@ -39,5 +39,18 @@ fn a_subscription_is_logged_by_its_scope_kind_and_task() {
     assert_eq!(
         subscription_diagnostic_fields(&request("state/subscribe", json!({ "scope": 3 }))),
         (None, None)
+    );
+}
+
+#[test]
+fn a_request_is_logged_by_the_task_it_names() {
+    assert_eq!(
+        request_task_id(&request("task/open", json!({ "taskId": "task_1" }))),
+        Some("task_1".to_string())
+    );
+    assert_eq!(request_task_id(&request("task/list", json!({}))), None);
+    assert_eq!(
+        request_task_id(&request("task/open", json!({ "taskId": 3 }))),
+        None
     );
 }
