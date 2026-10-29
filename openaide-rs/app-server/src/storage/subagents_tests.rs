@@ -23,6 +23,8 @@ fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
     let seed = "x".repeat(1024 * 1024);
     store
         .append_subagent_message_part("task_1", "child-session", child_text(&seed))
+        .unwrap()
+        .wait()
         .unwrap();
     let journal = temp
         .path()
@@ -33,6 +35,8 @@ fn streamed_child_text_writes_only_the_new_output_and_survives_reopen() {
     for _ in 0..31 {
         store
             .append_subagent_message_part("task_1", "child-session", child_text(&"y".repeat(256)))
+            .unwrap()
+            .wait()
             .unwrap();
     }
     let written = std::fs::metadata(&journal).unwrap().len() - before;
@@ -96,6 +100,8 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
                     },
                     false,
                 )
+                .unwrap()
+                .wait()
                 .unwrap();
             assert!(
                 journal_len() > 0,
@@ -104,6 +110,8 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
         }
         reopened
             .append_subagent_message_part("task_1", "child-session", child_text("!"))
+            .unwrap()
+            .wait()
             .unwrap();
     }
     assert!(
@@ -112,6 +120,8 @@ fn previous_child_journal_accepts_mixed_updates_and_compacts_without_losing_hist
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("?"))
+        .unwrap()
+        .wait()
         .unwrap();
     drop(reopened);
 
@@ -161,6 +171,8 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
         }
         store
             .append_subagent_message_part("task_1", "child-session", child_text("x"))
+            .unwrap()
+            .wait()
             .unwrap();
     }
     drop(store);
@@ -177,6 +189,8 @@ fn interrupted_subagent_compaction_keeps_history_readable_and_appendable() {
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("!"))
+        .unwrap()
+        .wait()
         .unwrap();
     let history = reopened
         .subagent_history("task_1", &record.subagent_id)
@@ -212,6 +226,8 @@ fn a_message_update_journals_only_that_message() {
             "child-session",
             child_text(&"x".repeat(1024 * 1024)),
         )
+        .unwrap()
+        .wait()
         .unwrap();
     let history_dir = temp
         .path()
@@ -238,6 +254,8 @@ fn a_message_update_journals_only_that_message() {
                 },
                 true,
             )
+            .unwrap()
+            .wait()
             .unwrap();
         let written = journal_len() - before;
         assert!(written < 4096, "a small update wrote {written} bytes");
@@ -317,6 +335,8 @@ fn incomplete_subagent_append_preserves_accepted_history_and_allows_new_output()
         .unwrap();
     store
         .append_subagent_message_part("task_1", "child-session", child_text("accepted"))
+        .unwrap()
+        .wait()
         .unwrap();
     drop(store);
     let path = temp
@@ -341,6 +361,8 @@ fn incomplete_subagent_append_preserves_accepted_history_and_allows_new_output()
     );
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("!"))
+        .unwrap()
+        .wait()
         .unwrap();
     let history = reopened
         .subagent_history("task_1", &record.subagent_id)
@@ -398,6 +420,8 @@ fn nested_catalog_and_independent_history_survive_reopen() {
                     created_at: "2026-08-27T00:00:00Z".to_string(),
                 },
             )
+            .unwrap()
+            .wait()
             .unwrap();
     }
     store
@@ -482,6 +506,8 @@ fn subagent_user_chunks_form_one_prompt_in_history() {
                     attachments: Vec::new(),
                 },
             )
+            .unwrap()
+            .wait()
             .unwrap();
     }
 
@@ -524,6 +550,8 @@ fn legacy_codex_causal_root_prompt_is_hidden_from_child_history() {
             },
             false,
         )
+        .unwrap()
+        .wait()
         .unwrap();
     store
         .append_subagent_message(
@@ -542,8 +570,13 @@ fn legacy_codex_causal_root_prompt_is_hidden_from_child_history() {
             },
             false,
         )
+        .unwrap()
+        .wait()
         .unwrap();
 
+    // Loading normalizes what an older writer left.
+    drop(store);
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
     let history = store
         .subagent_history("task_1", &record.subagent_id)
         .unwrap();
@@ -588,6 +621,8 @@ fn subagent_history_pages_before_the_selected_cursor() {
                 },
                 false,
             )
+            .unwrap()
+            .wait()
             .unwrap();
     }
     let history = store
@@ -622,6 +657,8 @@ fn a_subagent_history_with_inline_images_moves_them_to_task_files_on_load() {
         .unwrap();
     store
         .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
+        .unwrap()
+        .wait()
         .unwrap();
     let task_dir = temp.path().join("task-store-v1/tasks/task_1");
     let history_dir = task_dir.join("subagents").join(&record.subagent_id);
@@ -684,6 +721,8 @@ fn a_subagent_image_reference_gains_its_size_on_load() {
         .unwrap();
     store
         .append_subagent_message_part("task_1", "child-session", child_text("Rendered:"))
+        .unwrap()
+        .wait()
         .unwrap();
     drop(store);
     let task_dir = temp.path().join("task-store-v1/tasks/task_1");
@@ -787,6 +826,8 @@ fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
             },
             false,
         )
+        .unwrap()
+        .wait()
         .unwrap();
     let plan = AgentPlan {
         entries: vec![AgentPlanEntry {
@@ -797,6 +838,8 @@ fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
     };
     store
         .set_subagent_plan("task_1", "child-session", plan.clone())
+        .unwrap()
+        .wait()
         .unwrap();
     store
         .record_subagent_permission_outcome(
@@ -848,6 +891,8 @@ fn plan_and_permission_changes_are_journaled_and_survive_reopen() {
                 entries: Vec::new(),
             },
         )
+        .unwrap()
+        .wait()
         .unwrap();
     drop(reopened);
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -891,11 +936,15 @@ fn a_schema_one_history_becomes_schema_two_before_its_first_message_frame() {
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text("first"))
+        .unwrap()
+        .wait()
         .unwrap();
     assert_eq!(schema(), 2, "the snapshot is republished as schema 2");
     assert_eq!(journal_len(), 0, "before any message frame is journaled");
     reopened
         .append_subagent_message_part("task_1", "child-session", child_text(" second"))
+        .unwrap()
+        .wait()
         .unwrap();
     assert!(journal_len() > 0, "a schema 2 history journals its changes");
     drop(reopened);
@@ -919,6 +968,8 @@ fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
     let dir = history_dir(temp.path(), &record.subagent_id);
     store
         .append_subagent_message_part("task_1", "child-session", child_text("small"))
+        .unwrap()
+        .wait()
         .unwrap();
     assert!(
         std::fs::metadata(dir.join("history.journal"))
@@ -940,6 +991,8 @@ fn a_change_larger_than_the_journal_budget_publishes_the_snapshot() {
             },
             false,
         )
+        .unwrap()
+        .wait()
         .unwrap();
     assert_eq!(
         std::fs::metadata(dir.join("history.journal"))

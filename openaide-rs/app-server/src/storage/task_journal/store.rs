@@ -8,6 +8,7 @@ use std::thread;
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
+use crate::storage::subagents::SubagentState;
 
 use super::artifact;
 use super::frame;
@@ -29,6 +30,7 @@ mod recovery;
 mod reduce;
 mod reset;
 mod semantic_noops;
+mod subagent_batch;
 mod usage;
 mod worker;
 pub use admission::CommitReceipt;
@@ -53,6 +55,7 @@ struct StoreInner {
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
     projection_load_lock: Arc<Mutex<()>>,
     artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
+    subagents: Arc<SubagentState>,
     tasks_root: PathBuf,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     failure_subscribers: Arc<Mutex<Vec<mpsc::Sender<TaskStorageFailure>>>>,
@@ -68,6 +71,7 @@ struct CommitContext {
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
     projection_load_lock: Arc<Mutex<()>>,
     artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
+    subagents: Arc<SubagentState>,
     faults: Arc<frame::FaultInjector>,
 }
 
@@ -132,6 +136,7 @@ impl TaskJournalStore {
         let projections = Arc::new(RwLock::new(initially_recovered));
         let projection_load_lock = Arc::new(Mutex::new(()));
         let artifact_heads = Arc::new(Mutex::new(HashMap::new()));
+        let subagents = Arc::new(SubagentState::default());
         let scheduler = Arc::new(Scheduler::new());
         let commit_subscribers = Arc::new(Mutex::new(Vec::new()));
         let failure_subscribers = Arc::new(Mutex::new(Vec::new()));
@@ -148,6 +153,7 @@ impl TaskJournalStore {
             projections: projections.clone(),
             projection_load_lock: projection_load_lock.clone(),
             artifact_heads: artifact_heads.clone(),
+            subagents: subagents.clone(),
             faults: faults.clone(),
         };
         let worker_scheduler = scheduler.clone();
@@ -190,6 +196,7 @@ impl TaskJournalStore {
                     projections,
                     projection_load_lock,
                     artifact_heads,
+                    subagents,
                     tasks_root,
                     worker: Mutex::new(Some(worker)),
                     failure_subscribers,
@@ -202,6 +209,11 @@ impl TaskJournalStore {
     }
 
     /// Subscribes to path-free storage failures used to stop unsafe live work.
+    /// Subagent catalogs and open histories, which this store's worker writes.
+    pub(crate) fn subagents(&self) -> &SubagentState {
+        &self.inner.subagents
+    }
+
     pub fn subscribe_failures(&self) -> Receiver<TaskStorageFailure> {
         let (sender, receiver) = mpsc::channel();
         self.inner
@@ -692,6 +704,7 @@ fn commit_batch(
         .insert(task_id.to_string(), next_task);
     Ok(Some(CommittedTaskBatch {
         task_id: task_id.to_string(),
+        subagent: None,
         journal_sequence: sequence,
         task_revision,
         task_snapshot_changed,
@@ -775,6 +788,7 @@ fn current_commit(
     };
     Ok(CommittedTaskBatch {
         task_id: task_id.to_string(),
+        subagent: None,
         journal_sequence: sequence,
         task_revision,
         task_snapshot_changed: false,

@@ -17,6 +17,7 @@ use crate::tasks::lifecycle::append_normalized_to_store;
 use crate::tasks::runtime_state::RuntimeState;
 
 mod commit;
+mod commit_publication;
 mod create_validation;
 mod message_lookup;
 mod observed_timing;
@@ -526,42 +527,7 @@ impl TaskMutations {
         let publication_notifier = notifier.clone();
         let publication_pending_text = pending_stream_text.clone();
         store.set_task_commit_handler(Arc::new(move |committed| {
-            if !committed.chat_text_appends.is_empty() {
-                let chat = committed
-                    .chat_text_appends
-                    .into_iter()
-                    .map(|append| {
-                        openaide_app_server_protocol::events::TaskChatChange::AppendText {
-                            message_id: append.message_id.into(),
-                            text: append.text,
-                        }
-                    })
-                    .collect();
-                publication_notifier.streamed_chat_changed(
-                    &committed.task_id,
-                    committed.task_revision,
-                    chat,
-                );
-            }
-            for change in committed.artifact_changes {
-                // A structured replacement and its same-revision terminal
-                // bytes must remain one atomic synchronous Tool delta. Other
-                // stream appends in the physical batch keep their async owner.
-                let synchronously_owned = committed.task_snapshot_changed
-                    && committed
-                        .replaced_artifact_ids
-                        .contains(&change.artifact_id);
-                if !synchronously_owned && !change.terminal_appends.is_empty() {
-                    publication_notifier.tool_detail_changed(
-                        &committed.task_id,
-                        change.artifact_id,
-                        change.artifact_sequence,
-                        change.terminal_appends,
-                    );
-                }
-            }
-            publication_pending_text
-                .complete(&committed.task_id, committed.streamed_text_write_count);
+            commit_publication::publish(&publication_notifier, &publication_pending_text, committed)
         }));
         Self {
             store,
@@ -574,25 +540,6 @@ impl TaskMutations {
 
     pub(crate) fn store(&self) -> &Store {
         &self.store
-    }
-
-    pub(crate) fn publish_subagent_catalog(
-        &self,
-        catalog: openaide_app_server_protocol::snapshot::SubagentCatalogSnapshot,
-    ) {
-        self.notifier.subagent_catalog_changed(catalog);
-    }
-
-    pub(crate) fn publish_subagent_history_change(
-        &self,
-        task_id: &str,
-        subagent_id: &str,
-        revision: u64,
-        chat: Vec<openaide_app_server_protocol::events::TaskChatChange>,
-        current_plan: Option<Option<openaide_app_server_protocol::snapshot::AgentPlanSnapshot>>,
-    ) {
-        self.notifier
-            .subagent_history_changed(task_id, subagent_id, revision, chat, current_plan);
     }
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {

@@ -232,8 +232,7 @@ impl TaskProductApi {
             ),
         )
         .with_native_catalog(native_catalog.clone())
-        .with_agent_statuses(agent_statuses)
-        .with_subscription_presence(task_subscription_presence.clone());
+        .with_agent_statuses(agent_statuses);
         let turn_acceptance = turn_runner.turn_acceptance();
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
@@ -282,7 +281,7 @@ impl TaskProductApi {
     }
 
     /// The presence the protocol subscription owner reports into. Retention and
-    /// recovery read it, and Subagent publication skips histories nobody watches.
+    /// recovery read it.
     pub(crate) fn task_subscription_presence(&self) -> TaskSubscriptionPresence {
         self.task_subscription_presence.clone()
     }

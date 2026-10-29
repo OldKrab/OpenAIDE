@@ -69,6 +69,7 @@ pub(super) fn clear(context: &CommitContext) -> Result<(), RuntimeError> {
         .expect("Task journal projections poisoned")
         .clear();
     artifact_heads.clear();
+    context.subagents.clear();
 
     remove_tombstone(&tombstone);
     Ok(())

@@ -66,7 +66,10 @@ fn legacy_subagent(root: &Path, frames: u64, text_bytes: usize) -> (Store, Strin
         journal.extend(serde_json::to_vec(&frame).unwrap());
         journal.push(b'\n');
     }
+    // An earlier process wrote these files, so this one has not opened them.
+    drop(store);
     std::fs::write(history_dir.join("history.journal"), journal).unwrap();
+    let store = Store::open(root.to_path_buf()).unwrap();
     (store, record.subagent_id, history_dir)
 }
 
@@ -114,6 +117,8 @@ fn a_journal_of_full_history_frames_becomes_the_snapshot_when_loaded() {
             },
             false,
         )
+        .unwrap()
+        .wait()
         .unwrap();
     assert_eq!(
         reopened

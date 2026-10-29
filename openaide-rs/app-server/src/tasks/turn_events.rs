@@ -7,7 +7,6 @@ mod questions;
 #[cfg(test)]
 mod released_subagent_tests;
 mod session;
-mod subagent_publication;
 #[cfg(test)]
 mod tests;
 mod text_chunks;
@@ -107,8 +106,6 @@ pub(crate) struct TaskSessionEventSink {
     server_requests: ServerRequestRuntime,
     /// Receives account limits an Agent reports on this session; they belong to the Agent.
     agent_statuses: AgentStatusCache,
-    /// Without it every Subagent change is published, as when nothing reports presence.
-    subscription_presence: Option<crate::state_sync::TaskSubscriptionPresence>,
     text_chunk_routes: TextChunkRoutes,
     subagent_text_chunk_routes: Mutex<HashMap<String, TextChunkRoutes>>,
     emission_lock: Mutex<()>,
@@ -128,7 +125,6 @@ impl TaskSessionEventSink {
             native_catalog: None,
             server_requests,
             agent_statuses: AgentStatusCache::default(),
-            subscription_presence: None,
             text_chunk_routes: TextChunkRoutes::new(session_id),
             subagent_text_chunk_routes: Mutex::default(),
             emission_lock: Mutex::new(()),
@@ -145,14 +141,6 @@ impl TaskSessionEventSink {
 
     pub(crate) fn with_agent_statuses(mut self, agent_statuses: AgentStatusCache) -> Self {
         self.agent_statuses = agent_statuses;
-        self
-    }
-
-    pub(crate) fn with_subscription_presence(
-        mut self,
-        subscription_presence: Option<crate::state_sync::TaskSubscriptionPresence>,
-    ) -> Self {
-        self.subscription_presence = subscription_presence;
         self
     }
 }
@@ -284,13 +272,8 @@ impl TaskSessionEventSink {
             return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
         if let AgentEvent::Subagent(subagent) = &event {
-            let interacted =
-                self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
-            self.upsert_session_tool(normalize_event(event, &now), &now)?;
-            if interacted {
-                self.publish_subagent_catalog()?;
-            }
-            return Ok(());
+            self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
+            return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
         self.append_session_message(normalize_event(event, &now), &now)
     }

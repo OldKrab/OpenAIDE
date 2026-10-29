@@ -28,7 +28,6 @@ pub struct TurnRunner {
     server_requests: ServerRequestRuntime,
     native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     agent_statuses: crate::agent::status_cache::AgentStatusCache,
-    subscription_presence: Option<crate::state_sync::TaskSubscriptionPresence>,
     cancel_grace_period: Arc<Mutex<Duration>>,
     turn_acceptance: TurnAcceptanceCoordinator,
     #[cfg(test)]
@@ -61,7 +60,6 @@ impl TurnRunner {
             server_requests,
             native_catalog: None,
             agent_statuses: crate::agent::status_cache::AgentStatusCache::default(),
-            subscription_presence: None,
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
             turn_acceptance: TurnAcceptanceCoordinator::default(),
             #[cfg(test)]
@@ -89,15 +87,6 @@ impl TurnRunner {
         agent_statuses: crate::agent::status_cache::AgentStatusCache,
     ) -> Self {
         self.agent_statuses = agent_statuses;
-        self
-    }
-
-    /// Lets session sinks skip publishing Subagent histories that no client watches.
-    pub(crate) fn with_subscription_presence(
-        mut self,
-        presence: crate::state_sync::TaskSubscriptionPresence,
-    ) -> Self {
-        self.subscription_presence = Some(presence);
         self
     }
 
@@ -637,8 +626,7 @@ impl TurnRunner {
                 self.server_requests.clone(),
             )
             .with_native_catalog(self.native_catalog.clone())
-            .with_agent_statuses(self.agent_statuses.clone())
-            .with_subscription_presence(self.subscription_presence.clone()),
+            .with_agent_statuses(self.agent_statuses.clone()),
         );
         self.agent
             .attach_session_event_sink(session, sink.clone() as Arc<dyn AgentSessionEventSink>)?;

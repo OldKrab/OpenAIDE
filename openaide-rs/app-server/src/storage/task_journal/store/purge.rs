@@ -72,6 +72,7 @@ pub(super) fn tombstoned_task(context: &CommitContext, task_id: &str) -> Result<
         .lock()
         .expect("Task artifact reconciliation poisoned")
         .retain(|(candidate_task_id, _), _| candidate_task_id != task_id);
+    context.subagents.forget_task(task_id);
 
     if tombstone.exists() {
         if let Err(error) = fs::remove_dir_all(&tombstone).and_then(|()| sync_directory(store_root))
