@@ -262,17 +262,11 @@ impl TaskProductApi {
         let mut stop_reason = "error";
         let outcome = (|| {
             loop {
+                // Healthy pages are summarized by the context terminal event; the Agent
+                // listing logs each page's boundary crossing under this operation id.
                 let page_id = uuid::Uuid::new_v4().to_string();
-                crate::logging::info(
-                    "native_session_context_page_started",
-                    serde_json::json!({
-                        "operation": "agent/list_sessions/page", "operation_id": page_id,
-                        "context_id": context_id, "refresh_id": refresh_id, "agent_id": agent_id,
-                        "project_id": project_id, "page_number": page_count + 1, "attempt": 1,
-                    }),
-                );
                 let page_started = Instant::now();
-                let page_outcome = (|| {
+                let page_outcome: Result<_, ProtocolError> = (|| {
                     let result = self
                         .native_catalog_refresh
                         .list_sessions(
@@ -315,19 +309,18 @@ impl TaskProductApi {
                     )?;
                     Ok((result, new_identity_count))
                 })();
-                let fields = serde_json::json!({
-                    "operation": "agent/list_sessions/page", "operation_id": page_id,
-                    "context_id": context_id, "refresh_id": refresh_id, "attempt": 1,
-                    "outcome": if page_outcome.is_ok() { "completed" } else { "failed" },
-                    "duration_ms": page_started.elapsed().as_millis(),
-                    "error_kind": page_outcome.as_ref().err().map(|error: &ProtocolError| &error.code),
-                    "returned_count": page_outcome.as_ref().ok().map(|(page, _)| page.sessions.len()),
-                    "eligible_count": visible_session_ids.len(), "authoritative": authoritative,
-                });
-                if page_outcome.is_ok() {
-                    crate::logging::info("native_session_context_page_published", fields);
-                } else {
-                    crate::logging::warn("native_session_context_page_failed", fields);
+                if let Err(error) = &page_outcome {
+                    crate::logging::warn(
+                        "native_session_context_page_failed",
+                        serde_json::json!({
+                            "operation": "agent/list_sessions/page", "operation_id": page_id,
+                            "context_id": context_id, "refresh_id": refresh_id, "attempt": 1,
+                            "outcome": "failed", "page_number": page_count + 1,
+                            "duration_ms": page_started.elapsed().as_millis(),
+                            "error_kind": &error.code,
+                            "eligible_count": visible_session_ids.len(), "authoritative": authoritative,
+                        }),
+                    );
                 }
                 let (result, new_identity_count) = page_outcome?;
                 // A local cycle/no-progress stop is not the Agent's terminal cursor.

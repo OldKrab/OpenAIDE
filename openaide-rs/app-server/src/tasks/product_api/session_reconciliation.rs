@@ -141,13 +141,13 @@ impl TaskProductApi {
         if removed_count > 0 {
             self.task_notifier
                 .navigation_project_entries_changed(project_id.to_string());
+            crate::logging::info(
+                "native_session_history_reconciled",
+                serde_json::json!({
+                    "project_id": project_id, "removed_count": removed_count, "evidence": "complete_listing",
+                }),
+            );
         }
-        crate::logging::info(
-            "native_session_history_reconciled",
-            serde_json::json!({
-                "project_id": project_id, "removed_count": removed_count, "evidence": "complete_listing",
-            }),
-        );
         Ok(())
     }
 

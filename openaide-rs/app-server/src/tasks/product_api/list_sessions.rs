@@ -27,6 +27,8 @@ pub(super) const MAX_CONCURRENT_CATALOG_LISTINGS: usize = 20;
 /// starts at dispatch. Waiting here instead of in the adapter keeps a refresh over
 /// many workspaces from timing out its own later listings.
 pub(super) const MAX_CONCURRENT_AGENT_LISTINGS: usize = 4;
+/// A shorter wait for a listing slot does not explain visible latency.
+const LISTING_QUEUE_WAIT_LOG_MS: u128 = 100;
 
 /// Listings in flight, in total and by Agent.
 #[derive(Default)]
@@ -91,13 +93,7 @@ impl NativeCatalogRefreshCoordinator {
         let started_at = Instant::now();
         let operation_id = request.operation_id.clone();
         let agent_id = request.agent_id.clone();
-        crate::logging::info(
-            "native_session_page_requested",
-            serde_json::json!({
-                "operation": "agent/list_sessions/page", "operation_id": operation_id,
-                "agent_id": agent_id, "attempt": 1, "has_cursor": request.cursor.is_some(),
-            }),
-        );
+        let has_cursor = request.cursor.is_some();
         let (slots, available) = &*self.listing_slots;
         let mut slots = available
             .wait_while(
@@ -114,19 +110,21 @@ impl NativeCatalogRefreshCoordinator {
         };
         let queue_ms = started_at.elapsed().as_millis();
         let result = gateway.list_sessions(request);
+        // The Agent listing logs every page; this layer adds only the shared-budget
+        // wait and the failure, so a healthy refresh stays quiet.
         let fields = serde_json::json!({
             "operation": "agent/list_sessions/page", "operation_id": operation_id,
-            "agent_id": agent_id, "attempt": 1,
+            "agent_id": agent_id, "attempt": 1, "has_cursor": has_cursor,
             "outcome": if result.is_ok() { "completed" } else { "failed" },
             "queue_ms": queue_ms, "duration_ms": started_at.elapsed().as_millis(),
             "returned_count": result.as_ref().ok().map(|page| page.sessions.len()),
             "authoritative": result.as_ref().ok().map(|page| page.authoritative),
             "error_kind": result.as_ref().err().map(|error| error.reason()),
         });
-        if result.is_ok() {
-            crate::logging::info("native_session_page_completed", fields);
-        } else {
+        if result.is_err() {
             crate::logging::warn("native_session_page_failed", fields);
+        } else if queue_ms >= LISTING_QUEUE_WAIT_LOG_MS {
+            crate::logging::info("native_session_page_queued", fields);
         }
         result
     }
