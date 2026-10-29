@@ -220,6 +220,7 @@ impl TaskProductApi {
         let native_catalog =
             crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone())?;
         let session_operations = crate::tasks::task_operation::TaskOperationCoordinator::default();
+        let task_subscription_presence = TaskSubscriptionPresence::default();
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
@@ -265,7 +266,7 @@ impl TaskProductApi {
             native_catalog_refresh: Default::default(),
             storage_maintenance: Default::default(),
             scheduled_queue: Default::default(),
-            task_subscription_presence: Default::default(),
+            task_subscription_presence,
             native_adoption: Arc::new(Mutex::new(())),
             server_requests,
             task_notifier: notifier,
@@ -279,14 +280,10 @@ impl TaskProductApi {
         Ok(api)
     }
 
-    /// Connects Task-view presence from the protocol subscription owner to
-    /// background recovery without making Frontend timestamps authoritative.
-    pub(crate) fn with_task_subscription_presence(
-        mut self,
-        task_subscription_presence: TaskSubscriptionPresence,
-    ) -> Self {
-        self.task_subscription_presence = task_subscription_presence;
-        self
+    /// The presence the protocol subscription owner reports into. Retention and
+    /// recovery read it.
+    pub(crate) fn task_subscription_presence(&self) -> TaskSubscriptionPresence {
+        self.task_subscription_presence.clone()
     }
 
     pub(super) fn publish_history_sync(
@@ -459,34 +456,54 @@ impl TaskProductApi {
         )
     }
 
+    /// Opens like `task/open`, then reads the Task the way a subscriber would see it,
+    /// so tests can assert what the open changed.
     pub(crate) fn open_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskOpenParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.open_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
-        )
+        )?;
+        self.subscriber_view_for_test(&task_id)
     }
 
+    /// Marks read like `task/mark_read`, then reads the Task as a subscriber sees it.
     pub(crate) fn mark_read_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.mark_task_read(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
-        )
+        )?;
+        self.subscriber_view_for_test(&task_id)
     }
 
+    /// Reloads like `task/reloadNativeSession`, then reads the Task as a subscriber sees it.
     pub(crate) fn reload_native_session_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskReloadNativeSessionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.reload_native_session(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
+        )?;
+        self.subscriber_view_for_test(&task_id)
+    }
+
+    fn subscriber_view_for_test(&self, task_id: &str) -> Result<TaskSnapshot, ProtocolError> {
+        let snapshot = crate::tasks::snapshot::build_snapshot(
+            &self.store,
+            task_id,
+            crate::chat_history::ChatHistoryPolicy::default().task_snapshot_tail_limit(),
         )
+        .map_err(runtime_error)?;
+        self.project_task_snapshot(snapshot)
     }
 
     pub(crate) fn set_config_option_for_test(

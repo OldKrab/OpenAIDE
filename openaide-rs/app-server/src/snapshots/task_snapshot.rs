@@ -19,6 +19,7 @@ use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 
+mod chat_image;
 mod tool_image_preview;
 
 /// Projects one committed lazy artifact into the complete replica baseline.
@@ -55,6 +56,7 @@ use super::task_navigation::{
 
 mod chat_projection;
 mod readiness;
+mod resume;
 
 pub trait TaskSnapshotSource: Send + Sync {
     fn list(
@@ -73,6 +75,16 @@ pub trait TaskSnapshotSource: Send + Sync {
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, ProtocolError>;
+
+    /// Reads a Task's resume basis on behalf of a client with `open_for_client`'s
+    /// access checks, without reading Chat (ADR-0073).
+    fn resume_basis_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+    ) -> Result<Option<crate::snapshots::TaskResumeBasis>, ProtocolError> {
+        Ok(None)
+    }
 
     /// Reads one expanded Tool detail after enforcing Task access for the client.
     fn tool_detail_for_client(
@@ -117,6 +129,16 @@ pub trait TaskSnapshotSource: Send + Sync {
         _artifact_id: &str,
     ) -> Result<Option<ToolImagePreview>, ProtocolError> {
         Ok(None)
+    }
+
+    /// Reads one stored Chat image of a Task the client may access (ADR-0075).
+    fn chat_image_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _image_id: &str,
+    ) -> Result<Vec<u8>, ProtocolError> {
+        Err(chat_image::not_found())
     }
 
     /// Resolves the Task Workspace for a File Viewer open without exposing a client path authority.
@@ -243,6 +265,14 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         self.open_authorized(task_id, |task| {
             crate::tasks::access::require_client_task_access(task, client_instance_id)
         })
+    }
+
+    fn resume_basis_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<Option<crate::snapshots::TaskResumeBasis>, ProtocolError> {
+        self.resume_basis(client_instance_id, task_id).map(Some)
     }
 
     fn tool_detail_for_client(
@@ -392,6 +422,15 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         Ok(tool_image_preview::load_tool_image_preview(&task, &details))
     }
 
+    fn chat_image_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        image_id: &str,
+    ) -> Result<Vec<u8>, ProtocolError> {
+        chat_image::load(&self.store, client_instance_id, task_id, image_id)
+    }
+
     fn workspace_root_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -466,15 +505,10 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     snapshot: StoredTaskSnapshot,
     history_sync: TaskHistorySyncSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
-    let history_sync = match (
+    let history_sync = effective_history_sync(
         history_sync,
-        snapshot.native_session_reload_requirement.as_ref(),
-    ) {
-        (TaskHistorySyncSnapshot::Idle { generation }, Some(_)) => {
-            TaskHistorySyncSnapshot::ReloadAvailable { generation }
-        }
-        (history_sync, _) => history_sync,
-    };
+        snapshot.native_session_reload_requirement.is_some(),
+    );
     let lifecycle = match snapshot.lifecycle {
         crate::storage::records::TaskLifecycle::Prepared { .. } => {
             openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared
@@ -595,6 +629,20 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
         pending_requests: Vec::new(),
         recovery: None,
     })
+}
+
+/// A durable reload requirement surfaces as an available reload while the
+/// in-memory coordinator is otherwise idle.
+pub(crate) fn effective_history_sync(
+    history_sync: TaskHistorySyncSnapshot,
+    reload_required: bool,
+) -> TaskHistorySyncSnapshot {
+    match history_sync {
+        TaskHistorySyncSnapshot::Idle { generation } if reload_required => {
+            TaskHistorySyncSnapshot::ReloadAvailable { generation }
+        }
+        history_sync => history_sync,
+    }
 }
 
 pub(crate) fn project_subagent_catalog(

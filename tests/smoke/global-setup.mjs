@@ -32,6 +32,23 @@ export default async function globalSetup() {
       desktop,
       "--emptyOutDir",
     ]);
+    // The Desktop test page has its own Vite config; the sandboxed renderers come from the
+    // shared Frontend build, as the Web build gets them.
+    for (const renderer of ["mermaid", "pdf"]) {
+      await step(`frontend_desktop_${renderer}_renderer`, "npm", [
+        "exec",
+        "--workspace",
+        "openaide-frontend",
+        "vite",
+        "--",
+        "build",
+        "--config",
+        `vite.${renderer}-renderer.config.ts`,
+        "--outDir",
+        desktop,
+        "--emptyOutDir=false",
+      ]);
+    }
     await step("app_server", "cargo", ["build", "-p", "openaide-app-server"]);
   } catch (error) {
     await rm(root, { recursive: true, force: true });

@@ -13,14 +13,14 @@ use openaide_app_server_protocol::task::{
     ActivityToolOutput as ProtocolActivityToolOutput,
     ActivityToolValue as ProtocolActivityToolValue, ToolDetailSnapshot,
 };
-use regex::Regex;
-use std::sync::LazyLock;
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
     AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ChatTiming, CompactionStatus,
     NormalizedMessage, ObservedSpan, QuestionAction, QuestionState,
 };
+use crate::storage::chat_images::ImageReference;
+use openaide_app_server_protocol::snapshot::ImageDimensions;
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
     let (role, status, parts) = project_message(&message.message);
@@ -58,7 +58,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             let mut parts =
                 Vec::with_capacity(usize::from(!text.trim().is_empty()) + attachments.len());
             if !text.trim().is_empty() {
-                parts.extend(project_legacy_user_text(text));
+                parts.push(MessagePart::Text { text: text.clone() });
             }
             parts.extend(
                 attachments
@@ -74,7 +74,10 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 AgentMessageRole::Thought => ChatRole::System,
             },
             ChatItemStatus::Complete,
-            parts.iter().map(project_agent_message_part).collect(),
+            parts
+                .iter()
+                .filter_map(project_agent_message_part)
+                .collect(),
         ),
         NormalizedMessage::Activity {
             title,
@@ -177,73 +180,22 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
     }
 }
 
-/// Converts the retired inline data-Image syntax at the App Server boundary so
-/// every frontend receives the same typed Image representation.
-fn project_legacy_user_text(text: &str) -> Vec<MessagePart> {
-    static DATA_IMAGE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\[@image\]\((data:(image/[a-z0-9.+-]+);base64,[a-z0-9+/=\s]+)\)")
-            .expect("legacy data Image regex must compile")
-    });
-
-    let mut parts = Vec::new();
-    let mut end = 0;
-    for captures in DATA_IMAGE.captures_iter(text) {
-        let Some(matched) = captures.get(0) else {
-            continue;
-        };
-        if matched.start() > end {
-            parts.push(MessagePart::Text {
-                text: text[end..matched.start()].to_string(),
-            });
-        }
-        let Some(data_url) = captures.get(1) else {
-            continue;
-        };
-        let Some(media_type) = captures.get(2) else {
-            continue;
-        };
-        parts.push(MessagePart::Image {
-            media_type: media_type.as_str().to_ascii_lowercase(),
-            data_url: data_url
-                .as_str()
-                .chars()
-                .filter(|character| !character.is_whitespace())
-                .collect(),
-            uri: None,
-        });
-        end = matched.end();
-    }
-    if end < text.len() {
-        parts.push(MessagePart::Text {
-            text: text[end..].to_string(),
-        });
-    }
-    if parts.is_empty() {
-        parts.push(MessagePart::Text {
-            text: text.to_string(),
-        });
-    }
-    parts
-}
-
+/// Stored Chat holds images as references (ADR-0075); hydration moved any
+/// inline bytes out of stored history. A mutation's draft still holds the bytes
+/// it received, so it projects the reference the journal writer will store.
 fn project_user_attachment(index: usize, attachment: &Attachment) -> MessagePart {
     if attachment.kind == "image" {
-        let media_type = attachment
-            .payload
-            .as_ref()
-            .and_then(|payload| payload.get("mimeType"))
-            .and_then(serde_json::Value::as_str);
-        let data = attachment
-            .payload
-            .as_ref()
-            .and_then(|payload| payload.get("data"))
-            .and_then(serde_json::Value::as_str);
-        if let (Some(media_type), Some(data)) = (media_type, data) {
-            return MessagePart::Image {
-                media_type: media_type.to_string(),
-                data_url: format!("data:{media_type};base64,{data}"),
-                uri: None,
-            };
+        let media_type = attachment_payload_string(attachment, "mimeType");
+        let reference = match crate::storage::chat_images::attachment_image_id(attachment) {
+            Some(image_id) => Some(ImageReference {
+                image_id,
+                size_bytes: attachment_payload_u64(attachment, "sizeBytes").unwrap_or_default(),
+                dimensions: crate::storage::chat_images::attachment_dimensions(attachment),
+            }),
+            None => crate::storage::chat_images::inline_attachment_reference(attachment),
+        };
+        if let (Some(media_type), Some(reference)) = (media_type, reference) {
+            return project_image(media_type, reference, None);
         }
     }
     MessagePart::Attachment {
@@ -251,18 +203,49 @@ fn project_user_attachment(index: usize, attachment: &Attachment) -> MessagePart
     }
 }
 
-fn project_agent_message_part(content: &AgentMessagePart) -> MessagePart {
-    match content {
+/// Returns `None` only for an Image without a stored reference, which the
+/// commit and hydration invariants rule out; Chat then omits it rather than
+/// naming bytes that do not exist.
+fn project_image(
+    media_type: String,
+    reference: ImageReference,
+    uri: Option<String>,
+) -> MessagePart {
+    MessagePart::Image {
+        media_type,
+        image_id: reference.image_id,
+        size_bytes: reference.size_bytes,
+        dimensions: reference
+            .dimensions
+            .map(|(width, height)| ImageDimensions { width, height }),
+        uri,
+    }
+}
+
+fn project_agent_message_part(content: &AgentMessagePart) -> Option<MessagePart> {
+    Some(match content {
         AgentMessagePart::Text { text } => MessagePart::Text { text: text.clone() },
         AgentMessagePart::Image {
             media_type,
             data,
+            image_id,
+            size_bytes,
+            width,
+            height,
             uri,
-        } => MessagePart::Image {
-            media_type: media_type.clone(),
-            data_url: format!("data:{media_type};base64,{data}"),
-            uri: uri.clone(),
-        },
+        } => {
+            // A draft holds the Agent's bytes until the journal writer stores them.
+            let reference = match image_id {
+                Some(image_id) => ImageReference {
+                    image_id: image_id.clone(),
+                    size_bytes: size_bytes.unwrap_or_default(),
+                    dimensions: width.zip(*height),
+                },
+                None => crate::storage::chat_images::inline_reference(data)
+                    .filter(|_| !data.is_empty())?,
+            };
+            project_image(media_type.clone(), reference, uri.clone())
+        }
         AgentMessagePart::Resource {
             uri,
             name,
@@ -289,7 +272,7 @@ fn project_agent_message_part(content: &AgentMessagePart) -> MessagePart {
             media_type: media_type.clone(),
             uri: uri.clone(),
         },
-    }
+    })
 }
 
 fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
@@ -616,7 +599,7 @@ fn attachment_snapshot(index: usize, attachment: &Attachment) -> AttachmentSnaps
         attachment_id: format!("legacy-attachment-{index}").into(),
         kind: attachment_kind(attachment),
         label: attachment.label.clone(),
-        preview_url: attachment_preview_url(attachment, media_type.as_deref()),
+        preview_image_id: crate::storage::chat_images::attachment_image_id(attachment),
         media_type,
         size_bytes: attachment_payload_u64(attachment, "sizeBytes"),
     }
@@ -627,15 +610,6 @@ fn attachment_kind(attachment: &Attachment) -> AttachmentKind {
         "embedded_snapshot" | "image" => AttachmentKind::EmbeddedSnapshot,
         _ => AttachmentKind::FileReference,
     }
-}
-
-fn attachment_preview_url(attachment: &Attachment, media_type: Option<&str>) -> Option<String> {
-    let media_type = media_type?;
-    if !media_type.starts_with("image/") {
-        return None;
-    }
-    attachment_payload_string(attachment, "data")
-        .map(|data| format!("data:{media_type};base64,{data}"))
 }
 
 fn attachment_payload_string(attachment: &Attachment, key: &str) -> Option<String> {

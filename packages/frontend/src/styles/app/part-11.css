@@ -460,3 +460,30 @@ body[data-input-modality="pointer"] button:focus-visible {
     background: var(--oa-raised);
   }
 }
+
+/* Phone top bar: the Project files entry is an icon with a count. An open panel or the Project
+   page has its own header, so the bar gives way to it. */
+@media (max-width: 760px) {
+  body[data-shell="web"] .web-workbench-shell:has(.task-work-stack[data-file-viewer="open"], .project-files-page) > .mobile-workbench-bar {
+    display: none;
+  }
+  body[data-shell="web"] .mobile-workbench-bar .project-files-entry {
+    position: relative;
+    border: 0;
+  }
+  body[data-shell="web"] .mobile-workbench-bar .project-files-entry-badge {
+    position: absolute;
+    top: 5px;
+    right: 3px;
+    display: block;
+    min-width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--oa-focus);
+    color: var(--oa-bg);
+    font: 600 10px/16px var(--oa-ui-font);
+    text-align: center;
+  }
+}

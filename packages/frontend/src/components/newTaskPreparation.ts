@@ -2,7 +2,6 @@ import {
   TASK_ACQUIRE,
   TASK_ACQUIRE_IN_WORKTREE,
   TASK_RELEASE,
-  TASK_OPEN,
   type BackendConnection,
   type TaskId,
   type TaskSnapshot as ProtocolTaskSnapshot,
@@ -59,18 +58,16 @@ export async function prepareNewTask(
     await discardPreparedTask(preparedTask.task.taskId as TaskId);
     preparedTask = undefined;
   }
-  if (!preparedTask && options.reuseSnapshot !== false && state.snapshot && !state.snapshot.task.has_messages) {
-    const staleOrReusableTaskId = state.snapshot.task.task_id as TaskId;
-    if (preparedSnapshotMatchesSelection(state)) {
-      const openedTask = await request(TASK_OPEN, { taskId: staleOrReusableTaskId }).then((result) => result.task);
-      if (!openedTask || !preparedProtocolTaskMatchesSelection(openedTask, state)) {
-        await discardPreparedTask(staleOrReusableTaskId);
-      } else {
-        preparedTask = openedTask;
-      }
-    } else {
-      await discardPreparedTask(staleOrReusableTaskId);
-    }
+  // A matching empty Task needs no separate read: `task/acquire` returns the Prepared
+  // Task this client already leases for the same context.
+  if (
+    !preparedTask
+    && options.reuseSnapshot !== false
+    && state.snapshot
+    && !state.snapshot.task.has_messages
+    && !preparedSnapshotMatchesSelection(state)
+  ) {
+    await discardPreparedTask(state.snapshot.task.task_id as TaskId);
   }
   preparedTask ??= state.newTask.selection.worktreeId
     ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task

@@ -131,14 +131,11 @@ export async function reloadNativeSessionIntent(
   const taskId = snapshot.task.task_id;
   const request = dependencies.backendConnection?.request;
   if (!request) throw new Error("App Server connection unavailable.");
-  const result = await request(TASK_RELOAD_NATIVE_SESSION, {
+  // The reply is an acknowledgement (ADR-0074); the replayed history arrives on the
+  // Task subscription.
+  await request(TASK_RELOAD_NATIVE_SESSION, {
     taskId: taskId as TaskId,
     clientMutationId: createReloadNativeSessionMutationId(),
-  });
-  dependencies.dispatch({
-    type: "snapshot",
-    snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-    intent: "refresh",
   });
 }
 

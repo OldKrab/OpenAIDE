@@ -6,6 +6,8 @@ import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
 import { createInitialState, type AppState } from "../state/store";
 import type { FrontendShell } from "../services/frontendShell";
+import { TerminalPageHost } from "./terminals/TerminalPageHost";
+import type { TerminalSurface } from "./terminals/terminalSurface";
 
 type TestController = AppController & { state: AppState };
 
@@ -18,6 +20,7 @@ const surfaceMocks = vi.hoisted(() => ({
   renderRealSidebar: false,
   settings: vi.fn(() => null),
   sidebar: vi.fn((_props?: unknown, _context?: unknown) => null),
+  terminalSurface: undefined as TerminalSurface | undefined,
   task: vi.fn(() => null),
   taskLoading: vi.fn(() => null),
   updateTaskSurfaceTitle: vi.fn(),
@@ -33,11 +36,14 @@ function latestMockProps<T>(mock: { mock: { calls: unknown[][] } }) {
 
 vi.mock("./Sidebar", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./Sidebar")>();
-  const { createElement } = await import("react");
+  const { createElement, useContext } = await import("react");
+  const { TerminalSurfaceContext } = await import("./terminals/terminalSurface");
   return {
     ...actual,
     Sidebar: (props: React.ComponentProps<typeof actual.Sidebar>, context: unknown) => {
       surfaceMocks.sidebar(props, context);
+      // The Project menu opens the Terminal page through this context.
+      surfaceMocks.terminalSurface = useContext(TerminalSurfaceContext);
       return surfaceMocks.renderRealSidebar ? createElement(actual.Sidebar, props) : null;
     },
   };
@@ -77,6 +83,7 @@ describe("AppSurfaces callback wiring", () => {
     surfaceMocks.taskLoading.mockClear();
     surfaceMocks.updateTaskSurfaceTitle.mockClear();
     frontendShellMocks.current = undefined;
+    surfaceMocks.terminalSurface = undefined;
   });
 
   afterEach(() => {
@@ -111,6 +118,26 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("leaves the Terminal page for a Task Navigation action that keeps the route", () => {
+    frontendShellMocks.current = { terminals: { socketUrl: () => "" } } as unknown as Partial<FrontendShell>;
+    const controller = webControllerFor("task");
+    const tree = render(controller);
+    const sidebarProps = () => latestMockProps<ComponentProps<typeof import("./Sidebar").Sidebar>>(surfaceMocks.sidebar)!;
+    const openTerminalPage = () => act(() => surfaceMocks.terminalSurface!.openPage({ projectId: "project_1" }));
+    const pageTarget = () => tree.root.findByType(TerminalPageHost).props.target;
+
+    openTerminalPage();
+    expect(pageTarget()).toEqual({ projectId: "project_1" });
+    act(() => sidebarProps().onNewTask());
+    expect(pageTarget()).toBeUndefined();
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalled();
+
+    openTerminalPage();
+    act(() => sidebarProps().onOpenTask("task_1"));
+    expect(pageTarget()).toBeUndefined();
+    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_1");
   });
 
   it("passes navigation callbacks to the sidebar", () => {
@@ -1654,6 +1681,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
         loadToolImagePreview: vi.fn(async () => undefined),
+        loadChatImage: vi.fn(async () => "aW1hZ2U="),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         moveAttachment: vi.fn(),

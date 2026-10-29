@@ -18,21 +18,53 @@ use super::{protocol_error_from_runtime, AgentListSessionsWorkflow, TaskProductA
 #[derive(Clone, Default)]
 pub(super) struct NativeCatalogRefreshCoordinator {
     state: Arc<Mutex<NativeCatalogRefreshState>>,
-    listing_slots: Arc<(Mutex<usize>, Condvar)>,
+    listing_slots: Arc<(Mutex<ListingSlots>, Condvar)>,
 }
 
 pub(super) const MAX_CONCURRENT_CATALOG_LISTINGS: usize = 20;
+
+/// One Agent answers its listings from one adapter process, whose request timeout
+/// starts at dispatch. Waiting here instead of in the adapter keeps a refresh over
+/// many workspaces from timing out its own later listings.
+pub(super) const MAX_CONCURRENT_AGENT_LISTINGS: usize = 4;
+
+/// Listings in flight, in total and by Agent.
+#[derive(Default)]
+struct ListingSlots {
+    total: usize,
+    by_agent: HashMap<String, usize>,
+}
+
+impl ListingSlots {
+    fn has_room_for(&self, agent_id: &str) -> bool {
+        self.total < MAX_CONCURRENT_CATALOG_LISTINGS
+            && self.by_agent.get(agent_id).copied().unwrap_or_default()
+                < MAX_CONCURRENT_AGENT_LISTINGS
+    }
+}
 
 /// How long after an App Server write the Agent's listed timestamp may still trail it.
 const OWN_ACTIVITY_TOLERANCE_MS: i128 = 5_000;
 
 /// A permit spans one Agent request; unwinding also releases capacity.
-struct CatalogListingPermit<'a>(&'a (Mutex<usize>, Condvar));
+struct CatalogListingPermit<'a> {
+    slots: &'a (Mutex<ListingSlots>, Condvar),
+    agent_id: &'a str,
+}
 
 impl Drop for CatalogListingPermit<'_> {
     fn drop(&mut self) {
-        *self.0 .0.lock().expect("catalog listing slots poisoned") -= 1;
-        self.0 .1.notify_one();
+        let mut slots = self.slots.0.lock().expect("catalog listing slots poisoned");
+        slots.total -= 1;
+        if let Some(active) = slots.by_agent.get_mut(self.agent_id) {
+            *active -= 1;
+            if *active == 0 {
+                slots.by_agent.remove(self.agent_id);
+            }
+        }
+        drop(slots);
+        // Waiters differ in which Agent they need room for, so wake them all.
+        self.slots.1.notify_all();
     }
 }
 
@@ -66,16 +98,20 @@ impl NativeCatalogRefreshCoordinator {
                 "agent_id": agent_id, "attempt": 1, "has_cursor": request.cursor.is_some(),
             }),
         );
-        let (active, available) = &*self.listing_slots;
-        let mut active = available
+        let (slots, available) = &*self.listing_slots;
+        let mut slots = available
             .wait_while(
-                active.lock().expect("catalog listing slots poisoned"),
-                |active| *active >= MAX_CONCURRENT_CATALOG_LISTINGS,
+                slots.lock().expect("catalog listing slots poisoned"),
+                |slots| !slots.has_room_for(&agent_id),
             )
             .expect("catalog listing slots poisoned");
-        *active += 1;
-        drop(active);
-        let _permit = CatalogListingPermit(&self.listing_slots);
+        slots.total += 1;
+        *slots.by_agent.entry(agent_id.clone()).or_default() += 1;
+        drop(slots);
+        let _permit = CatalogListingPermit {
+            slots: &self.listing_slots,
+            agent_id: &agent_id,
+        };
         let queue_ms = started_at.elapsed().as_millis();
         let result = gateway.list_sessions(request);
         let fields = serde_json::json!({

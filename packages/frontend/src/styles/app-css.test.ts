@@ -166,6 +166,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-agent-block > \.chat-message-actions\s*{[^}]*position:\s*absolute;[^}]*inset-inline-end:\s*0;[^}]*inset-block-end:\s*0;[^}]*min-height:\s*0;/);
     expect(appCss).toMatch(/\.chat-agent-block:hover \.chat-message-actions,\s*\.chat-agent-block:focus-within \.chat-message-actions,\s*\.chat-user-block:hover \.chat-message-actions,\s*\.chat-user-block:focus-within \.chat-message-actions\s*{\s*opacity:\s*1;/);
     expect(appCss).toMatch(/\.chat-message-action\s*{[^}]*width:\s*20px;[^}]*min-height:\s*16px;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
+    expect(appCss).toMatch(/@media \(min-width: 761px\) and \(hover: hover\) and \(pointer: fine\)\s*{\s*\.chat-agent-block:has\(> \.chat-message-actions \.chat-action-time\):not\(:has\(> \.chat-agent:nth-last-child\(2\) > p:last-child\)\)\s*{\s*padding-block-end:\s*20px;/);
     expect(appCss).not.toMatch(/\.message-list-virtual-row > \.activity-group\s*{[^}]*margin-block-end:/);
     expect(appCss).toMatch(/\.activity-group:not\(\.open\)\s*{[^}]*gap:\s*0;/);
   });

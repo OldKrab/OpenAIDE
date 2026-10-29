@@ -14,7 +14,8 @@
   font: inherit;
   font-size: 12px;
   gap: 5px;
-  max-width: 24ch;
+  /* Room for a short delegated task such as "Inventory server and HA devices". */
+  max-width: 32ch;
   min-height: 28px;
   min-width: 0;
   padding: 4px 7px;
@@ -70,6 +71,9 @@
 
 .oa-popup-surface.subagent-menu {
   --oa-popup-content-max-height: min(520px, calc(100dvh - 24px));
+  /* One column no wider than the menu, so a long delegated task truncates instead of
+     pushing its status and check past the edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   padding: 6px;
   width: min(380px, calc(100vw - 16px));

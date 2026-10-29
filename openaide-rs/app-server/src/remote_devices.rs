@@ -19,6 +19,7 @@ mod bridge;
 pub mod edge;
 mod host_name;
 mod pairing_code;
+mod relay_check;
 mod store;
 
 use pairing_code::{clamp_label, InviteCode, JoinCode, PairingCodeError, INVITE_SECRET_LEN};

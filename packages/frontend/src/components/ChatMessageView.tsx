@@ -3,7 +3,13 @@ import { memo, useRef, useState } from "react";
 import type { ActivityStep, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AgentMarkdown } from "./AgentMarkdown";
-import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
+import {
+  AttachmentImagePreviewLightbox,
+  chatImagePreview,
+  storedChatImageReference,
+  type AttachmentImagePreviewSource,
+} from "./AttachmentImagePreview";
+import { storedChatImageSize, StoredChatImagePlaceholder, useStoredChatImage } from "./StoredChatImage";
 import { CompactionView } from "./CompactionView";
 import { SentClock, StoppedTurnDuration, TurnDuration, formatClockTime, settledSpanSeconds } from "./timeMarks";
 import { ChatActivityView } from "./ChatActivityView";
@@ -265,6 +271,7 @@ function UserAttachments({
       attachments={attachments.map((attachment, index) => ({
         id: attachment.id ?? `${attachment.label}-${index}`,
         image: chatImagePreview(attachment),
+        storedImage: storedChatImageReference(attachment),
         label: attachment.label,
       }))}
       fileAction={fileInteraction?.sentFileAction}
@@ -316,17 +323,7 @@ function AgentContentMessage({
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
 }) {
   if (content.kind === "image") {
-    const label = content.uri ? resourceLabel(content.uri) : "Agent image";
-    return (
-      <button
-        aria-label={`Open ${label}`}
-        className="chat-agent-content-image"
-        onClick={() => onOpenImage({ label, url: content.data_url })}
-        type="button"
-      >
-        <img alt={label} src={content.data_url} />
-      </button>
-    );
+    return <AgentContentImage content={content} onOpenImage={onOpenImage} />;
   }
   if (content.kind === "resource") {
     const label = content.title || content.name || resourceLabel(content.uri);
@@ -362,6 +359,39 @@ function AgentContentMessage({
       <span>{label} is not previewable yet.</span>
       {content.media_type ? <code>{content.media_type}</code> : null}
     </section>
+  );
+}
+
+/** An Agent image stored for the Task; it loads when shown and opens once loaded. */
+function AgentContentImage({
+  content,
+  onOpenImage,
+}: {
+  content: Extract<AgentMessagePart, { kind: "image" }>;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+}) {
+  const label = content.uri ? resourceLabel(content.uri) : "Agent image";
+  const reference = {
+    imageId: content.image_id,
+    mediaType: content.media_type,
+    sizeBytes: content.size_bytes,
+    width: content.width,
+    height: content.height,
+  };
+  const state = useStoredChatImage(reference);
+  const size = storedChatImageSize(reference);
+  if (state.status !== "ready") {
+    return <StoredChatImagePlaceholder className="chat-agent-content-image" label={label} size={size} state={state} />;
+  }
+  return (
+    <button
+      aria-label={`Open ${label}`}
+      className="chat-agent-content-image"
+      onClick={() => onOpenImage({ label, url: state.url })}
+      type="button"
+    >
+      <img alt={label} height={size?.height} src={state.url} width={size?.width} />
+    </button>
   );
 }
 

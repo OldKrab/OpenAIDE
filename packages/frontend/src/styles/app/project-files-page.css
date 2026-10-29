@@ -1,0 +1,48 @@
+/* Project files opened from a Project: the same panel as a page, without Chat. */
+.project-files-page {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-files-page > .project-files-panel {
+  flex: 1;
+}
+
+/* Desktop's title bar is a drag region over the top of the main surface; without a Task header
+   to integrate with, the page starts below it so its header controls stay clickable. */
+.app-sidebar-frame-with-overlay-header .project-files-page {
+  padding-top: 32px;
+}
+
+/* Comments collect on the page; this sends them all as one new Task. */
+.project-files-ask {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-focus);
+  color: var(--oa-bg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.project-files-ask small {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--oa-bg) 22%, transparent);
+  font-size: 11px;
+  text-align: center;
+}
+
+.project-files-ask:hover {
+  background: color-mix(in oklch, var(--oa-focus) 88%, var(--oa-text));
+}

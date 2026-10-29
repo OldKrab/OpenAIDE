@@ -22,7 +22,7 @@ test.afterAll(async ({}, testInfo) => {
   await harness?.close();
 });
 
-test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page }) => {
+test("opens a Chat file link beside Chat, keeps Plan on Chat, and returns from Project files on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.goto(`${harness.baseUrl}/new-task`);
   await expect(page.getByLabel("New task")).toBeVisible();
@@ -44,65 +44,58 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
   await expect(readme).toBeVisible();
   await readme.click();
 
-  const fileViewer = page.getByRole("complementary", { name: "File Viewer" });
+  const panel = page.getByRole("complementary", { name: "Project files", exact: true });
+  const fileViewer = panel.getByRole("group", { name: "File Viewer" });
   await expect(fileViewer).toBeVisible();
+  // The file opens beside Chat, not instead of it.
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Files", exact: true })).toHaveAttribute("aria-pressed", "true");
   const downloadEvent = page.waitForEvent("download");
   await fileViewer.getByRole("button", { name: "Download file", exact: true }).click();
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toBe("README.md");
   expect(await readFile(await download.path())).toEqual(await readFile("README.md"));
 
-  await expect(page.getByRole("button", { name: "Back to conversation" })).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(shots, "wide-file-open.png") });
-  const explorer = page.locator(".project-files-list");
+  const explorer = panel.locator('.project-files-list[data-view="files"]');
   await expect(explorer.getByText("Loading files…", { exact: true })).toHaveCount(0);
   const scrollBefore = await explorer.evaluate(el => { el.scrollTop = 500; return el.scrollTop; });
   expect(scrollBefore).toBeGreaterThan(100);
-  await page.getByRole("button", { name: "Back to conversation" }).click();
+  await panel.getByRole("button", { name: "Close Project files", exact: true }).click();
+  await expect(page.locator(".task-panel.project-files-panel")).toHaveAttribute("aria-hidden", "true");
   await page.evaluate(() => {
     window.explorerScrollSamples = [];
     let frames = 0;
     const sample = () => {
-      const list = document.querySelector(".project-files-list");
+      const list = document.querySelector('.project-files-list[data-view="files"]');
       if (list?.getClientRects().length) window.explorerScrollSamples.push(list.scrollTop);
       if (++frames < 90) requestAnimationFrame(sample);
       else window.explorerScrollFinished = true;
     };
     requestAnimationFrame(sample);
   });
-  await page.getByRole("button", { name: "Project files", exact: true }).click();
+  // Reopening refreshes the tree; the rows it replaces stay in place meanwhile.
+  await page.getByRole("button", { name: /^Project files/ }).click();
   await page.waitForFunction(() => window.explorerScrollFinished);
   const samples = await page.evaluate(() => window.explorerScrollSamples);
   expect(samples.length).toBeGreaterThan(0);
   expect(Math.max(...samples) - Math.min(...samples), "Reopening Files moved the explorer during refresh").toBeLessThanOrEqual(1);
   expect(samples.at(-1)).toBe(scrollBefore);
 
-  await page.getByRole("button", { name: "Back to conversation" }).click();
+  await panel.getByRole("button", { name: "Close Project files", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  // Native windows enforce 880×600, so the phone flow is not reachable in the Desktop shell.
+  if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") return;
   await page.setViewportSize({ width: 390, height: 844 });
   const hidePlan = page.getByRole("button", { name: "Hide Plan", exact: true });
   if (await hidePlan.isVisible()) await hidePlan.click();
   await readme.click();
   await expect(fileViewer).toBeVisible();
-  const tabStrip = await fileViewer.locator(".file-viewer-tabs").evaluate((el) => ({
-    verticalBar: el.offsetWidth - el.clientWidth,
-    horizontalBar: el.offsetHeight - el.clientHeight,
-  }));
-  expect(tabStrip.verticalBar, "File Tabs showed a vertical scrollbar").toBe(0);
-  expect(tabStrip.horizontalBar, "File Tabs showed a scrollbar under the tabs").toBe(0);
-  const tab = fileViewer.getByRole("tab", { name: "README.md" });
-  const preview = fileViewer.getByRole("button", { name: "Show Markdown preview" });
-  await expect(tab).toBeVisible();
-  await expect(preview).toBeVisible();
-  const tabBox = await tab.boundingBox();
-  const previewBox = await preview.boundingBox();
-  expect(tabBox && previewBox).toBeTruthy();
-  const overlap = tabBox.x < previewBox.x + previewBox.width
-    && previewBox.x < tabBox.x + tabBox.width
-    && tabBox.y < previewBox.y + previewBox.height
-    && previewBox.y < tabBox.y + tabBox.height;
-  expect(overlap, "Preview overlapped the File Tab").toBe(false);
+  // A phone shows one file at a time: File Tabs give way to the list behind "Files".
+  await expect(fileViewer.getByRole("tab", { name: "README.md" })).toBeHidden();
+  await expect(fileViewer.getByRole("button", { name: "Show Markdown preview" })).toBeVisible();
+  const overflow = await fileViewer.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow, "The reader scrolled sideways on a phone").toBeLessThanOrEqual(0);
   // Measure actual wrapped text boxes: preview prose needs visible leading between lines.
   for (const tag of ["p", "li"]) {
     const gaps = await fileViewer.locator(`.file-viewer-markdown ${tag}`).evaluateAll(elements => {
@@ -130,11 +123,23 @@ test("keeps Plan on Chat and returns from File Viewer on a phone", async ({ page
   await page.screenshot({ path: path.join(shots, "phone-file-open.png") });
 
   await fileViewer.getByRole("button", { name: "Show raw Markdown" }).click();
-  await fileViewer.getByRole("button", { name: "Select line 1", exact: true }).click();
-  await fileViewer.getByRole("button", { name: "Comment", exact: true }).click();
+  await fileViewer.locator(".file-viewer-line").first().click();
+  await fileViewer.getByRole("button", { name: "Quote only", exact: true }).click();
+  // The quote stays marked on its line, and the way back says a comment is waiting.
+  await expect(fileViewer.getByRole("button", { name: "Quoted lines: add a comment or remove" })).toBeVisible();
+  await panel.getByRole("button", { name: "Files", exact: true }).first().click();
+  await page.screenshot({ path: path.join(shots, "phone-file-list.png") });
+  await panel.getByRole("button", { name: "Chat · 1 comment", exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Message" });
   await expect(composer).toBeVisible();
   await expect(composer).toContainText("README.md:1");
+  // Project files stays in the phone bar; the less used Task controls wait under More.
+  const bar = page.locator(".mobile-workbench-bar");
+  await expect(bar.getByRole("button", { name: /^Project files/ })).toBeVisible();
+  await bar.getByRole("button", { name: "More Task actions", exact: true }).click();
+  await expect(bar.locator("#mobile-task-more")).toBeVisible();
+  await page.screenshot({ path: path.join(shots, "phone-task-actions.png") });
+  await bar.getByRole("button", { name: "Hide more Task actions", exact: true }).click();
   await page.screenshot({ path: path.join(shots, "phone-back-to-chat.png") });
 
   const phonePlan = page.locator("aside.task-plan-drawer[data-open='true']");
@@ -172,7 +177,7 @@ test("downloads current binary bytes through a relative symlink link and retries
     await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${path.relative(process.cwd(), alias)}`);
     await page.getByLabel("Send message").click();
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
-    const viewer = page.getByRole("complementary", { name: "File Viewer" });
+    const viewer = page.getByRole("group", { name: "File Viewer" });
     await expect(viewer.getByText("Unsupported file", { exact: true })).toBeVisible();
     const bytes = Buffer.alloc(2 * 1024 * 1024, 0xfd);
     await writeFile(target, bytes);
@@ -225,7 +230,7 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
     await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${imagePath}`);
     await page.getByLabel("Send message").click();
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
-    const viewer = page.getByRole("complementary", { name: "File Viewer" });
+    const viewer = page.getByRole("group", { name: "File Viewer" });
     const image = viewer.getByRole("img", { name: filename, exact: true });
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((img) => img.complete && img.naturalWidth > 0)).toBe(true);
@@ -272,7 +277,7 @@ test("renders a PDF with selectable text inside the sandboxed viewer", async ({ 
     await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${pdfPath}`);
     await page.getByLabel("Send message").click();
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
-    const viewer = page.getByRole("complementary", { name: "File Viewer" });
+    const viewer = page.getByRole("group", { name: "File Viewer" });
     await expect(viewer.getByText("Page 1 of 2", { exact: true })).toBeVisible({ timeout: 30_000 });
     const frame = viewer.locator("iframe");
     await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
@@ -320,7 +325,7 @@ test("renders a PDF with selectable text inside the sandboxed viewer", async ({ 
   }
 });
 
-test("browses independent files, searches exact lines, and comments beside source/diff selections", async ({ page }) => {
+test("reviews changes and files beside Chat, comments on lines, and browses a Project without a Task", async ({ page }) => {
   const filename = "000-project-access-smoke.ts";
   await writeFile(filename, "export const first = 1;\nexport const second = 2;\nexport const projectAccessNeedle = 3;\n");
   try {
@@ -329,82 +334,190 @@ test("browses independent files, searches exact lines, and comments beside sourc
     await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${filename}`);
     await page.getByLabel("Send message").click();
     await expect(page.getByLabel("Task chat").getByRole("link", { name: "README.md" })).toBeVisible();
-    await page.getByRole("textbox", { name: "Message" }).fill("Keep this draft");
-    await page.getByRole("button", { name: "Project files", exact: true }).click();
-    const project = page.getByRole("region", { name: "Project files", exact: true });
-    await project.getByRole("treeitem", { name: filename, exact: true }).click();
-    await project.getByRole("textbox", { name: "Find a file" }).fill(filename);
-    await project.locator(".project-file-result").filter({ hasText: filename }).click();
-    const reader = project.locator(".file-code-reader");
-    await expect(reader.getByRole("button", { name: "Select line 3", exact: true })).toBeVisible();
-    const first = await reader.getByRole("button", { name: "Select line 1", exact: true }).boundingBox();
-    const third = await reader.getByRole("button", { name: "Select line 3", exact: true }).boundingBox();
-    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2, { steps: 6 });
-    await expect(reader.getByRole("button", { name: "Comment", exact: true })).toBeHidden();
-    await page.mouse.up();
-    await expect(reader.locator('[data-selected="true"]')).toHaveCount(3);
-    await expect(reader.getByRole("button", { name: "Select range", exact: true })).toBeHidden();
-    const action = reader.getByRole("button", { name: "Comment", exact: true });
-    await expect(action).toBeVisible();
-    const actionBox = await action.boundingBox();
-    expect(actionBox.y - third.y).toBeLessThan(65);
-    await page.screenshot({ path: path.join(shots, "project-source-selection.png") });
-    await action.click();
     const composer = page.getByRole("textbox", { name: "Message" });
+    await composer.fill("Keep this draft");
+
+    // The header entry says how much changed before the panel is opened.
+    const entry = page.getByRole("button", { name: /^Project files, \d+ changed files?/ });
+    await expect(entry).toBeVisible();
+    await entry.click();
+    const panel = page.getByRole("complementary", { name: "Project files", exact: true });
+    const changesView = panel.getByRole("button", { name: /^Changes/ });
+    const filesView = panel.getByRole("button", { name: "Files", exact: true });
+    await expect(changesView).toHaveAttribute("aria-pressed", "true");
+    await expect(composer).toBeVisible();
+
+    // Changes: the new file is listed with its counts, and its diff takes a comment on a line.
+    const changed = panel.getByRole("complementary", { name: "Changed files" }).locator(".project-files-row").filter({ hasText: filename });
+    await expect(changed).toContainText("+3");
+    await changed.click();
+    const section = panel.getByRole("region", { name: filename, exact: true });
+    const diff = section.locator(".file-code-reader");
+    await expect(diff).toHaveAttribute("data-diff", "true");
+    await diff.locator(".file-viewer-line").nth(1).click();
+    await section.getByRole("textbox", { name: "Comment" }).fill("Why two?");
+    await page.screenshot({ path: path.join(shots, "project-diff-comment.png") });
+    await section.getByRole("button", { name: "Add comment", exact: true }).click();
     await expect(composer).toContainText("Keep this draft");
+    await expect(composer).toContainText("working copy lines 2");
+    await expect(composer).toContainText("Why two?");
+    // A saved comment can be reworded or taken back; the message follows.
+    await section.getByRole("button", { name: "Edit comment" }).click();
+    await section.getByRole("textbox", { name: "Comment" }).fill("Why not three?");
+    await section.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(composer).toContainText("Why not three?");
+    await expect(composer).not.toContainText("Why two?");
+    await section.getByRole("button", { name: "Edit comment" }).click();
+    await section.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(composer).not.toContainText("working copy lines 2");
+    await expect(composer).toContainText("Keep this draft");
+
+    // One file at a time is a choice that survives a reload.
+    await panel.getByRole("button", { name: "One file at a time", exact: true }).click();
+    await expect(panel.locator(".project-files-one")).toContainText(filename);
+    await expect(panel.getByRole("button", { name: "Next changed file" })).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "project-changes-one-file.png") });
+    await panel.getByRole("button", { name: "All changes on one page", exact: true }).click();
+
+    // Files is a separate view with File Tabs; a range is two clicks, without a toolbar.
+    await section.getByRole("button", { name: "Open in Files", exact: true }).click();
+    await expect(filesView).toHaveAttribute("aria-pressed", "true");
+    await expect(panel.getByRole("tab", { name: filename })).toBeVisible();
+    const reader = panel.getByRole("group", { name: "File Viewer" }).locator(".file-code-reader");
+    await expect(reader).not.toHaveAttribute("data-diff", "true");
+    await reader.locator(".file-viewer-line").nth(0).click();
+    await reader.locator(".file-viewer-line").nth(2).click();
+    await expect(reader.locator('[data-selected="true"]')).toHaveCount(3);
+    const box = reader.getByRole("form", { name: "Comment on the selected lines" });
+    const third = await reader.locator(".file-viewer-line").nth(2).boundingBox();
+    expect((await box.boundingBox()).y - (third.y + third.height), "The comment box left its lines").toBeLessThan(24);
+    await page.screenshot({ path: path.join(shots, "project-source-selection.png") });
+    await box.getByRole("button", { name: "Quote only", exact: true }).click();
     await expect(composer).toContainText(`${filename}:1–3`);
-    await page.getByRole("button", { name: "Project files", exact: true }).click();
-    await project.getByRole("button", { name: "Search", exact: true }).click();
-    await project.getByRole("textbox", { name: "Search file contents" }).fill("projectAccessNeedle");
-    await project.locator(".project-file-result").filter({ hasText: filename }).click();
-    await expect(reader.locator('[data-focus="true"]')).toContainText("projectAccessNeedle");
-    // Native drag selects characters without turning the source into whole-line selection.
+    await expect(reader.getByRole("button", { name: "Quoted lines: add a comment or remove" })).toBeVisible();
+
+    // Dragging over code copies characters; it does not pick lines.
     const code = reader.locator(".file-viewer-code").first();
     const bounds = await code.boundingBox();
     await page.mouse.move(bounds.x + 2, bounds.y + bounds.height / 2);
     await page.mouse.down();
     await page.mouse.move(bounds.x + 83, bounds.y + bounds.height / 2, { steps: 8 });
     await page.mouse.up();
-    const selected = await page.evaluate(() => window.getSelection().toString());
-    expect(selected.length).toBeGreaterThan(0);
-    await expect(reader.locator('[data-selected="true"]')).toHaveCount(0);
-    await action.click();
-    await expect(composer).toContainText(selected);
-    await page.getByRole("button", { name: "Project files", exact: true }).click();
-    await project.getByRole("button", { name: "Changes", exact: true }).click();
-    await project.locator(".project-file-result").filter({ hasText: filename }).click();
-    await expect(reader).toHaveAttribute("data-diff", "true");
-    await reader.getByRole("button", { name: "Select working copy line 2", exact: true }).click();
-    await expect(action).toBeVisible();
-    await page.screenshot({ path: path.join(shots, "project-diff-selection.png") });
-    await action.click();
-    await expect(composer).toContainText("working copy lines 2");
-    await page.getByRole("button", { name: "Project files", exact: true }).click();
-    await expect(project.getByRole("button", { name: "Changes", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await project.getByRole("button", { name: "File", exact: true }).click();
-    await expect(reader).toHaveAttribute("data-diff", "false");
-    await project.getByRole("button", { name: "Diff", exact: true }).click();
-    await expect(reader).toHaveAttribute("data-diff", "true");
-    await project.getByRole("button", { name: "Back to conversation" }).click();
+    expect((await page.evaluate(() => window.getSelection().toString())).length).toBeGreaterThan(0);
+    await expect(box).toHaveCount(0);
+    await page.evaluate(() => window.getSelection().removeAllRanges());
+
+    // Search is a palette over the panel: by name, or by content landing on the line.
+    await page.keyboard.press("Control+Shift+F");
+    const palette = page.getByRole("dialog", { name: "Search files" });
+    await palette.getByRole("textbox", { name: "Search file contents" }).fill("projectAccessNeedle");
+    await palette.locator(".project-files-palette-list > button").filter({ hasText: filename }).first().click();
+    await expect(palette).toHaveCount(0);
+    await expect(reader.locator('[data-focus="true"]')).toContainText("projectAccessNeedle");
+    // Each view keeps its own place: the tree is where it was left after a look at the diff.
+    const tree = panel.getByRole("tree", { name: "Workspace files" });
+    await tree.getByRole("treeitem", { name: "docs", exact: true }).click();
+    await expect(tree.getByRole("treeitem", { name: "adr", exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "Show diff", exact: true }).click();
+    await expect(changesView).toHaveAttribute("aria-pressed", "true");
+    await expect(tree).toBeHidden();
+    await filesView.click();
+    await expect(tree.getByRole("treeitem", { name: "adr", exact: true })).toBeVisible();
+    await expect(panel.getByText("Loading files…", { exact: true })).toHaveCount(0);
+    await changesView.click();
+
+    // The panel can take the whole Task Page and give it back.
+    await panel.getByRole("button", { name: "Maximize", exact: true }).click();
+    await expect(composer).toBeHidden();
+    await page.screenshot({ path: path.join(shots, "project-maximized.png") });
+    await panel.getByRole("button", { name: "Show Chat", exact: true }).click();
+    await expect(composer).toBeVisible();
+    await panel.getByRole("button", { name: "Close Project files", exact: true }).click();
     await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
-    await expect(reader).toHaveAttribute("data-diff", "false");
+    await expect(filesView).toHaveAttribute("aria-pressed", "true");
+    await expect(reader).toBeVisible();
     await page.emulateMedia({ colorScheme: "dark" });
     await page.screenshot({ path: path.join(shots, "project-dark.png") });
+    await page.emulateMedia({ colorScheme: "light" });
+    // At the Desktop window minimum with the sidebar open, the column is too narrow to share:
+    // the panel covers Chat, and Close is the way back.
+    await page.setViewportSize({ width: 880, height: 600 });
+    await expect(page.locator(".task-work-stack")).toHaveAttribute("data-file-viewer-maximized", "true");
+    await expect(panel.getByRole("button", { name: "Maximize", exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Show Chat", exact: true })).toHaveCount(0);
+    await expect(reader).toBeVisible();
+    await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
+    // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
     if (process.env.OPENAIDE_SMOKE_FRONTEND === "desktop") {
-      // Native windows enforce 880×600; verify the supported minimum, not a phone-sized native window.
-      await page.setViewportSize({ width: 880, height: 600 });
-      await expect(project.getByRole("button", { name: "Back to conversation" })).toBeVisible();
-      await expect(reader).toBeVisible();
-      await page.screenshot({ path: path.join(shots, "project-desktop-minimum.png") });
+      // Desktop routes the Project page in memory, and its Close returns to the Task it was opened from.
+      await page.getByRole("button", { name: "OpenAIDE actions", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
+      const projectPage = page.getByRole("region", { name: "Project files", exact: true });
+      await expect(projectPage.getByRole("treeitem", { name: filename })).toBeVisible();
+      await page.screenshot({ path: path.join(shots, "project-desktop-page.png") });
+      await projectPage.getByRole("button", { name: "Close Project files", exact: true }).click();
+      await expect(projectPage).toHaveCount(0);
+      await expect(composer).toBeVisible();
       return;
     }
+
+    // Phone: the list and the reader are separate screens under Changes and Files.
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(project.getByRole("complementary", { name: "Project navigation", exact: true })).toBeHidden();
-    await project.locator(".project-files-mobile-back").click();
-    await expect(project.getByRole("complementary", { name: "Project navigation", exact: true })).toBeVisible();
+    await expect(reader).toBeVisible();
+    await expect(panel.getByRole("complementary", { name: "Files", exact: true })).toBeHidden();
+    await panel.locator(".project-files-back").click();
+    await expect(panel.getByRole("complementary", { name: "Files", exact: true })).toBeVisible();
+    await changesView.click();
+    await expect(panel.getByRole("complementary", { name: "Changed files" })).toBeVisible();
     await page.screenshot({ path: path.join(shots, "project-phone-list.png") });
+    await panel.locator(".project-files-back").click();
+    await expect(composer).toBeVisible();
+
+    // From the Project, without a Task: the same viewer as a page, and a comment starts a Task.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("button", { name: "OpenAIDE actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
+    const viewer = page.getByRole("region", { name: "Project files", exact: true });
+    await expect(viewer.getByRole("button", { name: "Files", exact: true })).toHaveAttribute("aria-pressed", "true");
+    // The page is a route: reload keeps it, and Back returns to the Task it was opened from.
+    await expect(page).toHaveURL(/\/new-task\?projectId=[^&]+&view=files$/);
+    await page.reload();
+    await expect(viewer.getByRole("treeitem", { name: filename })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/task\/task_/);
+    await expect(viewer).toHaveCount(0);
+    await page.goForward();
+    await viewer.getByRole("treeitem", { name: filename }).click();
+    const projectReader = viewer.getByRole("group", { name: "File Viewer" }).locator(".file-code-reader");
+    // Comments collect on the page until they are asked about together in one new Task.
+    await projectReader.locator(".file-viewer-line").nth(0).click();
+    await viewer.getByRole("button", { name: "Quote only", exact: true }).click();
+    await projectReader.locator(".file-viewer-line").nth(2).click();
+    await viewer.getByRole("textbox", { name: "Comment" }).fill("Is this exported on purpose?");
+    await viewer.getByRole("button", { name: "Add comment", exact: true }).click();
+    const ask = viewer.getByRole("button", { name: /^Ask in a new Task/ });
+    await expect(ask).toHaveText("Ask in a new Task 2");
+    await page.screenshot({ path: path.join(shots, "project-viewer.png") });
+    await ask.click();
+    await expect(page).toHaveURL(/\/new-task\?projectId=[^&]+$/);
+    const draft = page.getByRole("textbox", { name: "Message" });
+    await expect(draft).toContainText(`${filename}:1`);
+    await expect(draft).toContainText(`${filename}:3`);
+    await expect(draft).toContainText("Is this exported on purpose?");
+    await expect(viewer).toHaveCount(0);
+
+    // A phone reaches the same page from the Project's menu in the navigation drawer.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Open task navigation", exact: true }).click();
+    await page.getByRole("button", { name: "OpenAIDE actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Browse files", exact: true }).click();
+    await expect(viewer.getByRole("treeitem", { name: filename })).toBeVisible();
+    await expect(page.locator(".mobile-workbench-bar")).toBeHidden();
+    await page.screenshot({ path: path.join(shots, "project-phone-page.png") });
+    await viewer.locator(".project-files-back").click();
+    await expect(viewer).toHaveCount(0);
+    await expect(page).not.toHaveURL(/view=files/);
+    await expect(page.locator(".mobile-workbench-bar")).toBeVisible();
   } finally { await rm(filename, { force: true }); }
 });
 

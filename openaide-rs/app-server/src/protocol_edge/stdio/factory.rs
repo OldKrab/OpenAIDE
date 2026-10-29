@@ -21,7 +21,7 @@ use crate::snapshots::{
     AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
     TaskNavigationStore, TaskSnapshotStore,
 };
-use crate::state_sync::{StateStream, TaskSubscriptionPresence};
+use crate::state_sync::StateStream;
 use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
@@ -89,20 +89,17 @@ pub(super) fn gateway(
         agent_statuses.clone(),
     );
     let task_navigation_agents = agent_registry.clone();
-    let task_subscription_presence = TaskSubscriptionPresence::default();
-    let task_product_api = Arc::new(
-        TaskProductApi::new_with_server_requests_and_projects(
-            store.clone(),
-            Arc::new(project_resolver),
-            agent_registry,
-            agent_runtime,
-            task_notifier,
-            server_requests.clone(),
-            configured_projects.clone(),
-            agent_statuses.clone(),
-        )?
-        .with_task_subscription_presence(task_subscription_presence.clone()),
-    );
+    let task_product_api = Arc::new(TaskProductApi::new_with_server_requests_and_projects(
+        store.clone(),
+        Arc::new(project_resolver),
+        agent_registry,
+        agent_runtime,
+        task_notifier,
+        server_requests.clone(),
+        configured_projects.clone(),
+        agent_statuses.clone(),
+    )?);
+    let task_subscription_presence = task_product_api.task_subscription_presence();
     let task_navigation = TaskNavigationStore::with_native_sessions_and_agents(
         store.clone(),
         task_product_api.native_session_catalog(),

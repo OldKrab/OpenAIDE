@@ -94,9 +94,7 @@ fn initialize_request_with_subagents(
 /// rollback override affects only newly initialized ACP connections.
 pub(crate) fn native_subagents_enabled() -> bool {
     native_subagents_enabled_with_override(
-        std::env::var("OPENAIDE_ACP_NATIVE_SUBAGENTS")
-            .ok()
-            .as_deref(),
+        crate::instance_env::var(crate::instance_env::ACP_NATIVE_SUBAGENTS).as_deref(),
     )
 }
 

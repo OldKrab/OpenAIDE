@@ -1,5 +1,7 @@
 import { NewTaskView } from "./NewTaskView";
+import { ProjectFilesPage } from "./ProjectFilesPage";
 import { TaskLoadingView, TaskView } from "./TaskView";
+import { ChatImageProvider } from "./StoredChatImage";
 import { taskTurnOpen } from "./taskSurfaceHelpers";
 import type { AppController } from "./appController";
 import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
@@ -93,6 +95,8 @@ type AppPrimaryTaskSurfaceProps = {
   onCheckProject?: (projectId: string) => Promise<void>;
   onRemoveProject?: (projectId: string) => void;
   planDrawerOpen?: boolean;
+  /** The Project whose files cover the primary surface, and how to leave that page. */
+  projectFilesPage?: { projectId: string; onClose: () => void };
   workspaceRecovery?: {
     manageWorktrees: (projectId: string) => void;
     openProjectSettings: () => void;
@@ -114,6 +118,7 @@ export function AppPrimaryTaskSurface({
   onCheckProject,
   onRemoveProject,
   planDrawerOpen,
+  projectFilesPage,
   workspaceRecovery,
 }: AppPrimaryTaskSurfaceProps) {
   const {
@@ -149,69 +154,102 @@ export function AppPrimaryTaskSurface({
     : undefined;
   const recoveryActions = createAgentRecoveryActions(controller);
 
-  if (renderableTaskSnapshot && !openingNativeSession) {
+  const browsedProject = projectFilesPage
+    ? view.navigation.projects.find((project) => project.projectId === projectFilesPage.projectId)
+    : undefined;
+  if (projectFilesPage && browsedProject && callbacks.task.fileViewer) {
     return (
-      <TaskView
-        activeTask={activeTask}
-        agentIcons={agentIcons}
-        agents={agents}
-        agentRecoveryActions={recoveryActions}
-        archived={renderableTaskArchived}
-        backendConnectionState={controller.backendConnectionState}
-        subagentConnection={controller.backendConnection}
-        chatPageState={primaryTask.chatPageState}
-        desktopWindow={desktopWindow}
-        backendReady={backendReady}
-        taskMutationReady={taskMutationReady}
-        fileBrowser={callbacks.task.fileBrowser}
-        fileViewer={callbacks.task.fileViewer}
-        headerActionsTarget={headerActionsTarget}
-        headerOverflowTarget={headerOverflowTarget}
-        intents={intents.task}
-        onCancel={renderableTaskSnapshot.task.has_messages || taskTurnOpen(renderableTaskSnapshot.task.status)
-          ? callbacks.task.cancel
-          : callbacks.newTask.cancel}
-        onClosePlan={callbacks.task.closePlan}
-        onStopBackgroundCommand={callbacks.task.stopBackgroundCommand}
-        onStopSubagent={callbacks.task.stopSubagent}
-        onAddToQueue={callbacks.task.addToQueue}
-        onLoadChatPage={callbacks.task.loadChatPage}
-        onLoadComposerHistory={callbacks.task.loadComposerHistory}
-        onLoadToolImagePreview={callbacks.task.loadToolImagePreview}
-        onManageWorktrees={workspaceRecovery?.manageWorktrees}
-        onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
-        onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
-        onPermissionRespond={callbacks.task.respondToPermission}
-        onPermissionPolicyChange={callbacks.task.setPermissionPolicy}
-        onQuestionRespond={callbacks.task.respondToQuestion}
-        onReconnectProject={workspaceRecovery?.reconnectProject}
-        onRetryConnection={retryTaskOpen}
-        onRetryConfigOptions={controller.retryTaskOpen}
-        onRevealAttachment={callbacks.task.revealAttachment}
-        onMoveAttachment={callbacks.task.moveAttachment}
-        onRemoveAttachment={callbacks.task.removeAttachment}
-        onRemoveQueueMessage={callbacks.task.removeQueueMessage}
-        onReloadNativeSession={callbacks.task.reloadNativeSession}
-        onTakeQueueMessage={callbacks.task.takeQueueMessage}
-        onMoveQueueMessage={callbacks.task.moveQueueMessage}
-        onPlanDrawerOpenChange={onPlanDrawerOpenChange}
-        onSendQueueMessageNow={callbacks.task.sendQueueMessageNow}
-        onResumeQueue={callbacks.task.resumeQueue}
-        onRestoreTask={callbacks.navigation.restoreTask}
-        onSelectConfigOption={callbacks.task.selectConfigOption}
-        onSendPrompt={callbacks.task.sendPrompt}
-        permissionResponses={primaryTask.permissionResponses}
-        planDrawerOpen={planDrawerOpen}
-        liveTextPresentation={primaryTask.liveTextPresentation}
-        questionResponses={primaryTask.questionResponses}
-        savedScrollState={primaryTask.savedScrollState}
-        snapshot={renderableTaskSnapshot}
-        startupConfigOptions={startupConfigOptions}
-        submitShortcut={preferences.composer_submit_shortcut}
-        taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
-        toolDetails={primaryTask.toolDetails}
-        showWorkspaceContext={usesProjectNavigation && bootstrap.shell.kind !== "desktop"}
+      <ProjectFilesPage
+        connection={callbacks.task.fileViewer}
+        onAsk={(prompt) => {
+          // Leaves the routed page forward, so Back returns to it rather than racing a close.
+          callbacks.navigation.openNewTask(browsedProject.projectId);
+          intents.newTask.changePrompt(prompt);
+        }}
+        onClose={projectFilesPage.onClose}
+        project={browsedProject}
+        refreshWorktrees={browsedProject.worktreeRepositoryId ? () => intents.newTask.refreshWorktrees(browsedProject) : undefined}
+        repository={browsedProject.worktreeRepositoryId
+          ? primaryTask.newTask.worktreeRepositories[browsedProject.worktreeRepositoryId]
+          : undefined}
       />
+    );
+  }
+
+  if (renderableTaskSnapshot && !openingNativeSession) {
+    const taskProject = view.navigation.projects.find(
+      (project) => project.projectId === renderableTaskSnapshot.task.project_id,
+    );
+    return (
+      <ChatImageProvider loadImage={callbacks.task.loadChatImage} taskId={renderableTaskSnapshot.task.task_id}>
+        <TaskView
+          activeTask={activeTask}
+          agentIcons={agentIcons}
+          agents={agents}
+          agentRecoveryActions={recoveryActions}
+          archived={renderableTaskArchived}
+          backendConnectionState={controller.backendConnectionState}
+          subagentConnection={controller.backendConnection}
+          chatPageState={primaryTask.chatPageState}
+          desktopWindow={desktopWindow}
+          backendReady={backendReady}
+          taskMutationReady={taskMutationReady}
+          fileBrowser={callbacks.task.fileBrowser}
+          fileViewer={callbacks.task.fileViewer}
+          headerActionsTarget={headerActionsTarget}
+          headerOverflowTarget={headerOverflowTarget}
+          projectFiles={{
+            project: taskProject,
+            repository: taskProject?.worktreeRepositoryId
+              ? primaryTask.newTask.worktreeRepositories[taskProject.worktreeRepositoryId]
+              : undefined,
+          }}
+          intents={intents.task}
+          onCancel={renderableTaskSnapshot.task.has_messages || taskTurnOpen(renderableTaskSnapshot.task.status)
+            ? callbacks.task.cancel
+            : callbacks.newTask.cancel}
+          onClosePlan={callbacks.task.closePlan}
+          onStopBackgroundCommand={callbacks.task.stopBackgroundCommand}
+          onStopSubagent={callbacks.task.stopSubagent}
+          onAddToQueue={callbacks.task.addToQueue}
+          onLoadChatPage={callbacks.task.loadChatPage}
+          onLoadComposerHistory={callbacks.task.loadComposerHistory}
+          onLoadToolImagePreview={callbacks.task.loadToolImagePreview}
+          onManageWorktrees={workspaceRecovery?.manageWorktrees}
+          onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
+          onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
+          onPermissionRespond={callbacks.task.respondToPermission}
+          onPermissionPolicyChange={callbacks.task.setPermissionPolicy}
+          onQuestionRespond={callbacks.task.respondToQuestion}
+          onReconnectProject={workspaceRecovery?.reconnectProject}
+          onRetryConnection={retryTaskOpen}
+          onRetryConfigOptions={controller.retryTaskOpen}
+          onRevealAttachment={callbacks.task.revealAttachment}
+          onMoveAttachment={callbacks.task.moveAttachment}
+          onRemoveAttachment={callbacks.task.removeAttachment}
+          onRemoveQueueMessage={callbacks.task.removeQueueMessage}
+          onReloadNativeSession={callbacks.task.reloadNativeSession}
+          onTakeQueueMessage={callbacks.task.takeQueueMessage}
+          onMoveQueueMessage={callbacks.task.moveQueueMessage}
+          onPlanDrawerOpenChange={onPlanDrawerOpenChange}
+          onSendQueueMessageNow={callbacks.task.sendQueueMessageNow}
+          onResumeQueue={callbacks.task.resumeQueue}
+          onRestoreTask={callbacks.navigation.restoreTask}
+          onSelectConfigOption={callbacks.task.selectConfigOption}
+          onSendPrompt={callbacks.task.sendPrompt}
+          permissionResponses={primaryTask.permissionResponses}
+          planDrawerOpen={planDrawerOpen}
+          liveTextPresentation={primaryTask.liveTextPresentation}
+          questionResponses={primaryTask.questionResponses}
+          savedScrollState={primaryTask.savedScrollState}
+          snapshot={renderableTaskSnapshot}
+          startupConfigOptions={startupConfigOptions}
+          submitShortcut={preferences.composer_submit_shortcut}
+          taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
+          toolDetails={primaryTask.toolDetails}
+          showWorkspaceContext={usesProjectNavigation && bootstrap.shell.kind !== "desktop"}
+        />
+      </ChatImageProvider>
     );
   }
 

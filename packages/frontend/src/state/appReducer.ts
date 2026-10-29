@@ -169,6 +169,7 @@ type AppActionPayload =
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
+  | { type: "taskOpen:accepted"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; kind?: TaskOpenError["kind"]; message: string }
   | { type: "chatPage:start"; taskId: string; requestGeneration: number }
   | { type: "chatPage:result"; taskId: string; requestGeneration: number; page: MessagePage }

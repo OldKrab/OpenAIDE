@@ -2,6 +2,7 @@
 
 import readline from "node:readline";
 import { released } from "./gate.mjs";
+import { encodedPng } from "./png.mjs";
 
 const sessions = new Map();
 const history = new Map();
@@ -179,7 +180,7 @@ async function runPrompt(message) {
       textUpdate(childId, "agent_thought_chunk", "Checking the implementation", "child-thought");
       update(childId, {
         sessionUpdate: "subagent_spawned", subagentSessionId: nestedId,
-        name: "Detail reviewer for a name longer than a phone-width inspection bar", task: "Check a nested detail", capabilities: {},
+        name: "Detail reviewer", task: "Check a nested detail with a delegated task longer than a phone-width inspection bar", capabilities: {},
       });
       textUpdate(nestedId, "agent_message_chunk", "Nested review result", "nested-result");
       update(childId, {
@@ -226,6 +227,17 @@ async function runPrompt(message) {
       });
       textUpdate(sessionId, "agent_message_chunk", "Main delegation result", `main-${promptNumber}`);
     }
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+
+  if (text.includes("smoke:agent-image")) {
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: `agent-image-${promptNumber}`,
+      content: { type: "image", mimeType: "image/png", data: encodedPng(60, 120).toString("base64") },
+    });
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
     session.activePrompts.delete(String(message.id));
     return;
@@ -328,6 +340,17 @@ async function runPrompt(message) {
       sessionId,
       "agent_message_chunk",
       "Use `inline` first.\n\n```ts\nconst first = true;\n```\n\n```py\ndef second():\n    return 2\n```",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
+  if (text.includes("smoke:footer-after-list")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Two questions are still open:\n\n- **First:** a short item.\n- **Second:** should the reply's last line stay readable beside its duration and `deploy/local-web.env`?",
       `agent-${promptNumber}`,
     );
     respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });

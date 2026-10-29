@@ -45,6 +45,7 @@ pub(super) async fn run(
         session_event_sinks,
         session_idle: mut session_idle_policy,
         process_lifetime,
+        snapshot,
     } = runtime;
     let OpenedAcpSession {
         mut active_session,
@@ -55,9 +56,9 @@ pub(super) async fn run(
         started_session,
         ..
     } = opened;
-    // The attachment owns the current session snapshot. The registry can ask for
-    // this state when a caller reuses an existing attachment instead of
-    // issuing a duplicate ACP session/resume request.
+    // The attachment owns the current session snapshot and publishes it through
+    // `snapshot`, so a caller reusing this attachment instead of issuing a duplicate
+    // ACP session/resume request reads it without waiting for this loop.
     let mut session_snapshot = started_session.clone();
     let mut session_event_sink: Option<Arc<dyn AgentSessionEventSink>> = None;
     let mut session_projection: Option<LivePromptProjection> = None;
@@ -117,9 +118,6 @@ pub(super) async fn run(
                     break;
                 };
                 match command {
-                    AcpSessionCommand::Snapshot { reply_tx } => {
-                        let _ = reply_tx.send(Ok(session_snapshot.clone()));
-                    }
                     AcpSessionCommand::SetEventSink { sink } => {
                         // The first sink follows the session/new, load, or resume that
                         // created this attachment; later ones only replace the consumer.
@@ -203,6 +201,7 @@ pub(super) async fn run(
                         if let Ok(loaded) = &result {
                             session_snapshot = loaded.session.clone();
                             commands_catalog = loaded.session.commands_catalog.clone();
+                            snapshot.publish(&session_snapshot);
                         }
                         if result.is_ok() {
                             idle_close_eligible = true;
@@ -236,6 +235,7 @@ pub(super) async fn run(
                                 current_prompts: &current_prompts,
                                 trace: trace.clone(),
                                 content_policy,
+                                snapshot: &snapshot,
                             },
                             prompt,
                             sink,
@@ -246,7 +246,6 @@ pub(super) async fn run(
                             &mut config_requests,
                             &mut config_catalog,
                             &mut commands_catalog,
-                            &session_snapshot,
                             &mut session_event_sink,
                             &mut session_projection,
                             &mut pending_session_catalogs,
@@ -427,6 +426,7 @@ pub(super) async fn run(
         idle_deadline
             .as_mut()
             .reset(tokio::time::Instant::now() + session_idle.idle);
+        snapshot.publish_catalogs(&config_catalog, &commands_catalog);
     }
 
     Ok(())

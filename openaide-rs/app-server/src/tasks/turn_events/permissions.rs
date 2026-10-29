@@ -255,14 +255,12 @@ impl TaskEventSink {
             resolved_at: now.clone(),
         };
         if let Some(native_session_id) = request.subagent_native_session_id.as_deref() {
-            let record = self.mutations.store().record_subagent_permission_outcome(
+            self.mutations.store().record_subagent_permission_outcome(
                 &self.task_id,
                 native_session_id,
                 &tool_call_id,
                 permission_outcome.clone(),
             )?;
-            self.session_sink
-                .publish_subagent_snapshots(&record.subagent_id)?;
         }
         let is_subagent_request = request.subagent_native_session_id.is_some();
         self.mutations.commit_existing_task(

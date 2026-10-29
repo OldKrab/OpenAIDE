@@ -21,6 +21,7 @@ internal object RemotePairing {
     fun interface Paired { fun done(server: ConnectionStore.PairedServer?, problem: String?) }
     fun interface Connected { fun done(problem: String?) }
     fun interface JoinCode { fun shown(code: JSONObject?, problem: String?) }
+    fun interface Checked { fun done(ok: Boolean, message: String) }
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -85,6 +86,19 @@ internal object RemotePairing {
         }
     }
 
+    /** Checks the way to the paired computer step by step and says which step failed (see [ConnectionCheck]). */
+    @JvmStatic fun check(context: Context, callback: Checked) {
+        val application = context.applicationContext
+        RemoteNode.scope.launch {
+            val server = ConnectionStore(application).pairedServer()
+            val (ok, message) = if (server == null) false to "Pair with a computer first, then check again." else {
+                val result = RemoteNode.check(application, server)
+                (ConnectionCheck.outcome(result) == "ok") to ConnectionCheck.message(result, server.name)
+            }
+            main.post { callback.done(ok, message) }
+        }
+    }
+
     /**
      * The phone's steps for one page's [ComputerSwitch]: reach this phone's own App
      * Server or a paired computer's while the one in use stays live, then save the
@@ -96,9 +110,16 @@ internal object RemotePairing {
         val diagnostics = AndroidDiagnostics()
         return ComputerSwitch(RemoteNode.scope, { main.post(it) }, SystemClock::elapsedRealtime,
             { event, outcome, durationMs, fields -> diagnostics.record(event, outcome, 0, durationMs, fields) },
-            object : ComputerSwitch.Steps<Connection?> {
-                override suspend fun connect(target: String?): Connection? {
-                    if (!WorkspaceGateway.start(application, if (target == null) ConnectionProfile.Kind.LOCAL else ConnectionProfile.Kind.PAIRED)) {
+            // What a connect reached: a paired computer's connection, an SSH Computer's
+            // prepared session, or nothing for this phone.
+            object : ComputerSwitch.Steps<Any?> {
+                override suspend fun connect(target: String?): Any? {
+                    val kind = when {
+                        target == null -> ConnectionProfile.Kind.LOCAL
+                        ComputerSwitch.sshId(target) != null -> ConnectionProfile.Kind.SSH
+                        else -> ConnectionProfile.Kind.PAIRED
+                    }
+                    if (!WorkspaceGateway.start(application, kind)) {
                         throw ComputerSwitch.Failed("gateway", "OpenAIDE could not start its connection on this phone. Restart the app and try again.")
                     }
                     if (target == null) {
@@ -108,6 +129,15 @@ internal object RemotePairing {
                         }
                         return null
                     }
+                    val sshId = ComputerSwitch.sshId(target)
+                    if (sshId != null) {
+                        val computer = SshComputers.find(ConnectionStore(application).sshComputers(), sshId)
+                            ?: throw ComputerSwitch.Failed("not_added", "This phone no longer has that SSH computer.")
+                        // The SSH library blocks; like this phone's own start, a Cancel ignores its result.
+                        return try { SshServer.prepare(application, computer) } catch (error: HeldServer.Unavailable) {
+                            throw ComputerSwitch.Failed(error.reason, SshServer.message(error.reason))
+                        }
+                    }
                     val server = PairedServers.find(ConnectionStore(application).pairedServers(), target)
                         ?: throw ComputerSwitch.Failed("not_paired", "This phone is no longer paired with that computer.")
                     return try { RemoteNode.reachForSwitch(application, server) } catch (error: RemoteNode.Unavailable) {
@@ -115,21 +145,32 @@ internal object RemotePairing {
                     }
                 }
 
-                override fun apply(target: String?, connected: Connection?) {
+                override fun apply(target: String?, connected: Any?) {
                     val store = ConnectionStore(application)
+                    if (connected is SshServer.Prepared) {
+                        check(store.selectSsh(connected.id))
+                        SshServer.adopt(connected)
+                        // The computer left behind keeps its work; only this phone's link to it ends.
+                        RemoteNode.disconnect()
+                        return
+                    }
                     // Leaving an SSH Computer ends its forward; its App Server keeps running there.
                     SshServer.reset()
                     if (target == null) {
                         store.selectLocal()
-                        // The computer left behind keeps its work; only this phone's link to it ends.
                         RemoteNode.disconnect()
                     } else {
                         check(store.selectPaired(target))
-                        RemoteNode.adopt(connected!!)
+                        RemoteNode.adopt(connected as Connection)
                     }
                 }
 
-                override fun discard(connected: Connection?) { connected?.let(RemoteNode::abandon) }
+                override fun discard(connected: Any?) {
+                    when (connected) {
+                        is SshServer.Prepared -> SshServer.discard(connected)
+                        is Connection -> RemoteNode.abandon(connected)
+                    }
+                }
 
                 override fun replacePage() = replacePage.run()
             })

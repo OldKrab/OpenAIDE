@@ -3,6 +3,7 @@
 
 export const FILE_VIEWER_LIST_DIRECTORY = "fileViewer/listDirectory" as const;
 export const FILE_VIEWER_SEARCH = "fileViewer/search" as const;
+export const FILE_VIEWER_EXISTING_FILES = "fileViewer/existingFiles" as const;
 export const FILE_VIEWER_CHANGES = "fileViewer/changes" as const;
 export const FILE_VIEWER_DIFF = "fileViewer/diff" as const;
 export const CLIENT_PROBE = "client/probe" as const;
@@ -21,6 +22,8 @@ export const STATE_SUBSCRIBE = "state/subscribe" as const;
 export const STATE_UNSUBSCRIBE = "state/unsubscribe" as const;
 
 export const DIAGNOSTICS_GET_RUNTIME = "diagnostics/getRuntime" as const;
+
+export const DIAGNOSTICS_RECORD_CLIENT_EVENTS = "diagnostics/recordClientEvents" as const;
 
 export const DIAGNOSTICS_LIST_SUPPORT_EXPORT = "diagnostics/listSupportExport" as const;
 export const DIAGNOSTICS_CREATE_SUPPORT_EXPORT = "diagnostics/createSupportExport" as const;
@@ -65,6 +68,7 @@ export const TASK_ATTENTION_WAIT = "taskAttention/wait" as const;
 export const TERMINALS_OPEN = "terminals/open" as const;
 export const TERMINALS_ATTACH = "terminals/attach" as const;
 export const TERMINALS_CLOSE = "terminals/close" as const;
+export const TASK_IMAGE = "task/image" as const;
 export const ATTACHMENT_LIST_ROOTS = "attachment/listRoots" as const;
 export const ATTACHMENT_LIST_DIRECTORY = "attachment/listDirectory" as const;
 export const ATTACHMENT_CREATE_FILE_REFERENCE = "attachment/createFileReference" as const;
@@ -332,9 +336,23 @@ export type ClientProtocolCapability = "resync" | "requestResponses" | "stableCl
 
 export type ShellCapability = "openExternal" | "revealFile" | "resolveFileReveal" | "pickLocalFile" | "openTerminal" | "readSecret" | "writeSecret" | "showNotification";
 
-export type StateSubscribeParams = { scope: SubscriptionScope, };
+export type StateSubscribeParams = { scope: SubscriptionScope,
+/**
+ * Task revision of a copy this client already holds from the current App Server
+ * process. Only a Task scope honors it; the reply may then be a `taskResume`
+ * instead of a complete baseline (ADR-0073).
+ */
+knownRevision?: number, };
 
 export type StateSubscribeResult = { cursor: EventCursor, scope: SubscriptionScope, snapshot: SubscriptionSnapshot, };
+
+export type TaskResumeSnapshot = { taskId: TaskId, knownRevision: number,
+/**
+ * Published `taskChanged` changes after `known_revision`; empty when the copy is current.
+ */
+changes: Array<TaskRevisionChanges>, historySync: TaskHistorySyncSnapshot, pendingRequests: Array<PendingRequestSnapshot>, subagents: SubagentOverviewSnapshot, workspaceAvailable: boolean, };
+
+export type TaskRevisionChanges = { revision: number, changes: TaskChanges, };
 
 export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
@@ -342,7 +360,7 @@ export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
 export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, projectIds?: Array<ProjectId> | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, } | { "kind": "devices" } | { "kind": "terminals" };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "taskResume", resume: TaskResumeSnapshot, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
 
 export type SubagentOverviewSnapshot = { totalCount: number, runningCount: number, attentionCount: number, available?: boolean, };
 
@@ -363,6 +381,26 @@ export type SubagentHistorySnapshot = { taskId: TaskId, subagentId: SubagentId, 
 export type RuntimeDiagnosticsParams = Record<symbol, never>;
 
 export type RuntimeDiagnosticsResult = { status: RuntimeDiagnosticsStatus, version?: string | null, methodCount: number, tasks: TaskDiagnosticsResult, redaction: DiagnosticsRedaction, };
+
+export type ClientDiagnosticValue = boolean | number | string;
+
+export type ClientDiagnosticEvent = {
+/**
+ * A stable snake_case operation name, such as `task_route_open_completed`.
+ */
+event: string,
+/**
+ * Milliseconds since the Unix epoch on the client, for ordering against server events.
+ */
+atMs: number, fields: { [key in string]: ClientDiagnosticValue }, };
+
+export type ClientDiagnosticEventsParams = { events: Array<ClientDiagnosticEvent>, };
+
+export type ClientDiagnosticEventsResult = {
+/**
+ * How many events were written; the rest were outside the limits.
+ */
+recorded: number, };
 
 export type RuntimeDiagnosticsStatus = "ready" | "degraded";
 
@@ -1066,11 +1104,32 @@ export type TaskToolImagePreviewParams = { taskId: TaskId, artifactId: string, }
 
 export type TaskToolImagePreviewResult = { preview?: ToolImagePreview | null, };
 
-export type ProjectFilesParams = { taskId: TaskId, path: string, query: string, content: boolean, caseSensitive: boolean,
+export type TaskImageParams = { taskId: TaskId, imageId: string, };
+
+export type TaskImageResult = { data: string, };
+
+export type ProjectFilesParams = {
+/**
+ * Exactly one of `task_id` and `project_id` names the scope: a Task authorizes its Task
+ * Workspace, a Project its root.
+ */
+taskId?: TaskId, projectId?: ProjectId,
+/**
+ * Selects another worktree of the scope's repository instead of its default root.
+ */
+worktreeId?: WorktreeId,
+/**
+ * What changes and diffs compare against. Absent means uncommitted work.
+ */
+base?: ProjectChangeBase, path: string, query: string, content: boolean, caseSensitive: boolean,
 /**
  * Search respects ignore files unless explicitly requested. Tree browsing includes ignored files.
  */
-includeIgnored: boolean, cursor: number, };
+includeIgnored: boolean, cursor: number,
+/**
+ * `fileViewer/existingFiles` only: workspace-relative paths to check, at most 100.
+ */
+paths?: Array<string>, };
 
 export type ProjectFilesResult = { entries: Array<ProjectFileEntry>, nextCursor: number | null,
 /**
@@ -1080,9 +1139,24 @@ truncated: boolean,
 /**
  * Classified code only: unavailable, permissionDenied, outsideWorkspace, notRepository, timeout, tooLarge, changed.
  */
-error: string | null, branch: string | null, base: string | null, diff: ProjectFileDiff | null, };
+error: string | null, branch: string | null, base: string | null,
+/**
+ * Short name of the default branch when comparing against it would differ from
+ * uncommitted work; absent on that branch itself or when none can be found.
+ */
+defaultBranch: string | null,
+/**
+ * Number of changed files before paging; changes only.
+ */
+total: number | null, diff: ProjectFileDiff | null, };
 
-export type ProjectFileEntry = { path: string, name: string, directory: boolean, status: string | null, oldPath: string | null, line: number | null, text: string | null, };
+export type ProjectChangeBase = "uncommitted" | "defaultBranch";
+
+export type ProjectFileEntry = { path: string, name: string, directory: boolean, status: string | null, oldPath: string | null, line: number | null, text: string | null,
+/**
+ * Lines added and removed against the requested base; changes only.
+ */
+added: number | null, removed: number | null, };
 
 export type ProjectFileDiff = { path: string, oldPath: string | null, binary: boolean, conflicted: boolean, hunks: Array<ProjectDiffHunk>, };
 
@@ -1090,7 +1164,12 @@ export type ProjectDiffHunk = { heading: string, lines: Array<ProjectDiffLine>, 
 
 export type ProjectDiffLine = { kind: string, text: string, oldLine: number | null, newLine: number | null, };
 
-export type FileViewerOpenParams = { taskId: TaskId, path: string, line?: number | null, };
+export type FileViewerOpenParams = {
+/**
+ * Exactly one of `task_id` and `project_id` names the workspace that relative paths
+ * resolve against; `worktree_id` selects another worktree of the same repository.
+ */
+taskId?: TaskId, projectId?: ProjectId, worktreeId?: WorktreeId, path: string, line?: number | null, };
 
 export type FileViewerOpenFromHandleParams = { handle: FileViewerHandleId, href: string, };
 
@@ -1166,15 +1245,15 @@ export type ActivityToolValue = { "kind": "null" } | { "kind": "boolean", value:
 
 export type TaskOpenParams = { taskId: TaskId, };
 
-export type TaskOpenResult = { task: TaskSnapshot, };
+export type TaskOpenResult = Record<symbol, never>;
 
 export type TaskReloadNativeSessionParams = { taskId: TaskId, clientMutationId: ClientMutationId, };
 
-export type TaskReloadNativeSessionResult = { task: TaskSnapshot, };
+export type TaskReloadNativeSessionResult = Record<symbol, never>;
 
 export type TaskMarkReadParams = { taskId: TaskId, };
 
-export type TaskMarkReadResult = { task: TaskSnapshot, };
+export type TaskMarkReadResult = Record<symbol, never>;
 
 export type TaskListParams = { lifecycle: TaskListLifecycle, projectId?: ProjectId | null, cursor?: TaskListCursor | null, };
 
@@ -1264,7 +1343,11 @@ subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCurso
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskUpdated", projectId: ProjectId, task: TaskSummary, } | { "kind": "projectEntriesReplaced", section: TaskNavigationSection, projectId: ProjectId, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore: boolean, loading: boolean, } | { "kind": "refreshStateChanged", refresh: TaskNavigationRefreshState, } | { "kind": "navigationReplaced", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryUpdated", history: SubagentHistorySnapshot, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, } | { "kind": "deviceCollectionUpdated", devices: DeviceCollectionSnapshot, } | { "kind": "terminalCollectionUpdated", terminals: TerminalCollectionSnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskUpdated", projectId: ProjectId, task: TaskSummary, } | { "kind": "projectEntriesReplaced", section: TaskNavigationSection, projectId: ProjectId, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore: boolean, loading: boolean, } | { "kind": "refreshStateChanged", refresh: TaskNavigationRefreshState, } | { "kind": "navigationReplaced", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
+/**
+ * Outer option controls delta presence; inner option clears the Agent Plan.
+ */
+currentPlan?: AgentPlanSnapshot | null | null, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, } | { "kind": "deviceCollectionUpdated", devices: DeviceCollectionSnapshot, } | { "kind": "terminalCollectionUpdated", terminals: TerminalCollectionSnapshot, };
 
 export type ToolDetailDelta = { "kind": "replaceDetails", details: ToolDetailSnapshot, } | { "kind": "appendTerminal", terminalId: string, data: string, };
 
@@ -1573,7 +1656,11 @@ export type TimeSpanSnapshot = { startedAt: string, endedAt?: string | null, };
 
 export type CompactionStatusSnapshot = "inProgress" | "completed" | "failed" | "cancelled" | "unknown";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, } | { "kind": "completedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "closedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "compaction", status: CompactionStatusSnapshot, summary?: string | null, error?: string | null, };
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, imageId: string, sizeBytes: number,
+/**
+ * Absent when App Server could not read the image's header.
+ */
+dimensions?: ImageDimensions | null, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, } | { "kind": "completedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "closedPlan", entries: Array<AgentPlanEntrySnapshot>, } | { "kind": "compaction", status: CompactionStatusSnapshot, summary?: string | null, error?: string | null, };
 
 export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error";
 
@@ -1612,9 +1699,16 @@ export type ToolPermissionOutcomeSnapshot = { requestId: RequestId, decision: To
 
 export type ToolPermissionDecisionSnapshot = "approved" | "rejected" | "cancelled";
 
-export type AttachmentSnapshot = { attachmentId: AttachmentId, kind: AttachmentKind, label: string, mediaType?: string | null, sizeBytes?: number | null, previewUrl?: string | null, };
+export type AttachmentSnapshot = { attachmentId: AttachmentId, kind: AttachmentKind, label: string, mediaType?: string | null, sizeBytes?: number | null,
+/**
+ * A stored image of the Task that previews this attachment, loaded with
+ * `task/image`.
+ */
+previewImageId?: string | null, };
 
 export type AttachmentKind = "fileReference" | "embeddedSnapshot";
+
+export type ImageDimensions = { width: number, height: number, };
 
 export type RecoverySnapshot = { message: string, actions: Array<RecoveryAction>, };
 
@@ -1632,10 +1726,11 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
+  [FILE_VIEWER_EXISTING_FILES]: ProjectFilesParams;
   [FILE_VIEWER_CHANGES]: ProjectFilesParams;
   [FILE_VIEWER_DIFF]: ProjectFilesParams;
   [CLIENT_PROBE]: ClientProbeParams;
@@ -1651,6 +1746,7 @@ export type RequestParamsByMethod = {
   [STATE_SUBSCRIBE]: StateSubscribeParams;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;
+  [DIAGNOSTICS_RECORD_CLIENT_EVENTS]: ClientDiagnosticEventsParams;
   [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListParams;
   [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateParams;
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsParams;
@@ -1689,6 +1785,7 @@ export type RequestParamsByMethod = {
   [TERMINALS_OPEN]: TerminalsOpenParams;
   [TERMINALS_ATTACH]: TerminalsAttachParams;
   [TERMINALS_CLOSE]: TerminalsCloseParams;
+  [TASK_IMAGE]: TaskImageParams;
   [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;
   [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;
   [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;
@@ -1762,6 +1859,7 @@ export type RequestParamsByMethod = {
 export type ResponseResultByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesResult;
   [FILE_VIEWER_SEARCH]: ProjectFilesResult;
+  [FILE_VIEWER_EXISTING_FILES]: ProjectFilesResult;
   [FILE_VIEWER_CHANGES]: ProjectFilesResult;
   [FILE_VIEWER_DIFF]: ProjectFilesResult;
   [CLIENT_PROBE]: ClientProbeResult;
@@ -1777,6 +1875,7 @@ export type ResponseResultByMethod = {
   [STATE_SUBSCRIBE]: StateSubscribeResult;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;
+  [DIAGNOSTICS_RECORD_CLIENT_EVENTS]: ClientDiagnosticEventsResult;
   [DIAGNOSTICS_LIST_SUPPORT_EXPORT]: SupportExportListResult;
   [DIAGNOSTICS_CREATE_SUPPORT_EXPORT]: SupportExportCreateResult;
   [SUPPORT_RECOVER_STUCK_SESSIONS]: SupportRecoverStuckSessionsResult;
@@ -1815,6 +1914,7 @@ export type ResponseResultByMethod = {
   [TERMINALS_OPEN]: TerminalsOpenResult;
   [TERMINALS_ATTACH]: TerminalsAttachResult;
   [TERMINALS_CLOSE]: TerminalsCloseResult;
+  [TASK_IMAGE]: TaskImageResult;
   [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;
   [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;
   [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;
@@ -1912,6 +2012,7 @@ export type ClientReplacementImpactResponse = ResponseEnvelope<ClientReplacement
 export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;
 export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;
 export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsResult>;
+export type DiagnosticsRecordClientEventsResponse = ResponseEnvelope<ClientDiagnosticEventsResult>;
 export type SupportRecoverStuckSessionsResponse = ResponseEnvelope<SupportRecoverStuckSessionsResult>;
 export type AgentProbeResponse = ResponseEnvelope<AgentProbeResult>;
 export type AgentAuthenticateResponse = ResponseEnvelope<AgentAuthenticateResult>;
@@ -2008,4 +2109,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 2, minor: 4 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 3, minor: 0 };

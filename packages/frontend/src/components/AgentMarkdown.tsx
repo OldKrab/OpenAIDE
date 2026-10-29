@@ -16,10 +16,12 @@ import remarkGfm from "remark-gfm";
 import { postHostMessage } from "../services/hostBridge";
 import {
   chatMarkdownFileLocation,
+  inlineFileReferenceCandidate,
   markdownFileLocation,
   pathLikeFileLocation,
   relativeMarkdownHref,
 } from "../state/fileViewerReferences";
+import { useFileReferenceState } from "./existingFileReferences";
 import { useAgentFileOpen, type OpenAgentFileReference } from "./agentFileOpen";
 import { copyText } from "./clipboard";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -152,13 +154,25 @@ function AgentMarkdownAnchor({ children, href, node: _node, ...props }: Componen
   );
 }
 
+// Code blocks render their `code` inside this context; their copy action is on the block.
+const MarkdownPreContext = createContext(false);
+
 function AgentMarkdownCode({ children, className, node: _node, ...props }: ComponentProps<"code"> & ExtraProps) {
   const { openFile } = useContext(MarkdownLinkBehaviorContext);
-  const fenced = className?.split(/\s+/).some((token) => token.startsWith("language-"));
+  const fenced = useContext(MarkdownPreContext)
+    || className?.split(/\s+/).some((token) => token.startsWith("language-"));
   const text = plainText(children);
-  const location = !fenced ? pathLikeFileLocation(text) : undefined;
-  if (!location) {
+  const candidate = fenced ? undefined : inlineFileReferenceCandidate(text);
+  const checked = useFileReferenceState(candidate?.needsCheck ? candidate.location.path : undefined);
+  if (fenced) {
     return <code {...props} className={className}>{children}</code>;
+  }
+  // Without a Task workspace to ask, fall back to guessing from the extension.
+  const location = checked === "unchecked" && candidate?.needsCheck
+    ? pathLikeFileLocation(text)
+    : candidate && (!candidate.needsCheck || checked === "file") ? candidate.location : undefined;
+  if (!location) {
+    return <CopyableInlineCode {...props} className={className} text={text}>{children}</CopyableInlineCode>;
   }
   return (
     <code
@@ -201,7 +215,9 @@ function MarkdownPreBlock({ children, node: _node, ...props }: ComponentProps<"p
   }
   return (
     <MarkdownCopyBlock kind="code" text={text}>
-      <pre {...props}>{children}</pre>
+      <MarkdownPreContext.Provider value>
+        <pre {...props}>{children}</pre>
+      </MarkdownPreContext.Provider>
     </MarkdownCopyBlock>
   );
 }
@@ -266,6 +282,66 @@ function MarkdownCopyBlock({ children, kind, text }: { children: ReactNode; kind
       </button>
       {children}
     </div>
+  );
+}
+
+/**
+ * Inline code copies its text when tapped, the way a chat app copies a monospace span.
+ * A tap that ends a text selection inside it, or one on code inside a link, keeps its
+ * usual meaning.
+ */
+function CopyableInlineCode({
+  children,
+  className,
+  text,
+  ...props
+}: Omit<ComponentProps<"code">, "onClick" | "onKeyDown"> & { text: string }) {
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+  const copy = async () => {
+    clearTimeout(resetTimer.current);
+    try {
+      await copyText(text);
+      setCopyState("copied");
+    } catch (error) {
+      console.warn("Failed to copy Markdown inline code.", {
+        error_kind: error instanceof Error && error.name ? error.name : typeof error,
+      });
+      setCopyState("failed");
+    }
+    resetTimer.current = setTimeout(() => setCopyState("idle"), 1_400);
+  };
+  return (
+    <>
+      <code
+        {...props}
+        className={["agent-inline-code-copy", className].filter(Boolean).join(" ")}
+        data-copy-state={copyState}
+        onClick={(event) => {
+          const code = event.currentTarget;
+          if (code.closest("a")) return;
+          const selection = code.ownerDocument.getSelection();
+          if (selection && !selection.isCollapsed && selection.containsNode(code, true)) return;
+          void copy();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          void copy();
+        }}
+        role="button"
+        tabIndex={0}
+        title="Copy"
+      >
+        {children}
+      </code>
+      {copyState === "idle" ? null : (
+        <span aria-live="polite" className="visually-hidden">
+          {copyState === "copied" ? "Copied" : "Copy failed"}
+        </span>
+      )}
+    </>
   );
 }
 

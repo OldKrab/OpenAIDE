@@ -570,7 +570,7 @@ describe("App Server Protocol state mapping", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ agentId: "claude-code" as AgentId })).agent_name).toBe("Claude Code");
   });
 
-  it("maps protocol image attachment previews into chat attachment payloads", () => {
+  it("maps a stored attachment preview image into a chat image reference", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {
         hasMoreBefore: false,
@@ -590,7 +590,7 @@ describe("App Server Protocol state mapping", () => {
                   label: "diagram.png",
                   mediaType: "image/png",
                   sizeBytes: 5,
-                  previewUrl: "data:image/png;base64,aW1hZ2U=",
+                  previewImageId: "a".repeat(64),
                 },
               },
             ],
@@ -607,7 +607,7 @@ describe("App Server Protocol state mapping", () => {
           kind: "file",
           label: "diagram.png",
           payload: {
-            previewUrl: "data:image/png;base64,aW1hZ2U=",
+            imageId: "a".repeat(64),
             mimeType: "image/png",
             sizeBytes: 5,
           },
@@ -616,7 +616,7 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("maps inline user images into renderable chat attachments", () => {
+  it("maps user image references into chat attachments without bytes", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {
         hasMoreBefore: false,
@@ -631,7 +631,9 @@ describe("App Server Protocol state mapping", () => {
               {
                 kind: "image",
                 mediaType: "image/png",
-                dataUrl: "data:image/png;base64,aW1hZ2U=",
+                imageId: "b".repeat(64),
+                sizeBytes: 5,
+                dimensions: { width: 640, height: 480 },
               },
             ],
           },
@@ -647,11 +649,21 @@ describe("App Server Protocol state mapping", () => {
           kind: "image",
           label: "Image",
           payload: {
-            previewUrl: "data:image/png;base64,aW1hZ2U=",
+            imageId: "b".repeat(64),
             mimeType: "image/png",
+            sizeBytes: 5,
           },
         },
       ],
+    });
+    const message = mapping.snapshot.chat.items[0].message;
+    // The reference is the whole payload: no inline bytes or data URL reach the Chat.
+    expect(message.kind === "user" ? message.attachments?.[0]?.payload : undefined).toEqual({
+      imageId: "b".repeat(64),
+      mimeType: "image/png",
+      sizeBytes: 5,
+      width: 640,
+      height: 480,
     });
   });
 
@@ -668,7 +680,9 @@ describe("App Server Protocol state mapping", () => {
             parts: [{
               kind: "image",
               mediaType: "image/png",
-              dataUrl: "data:image/png;base64,aW1hZ2U=",
+              imageId: "c".repeat(64),
+              sizeBytes: 5,
+              dimensions: { width: 320, height: 200 },
               uri: "memory://diagram.png",
             }],
           },
@@ -700,7 +714,10 @@ describe("App Server Protocol state mapping", () => {
         parts: [{
           kind: "image",
           media_type: "image/png",
-          data_url: "data:image/png;base64,aW1hZ2U=",
+          image_id: "c".repeat(64),
+          size_bytes: 5,
+          width: 320,
+          height: 200,
           uri: "memory://diagram.png",
         }],
       },

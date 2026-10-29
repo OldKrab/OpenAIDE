@@ -299,9 +299,22 @@ pub enum AgentMessagePart {
     Text {
         text: String,
     },
+    /// An image arrives with inline base64 `data`. The Task journal stores it as a
+    /// file and keeps only `image_id`, `size_bytes`, and the display `width` and
+    /// `height` read from its header (ADR-0075), so committed Chat holds a
+    /// reference and an empty `data`.
     Image {
         media_type: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
         #[serde(skip_serializing_if = "Option::is_none")]
         uri: Option<String>,
     },

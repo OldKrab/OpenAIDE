@@ -47,6 +47,7 @@ import {
   TASK_SET_CONFIG_OPTION,
   TASK_SET_PINNED,
   TASK_TOOL_IMAGE_PREVIEW,
+  TASK_IMAGE,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -388,7 +389,7 @@ describe("app controller callbacks", () => {
           userMessageId: "message_1",
         };
       }
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_old", "Old task") };
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     const state = preparedNewTaskState("task_old");
@@ -1013,8 +1014,9 @@ describe("app controller callbacks", () => {
   it("does not let an older first-send rejection reclaim a newer prepared lease", async () => {
     const pendingSend = deferred<never>();
     const request = vi.fn((method: string) => {
-      if (method === TASK_OPEN) {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_a", "First draft") });
+      // Preparing again for the same context returns the Task this client already leases.
+      if (method === TASK_ACQUIRE) {
+        return Promise.resolve({ task: protocolTaskSnapshotForContext("task_a", "project_1", "codex") });
       }
       if (method === TASK_SEND) return pendingSend.promise;
       return Promise.reject(new Error(method));
@@ -1040,6 +1042,7 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(newTaskController.currentLease()).toBe(leaseB);
+    expect(request).not.toHaveBeenCalledWith(TASK_OPEN, expect.anything());
   });
 
   it.each(["accepted", "cleanupFailed"])("keeps a newer New Task draft pending when a superseded first Send is %s", async (outcome) => {
@@ -1109,9 +1112,7 @@ describe("app controller callbacks", () => {
   it("routes existing tasks for the destination surface to open", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_1", "Unread task") };
-      }
+      if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
     const state = createInitialState();
@@ -1175,6 +1176,20 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("keeps the file viewer connection identity across callback rebuilds", () => {
+    // The Task page keys its file-existence cache on this connection; a fresh
+    // wrapper per render re-requested every Chat file link.
+    const backendConnection = { request: vi.fn() as unknown as BackendConnection["request"] };
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const first = callbacks({ backendConnection, state }).task.fileViewer;
+    const second = callbacks({ backendConnection, state }).task.fileViewer;
+
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+  });
+
   it("requests deeper Project discovery for the Load more target", async () => {
     const request = vi.fn(async () => ({ accepted: true }));
 
@@ -1206,7 +1221,7 @@ describe("app controller callbacks", () => {
       const dispatch = vi.fn();
       const request = vi.fn(async (method: string) => {
         if (method === TASK_ACQUIRE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
-        if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
+        if (method === TASK_OPEN) return {};
         if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
         throw new Error(method);
       });
@@ -1344,9 +1359,7 @@ describe("app controller callbacks", () => {
         if (method === TASK_ACQUIRE) {
           return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         }
-        if (method === TASK_OPEN) {
-          return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
-        }
+        if (method === TASK_OPEN) return {};
         if (method === TASK_SET_CONFIG_OPTION) {
           return { agentConfig: protocolTaskSnapshot("task_1", "New task").agentConfig };
         }
@@ -1502,7 +1515,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("refreshes an existing Task after a config mutation error clears backend pending state", async () => {
+  it("shows an existing Task config mutation error without re-reading the Task", async () => {
     vi.useFakeTimers();
     try {
       const dispatch = vi.fn();
@@ -1511,9 +1524,6 @@ describe("app controller callbacks", () => {
           throw new AppServerProtocolError({
             error: { code: "internal", message: "Agent rejected the option", recoverable: true },
           });
-        }
-        if (method === TASK_OPEN) {
-          return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } };
         }
         throw new Error(method);
       });
@@ -1531,7 +1541,8 @@ describe("app controller callbacks", () => {
 
       const configRequest = request.mock.calls.find(([method]) => method === TASK_SET_CONFIG_OPTION);
       const mutationId = (configRequest?.[1] as { clientMutationId?: string } | undefined)?.clientMutationId;
-      expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
+      // The live Task subscription carries any durable change; the error path re-reads nothing.
+      expect(request.mock.calls.map(([method]) => method)).toEqual([TASK_SET_CONFIG_OPTION]);
       expect(dispatch).toHaveBeenCalledWith({
         type: "taskInput:configError",
         taskId: "task_1",
@@ -1539,7 +1550,8 @@ describe("app controller callbacks", () => {
         message: "Agent rejected the option",
         catalog: editableConfigOptions(),
       });
-      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "taskOpen:accepted" }));
 
       vi.advanceTimersByTime(10_000);
       expect(dispatch).toHaveBeenCalledWith({
@@ -1556,9 +1568,6 @@ describe("app controller callbacks", () => {
     const configMutation = deferred<never>();
     const request = vi.fn((method: string) => {
       if (method === TASK_SET_CONFIG_OPTION) return configMutation.promise;
-      if (method === TASK_OPEN) {
-        return Promise.resolve({ task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } });
-      }
       throw new Error(method);
     });
     let renderedState = createInitialState();
@@ -1589,6 +1598,7 @@ describe("app controller callbacks", () => {
       state: "sending",
     });
     expect(renderedState.taskInputs.task_1.configError?.message).toBe("Agent rejected the option");
+    expect(request).not.toHaveBeenCalledWith(TASK_OPEN, expect.anything());
   });
 
   it("surfaces a new-task error when typed create prerequisites are missing", () => {
@@ -4177,7 +4187,7 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session.setConfigOption" }));
   });
 
-  it("refreshes a prepared Task after a config mutation error clears backend pending state", async () => {
+  it("shows a prepared Task config mutation error without re-reading the Task", async () => {
     let renderedState = preparedNewTaskState("task-prepared");
     renderedState.activeTaskId = "task-prepared";
     const dispatch = vi.fn((action) => {
@@ -4188,9 +4198,6 @@ describe("app controller callbacks", () => {
         throw new AppServerProtocolError({
           error: { code: "internal", message: "Agent rejected the option", recoverable: true },
         });
-      }
-      if (method === TASK_OPEN) {
-        return { task: { ...protocolTaskSnapshot("task-prepared", "New task"), revision: 4 } };
       }
       throw new Error(method);
     });
@@ -4203,12 +4210,14 @@ describe("app controller callbacks", () => {
     }).newTask.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task-prepared" });
+    // The live Task subscription carries any durable change; the error path re-reads nothing.
+    expect(request.mock.calls.map(([method]) => method)).toEqual([TASK_SET_CONFIG_OPTION]);
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:configOptions:error",
       message: "Unable to update Agent option.",
     });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "taskOpen:accepted" }));
     expect(renderedState.newTask.configOptionsError).toBe("Unable to update Agent option.");
   });
 
@@ -4334,6 +4343,26 @@ describe("app controller callbacks", () => {
       mediaType: "image/png",
       dataUrl: "data:image/png;base64,aW1hZ2U=",
     });
+  });
+
+  it("loads a stored Chat image by Task and image id and records metadata-only telemetry", async () => {
+    const request = vi.fn(async (method: string) => method === TASK_IMAGE ? { data: "aW1hZ2U=" } : { recorded: 2 });
+
+    const data = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state: createInitialState(),
+    }).task.loadChatImage("task_2", "image_1");
+
+    expect(data).toBe("aW1hZ2U=");
+    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_2", imageId: "image_1" });
+    const telemetry = postHostMessage.mock.calls
+      .map(([message]) => (message as { payload: Record<string, unknown> }).payload)
+      .filter((payload) => String(payload.event).startsWith("chat_image_load_"));
+    expect(telemetry).toEqual([
+      { event: "chat_image_load_started", task_id: "task_2", image_id: "image_1", cache_hit: false },
+      expect.objectContaining({ event: "chat_image_load_completed", task_id: "task_2", image_id: "image_1", size_bytes: 5 }),
+    ]);
+    expect(JSON.stringify(telemetry)).not.toContain("aW1hZ2U=");
   });
 
   it("task callbacks no-op when there is no active snapshot", () => {

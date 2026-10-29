@@ -13,6 +13,8 @@ mod tests;
 const PAGE: usize = 200;
 const SCAN: usize = 20_000;
 const FILE_BYTES: u64 = 1024 * 1024;
+/// Chat asks about the paths of the messages it renders; this bounds one request.
+const EXISTING_PATHS: usize = 100;
 
 pub fn run(root: &Path, operation: &str, params: &ProjectFilesParams) -> ProjectFilesResult {
     let mut result = empty();
@@ -26,6 +28,10 @@ pub fn run(root: &Path, operation: &str, params: &ProjectFilesParams) -> Project
     let outcome = match operation {
         "fileViewer/listDirectory" => directory(&root, params, &mut result),
         "fileViewer/search" => search(&root, params, &mut result),
+        "fileViewer/existingFiles" => {
+            existing(&root, params, &mut result);
+            Ok(())
+        }
         "fileViewer/changes" => git::changes(&root, params, &mut result),
         "fileViewer/diff" => git::diff(&root, params, &mut result),
         _ => Err("unavailable"),
@@ -43,6 +49,8 @@ fn empty() -> ProjectFilesResult {
         error: None,
         branch: None,
         base: None,
+        default_branch: None,
+        total: None,
         diff: None,
     }
 }
@@ -55,6 +63,8 @@ fn entry(path: String, directory: bool) -> ProjectFileEntry {
         old_path: None,
         line: None,
         text: None,
+        added: None,
+        removed: None,
     }
 }
 /// Missing leaf paths are allowed only for reviewing deletions; their existing parent
@@ -77,6 +87,21 @@ fn resolve(root: &Path, relative: &str, missing: bool) -> Result<PathBuf, &'stat
         return Err("outsideWorkspace");
     }
     Ok(joined)
+}
+/// Keeps the requested paths that name a regular file inside the workspace, as given.
+/// Missing paths, directories, parent components and symlinks leaving the workspace are
+/// dropped alike, so the answer reveals nothing outside it.
+fn existing(root: &Path, params: &ProjectFilesParams, result: &mut ProjectFilesResult) {
+    let paths = params.paths.as_deref().unwrap_or_default();
+    result.truncated = paths.len() > EXISTING_PATHS;
+    for path in paths.iter().take(EXISTING_PATHS) {
+        let is_file = resolve(root, path, false)
+            .and_then(|resolved| fs::metadata(resolved).map_err(|_| "unavailable"))
+            .is_ok_and(|metadata| metadata.is_file());
+        if is_file {
+            result.entries.push(entry(path.clone(), false));
+        }
+    }
 }
 fn relative(root: &Path, path: &Path) -> Option<String> {
     path.strip_prefix(root)
@@ -158,6 +183,9 @@ fn search(
     let started = Instant::now();
     let mut bytes = 0u64;
     let mut found = 0usize;
+    // A name search ranks every match in the bounded scan before paging, so the best match is
+    // first whatever its place in the walk.
+    let mut ranked: Vec<(NameRank, String)> = vec![];
     let walker = ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(!params.include_ignored)
@@ -188,13 +216,9 @@ fn search(
             continue;
         }
         if !params.content {
-            if !matches(&path) {
-                continue;
+            if let Some(rank) = name_rank(&path, &query, params.case_sensitive) {
+                ranked.push((rank, path));
             }
-            if found >= params.cursor as usize {
-                result.entries.push(entry(path, false));
-            }
-            found += 1;
         } else {
             let Ok(file) = fs::File::open(item.path()) else {
                 result.truncated = true;
@@ -236,9 +260,60 @@ fn search(
             break;
         }
     }
+    if !params.content {
+        ranked.sort();
+        let start = (params.cursor as usize).min(ranked.len());
+        result.entries = ranked
+            .drain(start..)
+            .take(PAGE + 1)
+            .map(|(_, path)| entry(path, false))
+            .collect();
+    }
     if result.entries.len() > PAGE {
         result.entries.truncate(PAGE);
         result.next_cursor = Some(params.cursor + PAGE as u32);
     }
     Ok(())
+}
+
+/// How well a path matches a file-name query, best first: the file name equals the query,
+/// starts with it, or contains it; then the path contains it; then the query's characters
+/// appear in order in the file name, then in the path. Shorter paths win within a tier, then
+/// path order, so the result is stable.
+type NameRank = (u8, usize);
+
+fn name_rank(path: &str, query: &str, case_sensitive: bool) -> Option<NameRank> {
+    let folded;
+    let text = if case_sensitive {
+        path
+    } else {
+        folded = path.to_lowercase();
+        &folded
+    };
+    let name = text.rsplit('/').next().unwrap_or(text);
+    let tier = if name == query {
+        0
+    } else if name.starts_with(query) {
+        1
+    } else if name.contains(query) {
+        2
+    } else if text.contains(query) {
+        3
+    } else if in_order(name, query) {
+        4
+    } else if in_order(text, query) {
+        5
+    } else {
+        return None;
+    };
+    Some((tier, path.len()))
+}
+
+/// Whether every character of `query` appears in `text` in the same order.
+fn in_order(text: &str, query: &str) -> bool {
+    let mut rest = text.chars();
+    query
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .all(|c| rest.any(|t| t == c))
 }

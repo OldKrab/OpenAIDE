@@ -34,10 +34,6 @@ use crate::client::{
     UpdateShutdownCommitParams, UpdateShutdownCommitResult, UpdateShutdownPrepareParams,
     UpdateShutdownPrepareResult,
 };
-use crate::diagnostics::{
-    RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, SupportExportCreateParams,
-    SupportExportCreateResult, SupportExportListParams, SupportExportListResult,
-};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
 use crate::file_viewer::{
     FileViewerOpenFromHandleParams, FileViewerOpenParams, FileViewerRefreshParams,
@@ -64,7 +60,6 @@ use crate::snapshot::NewTaskDefaultsSnapshot;
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
 };
-use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
     NativeSessionArchiveResult, NativeSessionDeleteParams, NativeSessionDeleteResult,
@@ -75,12 +70,13 @@ use crate::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderParams,
     TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
-    TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
-    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
-    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
+    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
+    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
     TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
     TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
     TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
@@ -142,10 +138,12 @@ macro_rules! protocol_method {
 
 // Declared after the macro so the modules can use it.
 mod devices;
+mod diagnostics;
 mod task_attention;
 mod terminals;
 
 pub use devices::*;
+pub use diagnostics::*;
 pub use task_attention::*;
 pub use terminals::*;
 
@@ -220,30 +218,6 @@ protocol_method!(
     STATE_UNSUBSCRIBE,
     StateUnsubscribeParams,
     StateUnsubscribeResult
-);
-protocol_method!(
-    DiagnosticsGetRuntime,
-    DIAGNOSTICS_GET_RUNTIME,
-    RuntimeDiagnosticsParams,
-    RuntimeDiagnosticsResult
-);
-protocol_method!(
-    DiagnosticsListSupportExport,
-    DIAGNOSTICS_LIST_SUPPORT_EXPORT,
-    SupportExportListParams,
-    SupportExportListResult
-);
-protocol_method!(
-    DiagnosticsCreateSupportExport,
-    DIAGNOSTICS_CREATE_SUPPORT_EXPORT,
-    SupportExportCreateParams,
-    SupportExportCreateResult
-);
-protocol_method!(
-    SupportRecoverStuckSessions,
-    SUPPORT_RECOVER_STUCK_SESSIONS,
-    SupportRecoverStuckSessionsParams,
-    SupportRecoverStuckSessionsResult
 );
 protocol_method!(AgentProbe, AGENT_PROBE, AgentProbeParams, AgentProbeResult);
 protocol_method!(
@@ -680,6 +654,7 @@ protocol_method!(
     TaskToolImagePreviewParams,
     TaskToolImagePreviewResult
 );
+protocol_method!(TaskImage, TASK_IMAGE, TaskImageParams, TaskImageResult);
 protocol_method!(
     FileViewerOpen,
     FILE_VIEWER_OPEN,
@@ -786,6 +761,12 @@ protocol_method!(
 protocol_method!(
     FileViewerSearch,
     FILE_VIEWER_SEARCH,
+    ProjectFilesParams,
+    ProjectFilesResult
+);
+protocol_method!(
+    FileViewerExistingFiles,
+    FILE_VIEWER_EXISTING_FILES,
     ProjectFilesParams,
     ProjectFilesResult
 );

@@ -6,6 +6,7 @@ import {
   type ImagePreviewViewportSource,
 } from "./ImagePreviewViewport";
 import { PopupDialog } from "./Popup";
+import type { StoredChatImageReference } from "./StoredChatImage";
 
 export type AttachmentImagePreviewSource = ImagePreviewViewportSource;
 
@@ -63,6 +64,22 @@ export function composerImagePreview(attachment: ComposerAttachment): Attachment
   return { label: attachment.label, url: attachment.preview_url };
 }
 
+/** A Chat attachment that names a stored Task image; its bytes load when it is shown. */
+export function storedChatImageReference(attachment: Attachment): StoredChatImageReference | undefined {
+  const imageId = payloadString(attachment.payload, "imageId");
+  const mediaType = payloadString(attachment.payload, "mimeType");
+  if (!imageId || !mediaType) return undefined;
+  const payload = attachment.payload as Record<string, unknown>;
+  return {
+    imageId,
+    mediaType,
+    ...payloadNumber(payload, "sizeBytes"),
+    ...payloadNumber(payload, "width"),
+    ...payloadNumber(payload, "height"),
+  };
+}
+
+/** An image the client still holds itself, such as a local preview before App Server stores it. */
 export function chatImagePreview(attachment: Attachment): AttachmentImagePreviewSource | undefined {
   const previewUrl = payloadString(attachment.payload, "preview_url") ?? payloadString(attachment.payload, "previewUrl");
   if (previewUrl && previewUrl.startsWith("data:image/")) return { label: attachment.label, url: previewUrl };
@@ -71,6 +88,11 @@ export function chatImagePreview(attachment: Attachment): AttachmentImagePreview
   const mimeType = payloadString(attachment.payload, "mimeType") ?? payloadString(attachment.payload, "mime");
   if (!data || !mimeType?.startsWith("image/")) return undefined;
   return { label: attachment.label, url: `data:${mimeType};base64,${data}` };
+}
+
+function payloadNumber<Key extends string>(payload: Record<string, unknown>, key: Key) {
+  const value = payload[key];
+  return typeof value === "number" ? { [key]: value } as Record<Key, number> : {};
 }
 
 function payloadString(payload: unknown, key: string) {

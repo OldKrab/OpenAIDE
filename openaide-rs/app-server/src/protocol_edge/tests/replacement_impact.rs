@@ -19,7 +19,11 @@ fn reports_other_clients_and_active_work_without_starting_a_replacement() {
         name: Some("Pixel".to_string()),
         version: Some("0.9.0".to_string()),
     };
-    phone.protocol_version = Some(ProtocolVersion { major: 2, minor: 1 });
+    // An older compatible minor: same major as this App Server, minor 0.
+    phone.protocol_version = Some(ProtocolVersion {
+        major: openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION.major,
+        minor: 0,
+    });
     response_value(gateway.handle_inbound(
         ConnectionId::new("conn-2"),
         request("2", CLIENT_INITIALIZE, phone),
@@ -56,7 +60,10 @@ fn reports_other_clients_and_active_work_without_starting_a_replacement() {
                     "kind": "mobile",
                     "name": "Pixel",
                     "appVersion": "0.9.0",
-                    "protocolVersion": { "major": 2, "minor": 1 },
+                    "protocolVersion": {
+                        "major": openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION.major,
+                        "minor": 0
+                    },
                     "reconnecting": false
                 },
                 { "kind": "terminal", "appVersion": "0.10.0", "reconnecting": true }
@@ -73,6 +80,7 @@ fn reports_other_clients_and_active_work_without_starting_a_replacement() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(6),

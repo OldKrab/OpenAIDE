@@ -92,9 +92,16 @@ pub enum MessagePart {
     Attachment {
         attachment: AttachmentSnapshot,
     },
+    /// A reference to one of the Task's stored images. Frontend loads the bytes
+    /// with `task/image` when it shows the image (ADR-0075), and reserves the
+    /// image's `dimensions` meanwhile so the Chat does not shift when it arrives.
     Image {
         media_type: String,
-        data_url: String,
+        image_id: String,
+        size_bytes: u64,
+        /// Absent when App Server could not read the image's header.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dimensions: Option<ImageDimensions>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         uri: Option<String>,
     },
@@ -339,6 +346,14 @@ pub enum ToolPermissionDecisionSnapshot {
     Cancelled,
 }
 
+/// Pixel size an image displays at, with its EXIF orientation applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentSnapshot {
@@ -349,8 +364,10 @@ pub struct AttachmentSnapshot {
     pub media_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// A stored image of the Task that previews this attachment, loaded with
+    /// `task/image`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview_url: Option<String>,
+    pub preview_image_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

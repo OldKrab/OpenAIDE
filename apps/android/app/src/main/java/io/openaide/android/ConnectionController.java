@@ -56,7 +56,7 @@ final class ConnectionController extends ContextWrapper {
         if (disposed) return;
         String command = message.optString("action");
         if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
-            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background").contains(command)) {
+            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check").contains(command)) {
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
@@ -75,14 +75,14 @@ final class ConnectionController extends ContextWrapper {
         if (action.equals("cancel_switch")) { reply.done(switcher.cancel() ? "cancelled" : "unchanged", null); return; }
         ConnectionStore store = new ConnectionStore(this);
         ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
-        String target = action.equals("use_computer") ? message.optString("id") : null;
+        // The switcher names an SSH Computer by its prefixed id; Settings' own row sends "use_ssh".
+        String target = action.equals("use_computer") ? message.optString("id")
+            : action.equals("use_ssh") ? ComputerSwitch.SSH_PREFIX + message.optString("id") : null;
         String operationId = message.has("operationId") ? message.optString("operationId") : null;
         if (action.equals("forget_computer")) { forget(message.optString("id"), operationId, reply); return; }
         // An SSH Computer in use is a source of its own, so returning to this phone is a switch.
-        // TODO(ssh-computers): switch to SSH Computers through this switch too (ADR-0070), so
-        // "use_ssh" connects before it replaces the page and the switcher lists them.
         SshComputers.Computer ssh = store.usesSsh() ? store.sshComputer() : null;
-        String source = selected != null ? selected.id : ssh != null ? "ssh:" + ssh.id : null;
+        String source = selected != null ? selected.id : ssh != null ? ComputerSwitch.SSH_PREFIX + ssh.id : null;
         switcher.request(source, target, operationId, reply);
     }
 
@@ -114,6 +114,7 @@ final class ConnectionController extends ContextWrapper {
             case "close": view.close(); break;
             case "state": emit(); break;
             case "check": check(); break;
+            case "remote_check": remoteCheck(); break;
             case "pair_setup": view.setup("remote"); break;
             case "phone_setup": view.setup("local"); break;
             case "scan": scan(); break;
@@ -123,13 +124,6 @@ final class ConnectionController extends ContextWrapper {
             case "ssh_add":
                 if (BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()) { unavailableInBuild("ssh"); break; }
                 SshSetup.start(activity, this::changed);
-                break;
-            case "use_ssh":
-                if (!new ConnectionStore(this).selectSsh(message.optString("id"))) { emit(); break; }
-                RemoteNode.INSTANCE.disconnect();
-                SshServer.reset();
-                diagnostics.record("connection_ssh_selected", "selected", 0, 0);
-                changed();
                 break;
             case "forget_ssh": {
                 ConnectionStore store = new ConnectionStore(this);
@@ -238,6 +232,11 @@ final class ConnectionController extends ContextWrapper {
         emit();
     }
 
+    private void remoteCheck() {
+        begin("setup_remote_check", "Checking the connection…");
+        RemotePairing.check(this, (ok, message) -> end(ok, message));
+    }
+
     private void scan() {
         // The scanner asks for the camera itself and returns here with the code's text.
         com.google.zxing.integration.android.IntentIntegrator scanner = new com.google.zxing.integration.android.IntentIntegrator(activity);
@@ -307,9 +306,13 @@ final class ConnectionController extends ContextWrapper {
     private String switchNotice(String action, String id) {
         if (action.equals("local")) return "Switching to this phone…";
         String name = "";
-        for (ConnectionStore.PairedServer server : new ConnectionStore(this).pairedServers()) {
+        ConnectionStore store = new ConnectionStore(this);
+        for (ConnectionStore.PairedServer server : store.pairedServers()) {
             if (server.id.equals(id)) name = server.name;
         }
+        String sshId = action.equals("use_ssh") ? id : ComputerSwitch.Companion.sshId(id);
+        SshComputers.Computer ssh = sshId == null ? null : SshComputers.find(store.sshComputers(), sshId);
+        if (ssh != null) name = ssh.name;
         if (action.equals("forget_computer")) return "Forgetting " + (name.isEmpty() ? "that computer" : name) + "…";
         return "Connecting to " + (name.isEmpty() ? "that computer" : name) + "…";
     }
@@ -377,6 +380,12 @@ final class ConnectionController extends ContextWrapper {
         for (ConnectionStore.PairedServer server : store.pairedServers()) {
             computers.put(new JSONObject().put("id", server.id).put("name", server.name)
                 .put("current", selected != null && selected.id.equals(server.id)));
+        }
+        // SSH Computers follow, switched to by their prefixed id (ADR-0070).
+        SshComputers.Computer ssh = store.sshComputer();
+        for (SshComputers.Computer computer : store.sshComputers()) {
+            computers.put(new JSONObject().put("id", ComputerSwitch.SSH_PREFIX + computer.id).put("name", computer.name)
+                .put("ssh", computer.destination()).put("current", ssh != null && ssh.id.equals(computer.id)));
         }
         return computers;
     }

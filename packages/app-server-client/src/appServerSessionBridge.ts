@@ -12,6 +12,7 @@ import type {
   BackendRecoveryFailure,
   BackendRequestContext,
   BackendUnsubscribe,
+  ReplicaSnapshot,
 } from "./backendConnection.js";
 import type {
   AppServerEvent,
@@ -20,7 +21,6 @@ import type {
   RequestMeta,
   ServerRequestMethod,
   SubscriptionScope,
-  SubscriptionSnapshot,
 } from "./generated/protocol.js";
 
 export type AppServerSessionViewMessage =
@@ -35,7 +35,7 @@ export type AppServerSessionViewMessage =
 
 export type AppServerSessionHostMessage =
   | { type: "appServer.session.response"; requestId: string; result?: unknown; error?: SerializedBridgeError }
-  | { type: "appServer.session.snapshot"; subscriptionId: string; snapshot: SubscriptionSnapshot; event?: AppServerEvent; snapshotChanged?: boolean }
+  | { type: "appServer.session.snapshot"; subscriptionId: string; snapshot: ReplicaSnapshot; event?: AppServerEvent; snapshotChanged?: boolean }
   | { type: "appServer.session.baselineLost"; subscriptionId: string }
   | { type: "appServer.session.baselineReady"; subscriptionId: string }
   | { type: "appServer.session.baselineError"; subscriptionId: string; error: SerializedBridgeError }

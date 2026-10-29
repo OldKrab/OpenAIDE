@@ -53,11 +53,12 @@ use crate::devices::{
     RemoteDevicePath, RemoteDeviceSummary,
 };
 use crate::diagnostics::{
-    ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
-    RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus, SupportArtifactAvailability,
-    SupportExportCreateParams, SupportExportCreateResult, SupportExportListParams,
-    SupportExportListResult, SupportExportSession, SupportExportSessionSelection,
-    SupportExportTrace, TaskDiagnosticsResult,
+    ActiveTaskDiagnosticsResult, ClientDiagnosticEvent, ClientDiagnosticEventsParams,
+    ClientDiagnosticEventsResult, ClientDiagnosticValue, DiagnosticsRedaction,
+    RuntimeDiagnosticsParams, RuntimeDiagnosticsResult, RuntimeDiagnosticsStatus,
+    SupportArtifactAvailability, SupportExportCreateParams, SupportExportCreateResult,
+    SupportExportListParams, SupportExportListResult, SupportExportSession,
+    SupportExportSessionSelection, SupportExportTrace, TaskDiagnosticsResult,
 };
 use crate::envelopes::{
     ClientRequestEnvelope, ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
@@ -117,29 +118,29 @@ use crate::snapshot::{
     AgentSignInPhase, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
     AgentSummary, AttachmentKind, AttachmentSnapshot, BackgroundCommandOutcome,
     BackgroundCommandSnapshot, ChatItem, ChatItemStatus, ChatItemTiming, ChatRole, ChatSnapshot,
-    ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot, LiveSessionDataState,
-    MessagePart, NativeSessionReference, NativeSessionSummary, NewTaskDefaultsSnapshot,
-    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
-    ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion, QuestionMessageAction,
-    QuestionMessageState, QueuedMessageAttachmentSnapshot, QueuedMessageSnapshot, RecoveryAction,
-    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    SubagentActivitySnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
-    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
-    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason, TaskContextUsage,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueuePauseSnapshot,
-    TaskMessageQueueSnapshot, TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState,
-    TaskNavigationSnapshot, TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
-    TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot, ToolPresentationSnapshot,
-    ToolSearchTargetSnapshot,
+    ClientSnapshot, ClientSnapshotScope, CompactionStatusSnapshot, ImageDimensions,
+    LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    QuestionMessageAction, QuestionMessageState, QueuedMessageAttachmentSnapshot,
+    QueuedMessageSnapshot, RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot,
+    SettingsSnapshot, StateRootSnapshot, SubagentActivitySnapshot, SubagentCapabilitiesSnapshot,
+    SubagentCatalogEntrySnapshot, SubagentCatalogSnapshot, SubagentDetailSnapshot,
+    SubagentHistoryAvailability, SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
+    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
+    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
-    SubscriptionScope, SubscriptionSnapshot,
+    SubscriptionScope, SubscriptionSnapshot, TaskResumeSnapshot, TaskRevisionChanges,
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
@@ -158,20 +159,21 @@ use crate::task::{
     TaskArchiveOlderProtectedTask, TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult,
     TaskAttentionWaitParams, TaskAttentionWaitResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult,
-    TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSection,
-    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
-    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
-    TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
-    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskStopBackgroundCommandParams,
-    TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
-    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
-    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
+    TaskImageParams, TaskImageResult, TaskLifecycleChanged, TaskListLifecycle, TaskListParams,
+    TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskNavigationSection, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult,
+    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
+    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
+    TaskStopSubagentResult, TaskTitleSelection, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
+    WorkspaceFileSearchState,
 };
 use crate::terminals::{
     TerminalAttach, TerminalCollectionSnapshot, TerminalStatus, TerminalSummary, TerminalTarget,
@@ -264,6 +266,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<StateSubscribeParams>(output, config);
     push_decl::<StateSubscribeResult>(output, config);
+    push_decl::<TaskResumeSnapshot>(output, config);
+    push_decl::<TaskRevisionChanges>(output, config);
     push_decl::<StateUnsubscribeParams>(output, config);
     push_decl::<StateUnsubscribeResult>(output, config);
     push_decl::<SubscriptionScope>(output, config);
@@ -279,6 +283,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<RuntimeDiagnosticsParams>(output, config);
     push_decl::<RuntimeDiagnosticsResult>(output, config);
+    push_decl::<ClientDiagnosticValue>(output, config);
+    push_decl::<ClientDiagnosticEvent>(output, config);
+    push_decl::<ClientDiagnosticEventsParams>(output, config);
+    push_decl::<ClientDiagnosticEventsResult>(output, config);
     push_decl::<RuntimeDiagnosticsStatus>(output, config);
     push_decl::<TaskDiagnosticsResult>(output, config);
     push_decl::<ActiveTaskDiagnosticsResult>(output, config);
@@ -552,8 +560,11 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskClosePlanResult>(output, config);
     push_decl::<TaskToolImagePreviewParams>(output, config);
     push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<TaskImageParams>(output, config);
+    push_decl::<TaskImageResult>(output, config);
     push_decl::<ProjectFilesParams>(output, config);
     push_decl::<ProjectFilesResult>(output, config);
+    push_decl::<ProjectChangeBase>(output, config);
     push_decl::<ProjectFileEntry>(output, config);
     push_decl::<ProjectFileDiff>(output, config);
     push_decl::<ProjectDiffHunk>(output, config);
@@ -730,6 +741,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ToolPermissionDecisionSnapshot>(output, config);
     push_decl::<AttachmentSnapshot>(output, config);
     push_decl::<AttachmentKind>(output, config);
+    push_decl::<ImageDimensions>(output, config);
     push_decl::<RecoverySnapshot>(output, config);
     push_decl::<RecoveryAction>(output, config);
     push_decl::<SettingsSnapshot>(output, config);

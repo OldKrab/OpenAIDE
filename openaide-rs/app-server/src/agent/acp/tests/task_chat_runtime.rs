@@ -689,6 +689,14 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
             task_id: task_id.clone(),
         })
         .expect("open completed task");
+    // The Agent's image is stored once under its SHA-256; Chat names it (ADR-0075).
+    const AGENT_IMAGE_ID: &str = "6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d";
+    assert_eq!(
+        store
+            .read_chat_image(task_id.as_str(), AGENT_IMAGE_ID)
+            .expect("read stored image"),
+        Some(b"image".to_vec())
+    );
     let agent_parts = completed
         .chat
         .items
@@ -704,7 +712,8 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
             serde_json::json!({
                 "kind": "image",
                 "mediaType": "image/png",
-                "dataUrl": "data:image/png;base64,aW1hZ2U=",
+                "imageId": AGENT_IMAGE_ID,
+                "sizeBytes": 5,
                 "uri": "memory://diagram.png"
             }),
             serde_json::json!({

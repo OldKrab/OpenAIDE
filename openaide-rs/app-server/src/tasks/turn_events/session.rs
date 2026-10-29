@@ -203,7 +203,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 // A resumed connection announces a stored child again; the
                 // announcement is its current identity.
                 let (name, delegated_task, cancel) = announced_identity;
-                record = self.mutations.store().update_subagent_identity(
+                self.mutations.store().update_subagent_identity(
                     &self.task_id,
                     &record.native_session_id,
                     Some(name),
@@ -212,7 +212,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 )?;
             }
             // The parent's own Tool rows show this delegation in its Chat.
-            return self.publish_subagent_snapshots(&record.subagent_id);
+            return Ok(());
         }
         if parent_interaction {
             record = self.mutations.store().update_subagent_status(
@@ -224,10 +224,12 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 &self.task_id,
                 &record.native_session_id,
                 codex_subagent_notice(
+                    // The persisted catalog's history revision may trail the
+                    // history, so it cannot name a new message.
                     format!(
                         "{}:codex:interaction:{}",
                         record.subagent_id,
-                        record.history_revision.saturating_add(1),
+                        uuid::Uuid::new_v4().simple(),
                     ),
                     &format!("{actor} interacted with this subagent"),
                     "The inter-agent message is unavailable because Codex does not expose it to clients.",
@@ -283,7 +285,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 Ok(TaskMutationResult::Changed)
             },
         )?;
-        self.publish_subagent_snapshots(&record.subagent_id)
+        Ok(())
     }
 
     fn subagent_session_update(
@@ -297,11 +299,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             .mutations
             .store()
             .subagent_record_by_native(&self.task_id, native_session_id)?;
-        let nested_target = if let AgentEvent::Subagent(subagent) = &event {
-            self.append_codex_subagent_interaction(subagent, "Parent Agent", &now)?
-        } else {
-            None
-        };
+        if let AgentEvent::Subagent(subagent) = &event {
+            self.append_codex_subagent_interaction(subagent, "Parent Agent", &now)?;
+        }
         match event {
             AgentEvent::UserMessageChunk {
                 text,
@@ -407,12 +407,6 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 )?;
             }
         }
-        self.publish_subagent_snapshots(&record.subagent_id)?;
-        if let Some(target_subagent_id) = nested_target {
-            if target_subagent_id != record.subagent_id {
-                self.publish_subagent_snapshots(&target_subagent_id)?;
-            }
-        }
         Ok(())
     }
 
@@ -421,7 +415,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         event: crate::agent::events::AgentNativeSubagentDetailsUpdate,
     ) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        let record = self.mutations.store().merge_subagent_details(
+        self.mutations.store().merge_subagent_details(
             &self.task_id,
             &event.native_session_id,
             event
@@ -433,7 +427,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
                 .collect(),
         )?;
-        self.publish_subagent_snapshots(&record.subagent_id)
+        Ok(())
     }
 
     fn subagent_identity_changed(
@@ -441,14 +435,14 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         event: crate::agent::events::AgentNativeSubagentIdentityUpdate,
     ) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        let record = self.mutations.store().update_subagent_identity(
+        self.mutations.store().update_subagent_identity(
             &self.task_id,
             &event.native_session_id,
             event.name,
             event.delegated_task,
             event.cancel,
         )?;
-        self.publish_subagent_snapshots(&record.subagent_id)
+        Ok(())
     }
 
     fn subagent_state_changed(
@@ -460,12 +454,12 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             AgentNativeSubagentState::Running => {
                 // A reused child works again. Released-form children have no
                 // Delegated Activity row to reopen.
-                let record = self.mutations.store().update_subagent_status(
+                self.mutations.store().update_subagent_status(
                     &self.task_id,
                     &event.native_session_id,
                     crate::storage::subagents::SubagentStatusRecord::Running,
                 )?;
-                return self.publish_subagent_snapshots(&record.subagent_id);
+                return Ok(());
             }
             AgentNativeSubagentState::Completed => (
                 crate::storage::subagents::SubagentStatusRecord::Completed,
@@ -505,7 +499,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 }
             },
         )?;
-        self.publish_subagent_snapshots(&record.subagent_id)
+        Ok(())
     }
 
     fn request_question(
@@ -523,14 +517,15 @@ impl AgentSessionEventSink for TaskSessionEventSink {
 }
 
 impl TaskSessionEventSink {
+    /// Records a Codex interaction in the target child's history.
     pub(super) fn append_codex_subagent_interaction(
         &self,
         subagent: &crate::agent::events::AgentSubagent,
         actor: &str,
         now: &str,
-    ) -> Result<Option<String>, RuntimeError> {
+    ) -> Result<(), RuntimeError> {
         if subagent.activity != "interacted" {
-            return Ok(None);
+            return Ok(());
         }
         let record = match self
             .mutations
@@ -541,7 +536,7 @@ impl TaskSessionEventSink {
             // Legacy codex-acp clients flatten subagents into Tool calls and never
             // announce a native child. Keep the parent activity without inventing
             // child history, and do not terminate the otherwise healthy prompt.
-            Err(RuntimeError::TaskNotFound(_)) => return Ok(None),
+            Err(RuntimeError::TaskNotFound(_)) => return Ok(()),
             Err(error) => return Err(error),
         };
         self.mutations.store().append_subagent_message(
@@ -558,7 +553,7 @@ impl TaskSessionEventSink {
             ),
             true,
         )?;
-        Ok(Some(record.subagent_id))
+        Ok(())
     }
 }
 
@@ -582,59 +577,7 @@ fn codex_subagent_notice(
     }
 }
 
-impl TaskSessionEventSink {
-    pub(super) fn publish_subagent_snapshots(&self, subagent_id: &str) -> Result<(), RuntimeError> {
-        let task_id = openaide_app_server_protocol::ids::TaskId::from(self.task_id.clone());
-        let catalog = crate::snapshots::task_snapshot::project_subagent_catalog(
-            task_id.clone(),
-            self.mutations.store().subagent_catalog(&self.task_id),
-        )
-        .map_err(|error| RuntimeError::Internal(error.message))?;
-        self.mutations.publish_subagent_catalog(catalog);
-
-        let history = self
-            .mutations
-            .store()
-            .subagent_history(&self.task_id, subagent_id)?;
-        let items = history
-            .messages
-            .iter()
-            .map(|stored| crate::snapshots::task_snapshot::project_chat_item(&stored.chat))
-            .collect::<Vec<_>>();
-        let start_cursor = history
-            .messages
-            .first()
-            .map(|stored| stored.chat.cursor.clone().into());
-        let end_cursor = history
-            .messages
-            .last()
-            .map(|stored| stored.chat.cursor.clone().into());
-        self.mutations.publish_subagent_history(
-            openaide_app_server_protocol::snapshot::SubagentHistorySnapshot {
-                task_id,
-                subagent_id: subagent_id.to_string().into(),
-                revision: history.revision,
-                availability: if history.messages.is_empty() {
-                    openaide_app_server_protocol::snapshot::SubagentHistoryAvailability::WaitingForActivity
-                } else {
-                    openaide_app_server_protocol::snapshot::SubagentHistoryAvailability::Available
-                },
-                chat: openaide_app_server_protocol::snapshot::ChatSnapshot {
-                    has_messages: !items.is_empty(),
-                    items,
-                    has_more_before: false,
-                    start_cursor: start_cursor.clone(),
-                    end_cursor,
-                },
-                current_plan: history
-                    .current_plan
-                    .map(crate::snapshots::task_snapshot::project_agent_plan),
-                start_cursor,
-            },
-        );
-        Ok(())
-    }
-}
+impl TaskSessionEventSink {}
 
 fn subagent_lifecycle_identity(subagent_id: &str) -> String {
     format!("subagent_lifecycle:{subagent_id}")

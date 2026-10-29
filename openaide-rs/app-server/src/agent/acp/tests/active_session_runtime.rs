@@ -1931,6 +1931,88 @@ fn resume_of_an_attached_session_republishes_its_current_config_catalog() {
     );
 }
 
+/// Holds the first sink attachment's `session_opened` report, as a contended Task
+/// store did after a restart, until the test releases it.
+struct BlockedOpenReportSink {
+    entered_tx: Mutex<mpsc::Sender<()>>,
+    release_rx: Mutex<mpsc::Receiver<()>>,
+}
+
+impl AgentSessionEventSink for BlockedOpenReportSink {
+    fn config_options_changed(&self, _catalog: ConfigOptionsCatalog) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn commands_changed(&self, _catalog: AgentCommandsCatalog) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn own_session_operation(&self, operation: &'static str) -> Result<(), RuntimeError> {
+        if operation == "session_opened" {
+            let _ = self
+                .entered_tx
+                .lock()
+                .expect("entered lock poisoned")
+                .send(());
+            let _ = self
+                .release_rx
+                .lock()
+                .expect("release lock poisoned")
+                .recv_timeout(crate::test_sync::WATCHDOG);
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn resume_of_an_attached_session_does_not_wait_for_its_busy_event_loop() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime(&temp, "resumable-session") else {
+        return;
+    };
+    let request = || AgentSessionResume {
+        agent_id: "codex".to_string(),
+        task_id: "task-resume-busy-loop".to_string(),
+        session_id: "resumable-session".to_string(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    };
+    let session = runtime.resume_session(request()).expect("first resume");
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    runtime
+        .attach_session_event_sink(
+            &session.key(),
+            Arc::new(BlockedOpenReportSink {
+                entered_tx: Mutex::new(entered_tx),
+                release_rx: Mutex::new(release_rx),
+            }),
+        )
+        .expect("attach session sink");
+    entered_rx
+        .recv_timeout(crate::test_sync::WATCHDOG)
+        .expect("event loop reports the open to the sink");
+
+    // The event loop is still inside the sink, so a snapshot request it had to
+    // answer would time out here.
+    let attached = runtime.resume_session(request());
+
+    release_tx.send(()).expect("release sink");
+    let attached = attached.expect("attached resume while the event loop is busy");
+    assert_eq!(
+        attached
+            .config_catalog
+            .as_ref()
+            .and_then(|catalog| catalog_id(catalog, "model")),
+        Some("gpt-5.6-sol")
+    );
+    runtime
+        .close_session(&attached.key())
+        .expect("close session");
+}
+
 #[test]
 fn attaching_to_a_resumed_session_replays_its_current_config_catalog() {
     let temp = tempfile::TempDir::new().expect("temp dir");

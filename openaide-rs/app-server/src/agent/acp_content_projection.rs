@@ -16,6 +16,10 @@ pub(super) fn project_content_block(
                 AgentMessagePart::Image {
                     media_type: image.mime_type,
                     data: image.data,
+                    image_id: None,
+                    size_bytes: None,
+                    width: None,
+                    height: None,
                     uri: image.uri,
                 }
             } else {

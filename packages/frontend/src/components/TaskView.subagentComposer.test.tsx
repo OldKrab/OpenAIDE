@@ -6,7 +6,7 @@ import type {
   AppServerSession,
   AppServerStateObserver,
   SubscriptionScope,
-  SubscriptionSnapshot,
+  ReplicaSnapshot,
 } from "@openaide/app-server-client";
 
 const SUBAGENT_ID = "subagent_11111111111111111111111111111111";
@@ -97,7 +97,7 @@ describe("TaskView Composer across Subagent inspection", () => {
   });
 });
 
-function catalogSnapshot(): SubscriptionSnapshot {
+function catalogSnapshot(): ReplicaSnapshot {
   return {
     kind: "subagentCatalog",
     catalog: {
@@ -113,7 +113,7 @@ function catalogSnapshot(): SubscriptionSnapshot {
         historyRevision: 0,
       }],
     },
-  } as unknown as SubscriptionSnapshot;
+  } as unknown as ReplicaSnapshot;
 }
 
 function taskSnapshot(): TaskSnapshot {

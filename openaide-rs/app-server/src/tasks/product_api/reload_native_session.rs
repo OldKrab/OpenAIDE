@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::snapshot::{TaskHistorySyncSnapshot, TaskSnapshot};
+use openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot;
 use openaide_app_server_protocol::task::TaskReloadNativeSessionParams;
 
 use crate::protocol::model::{AgentListedSession, TaskStatus};
@@ -15,7 +15,7 @@ impl TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskReloadNativeSessionParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         if params.client_mutation_id.as_str().trim().is_empty() {
             return Err(ProtocolError {
@@ -30,10 +30,7 @@ impl TaskProductApi {
             .serialize(&task_id, || self.reload_native_session_serialized(&task_id))
     }
 
-    fn reload_native_session_serialized(
-        &self,
-        task_id: &str,
-    ) -> Result<TaskSnapshot, ProtocolError> {
+    fn reload_native_session_serialized(&self, task_id: &str) -> Result<(), ProtocolError> {
         let task = self.store.read_task(task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
         if !matches!(task.lifecycle, TaskLifecycle::Open)
@@ -99,7 +96,9 @@ impl TaskProductApi {
             });
         self.history_sync.finish_interactive(task_id, generation);
         match result {
-            Ok(Some(snapshot)) => {
+            // TODO: The refresh still builds a Task snapshot that this acknowledgement
+            // discards; refresh_history could skip it for callers that need none.
+            Ok(Some(_)) => {
                 self.publish_history_sync(task_id, TaskHistorySyncSnapshot::Updated { generation });
                 crate::logging::info(
                     "native_session_reload_completed",
@@ -109,7 +108,7 @@ impl TaskProductApi {
                         "outcome": "loaded",
                     }),
                 );
-                self.project_task_snapshot(snapshot)
+                Ok(())
             }
             Ok(None) => {
                 self.publish_history_sync(

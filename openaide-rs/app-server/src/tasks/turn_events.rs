@@ -272,12 +272,8 @@ impl TaskSessionEventSink {
             return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
         if let AgentEvent::Subagent(subagent) = &event {
-            let target = self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
-            self.upsert_session_tool(normalize_event(event, &now), &now)?;
-            if let Some(subagent_id) = target {
-                self.publish_subagent_snapshots(&subagent_id)?;
-            }
-            return Ok(());
+            self.append_codex_subagent_interaction(subagent, "Main Agent", &now)?;
+            return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
         self.append_session_message(normalize_event(event, &now), &now)
     }

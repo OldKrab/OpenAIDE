@@ -272,6 +272,37 @@ fn barrier_seals_earlier_same_task_stream_writes_in_one_ordered_batch() {
 }
 
 #[test]
+fn subagent_and_task_writes_of_one_task_commit_in_separate_ordered_batches() {
+    let scheduler = Scheduler::new();
+    let writes = [
+        stream("task"),
+        subagent_stream("task"),
+        subagent_stream("task"),
+        stream("task"),
+    ];
+    let mut receipts = Vec::new();
+    for write in writes {
+        let (reply, receipt) = mpsc::channel();
+        scheduler.admit(write, reply).expect("admit write");
+        receipts.push(receipt);
+    }
+
+    let mut kinds = Vec::new();
+    while kinds.len() < 3 {
+        let NextWork::Batch { writes, .. } = scheduler.next() else {
+            panic!("expected a batch");
+        };
+        kinds.push(
+            writes
+                .iter()
+                .map(|queued| queued.write.is_subagent())
+                .collect::<Vec<_>>(),
+        );
+    }
+    assert_eq!(kinds, [vec![false], vec![true, true], vec![false]]);
+}
+
+#[test]
 fn text_barrier_leaves_streamed_tool_output_for_a_later_structured_barrier() {
     let scheduler = Scheduler::new();
     let (terminal_reply, _terminal_receipt) = mpsc::channel();
@@ -350,4 +381,16 @@ fn stream_with_estimated_bytes(task_id: &str, estimated_bytes: usize) -> TaskWri
     );
     assert_eq!(write.estimated_bytes(), estimated_bytes);
     write
+}
+
+fn subagent_stream(task_id: &str) -> TaskWrite {
+    TaskWrite::stream_subagent(
+        task_id.to_string(),
+        crate::storage::subagents::SubagentWrite {
+            native_session_id: "child".to_string(),
+            operation: crate::storage::subagents::SubagentOperation::SetStatus(
+                crate::storage::subagents::SubagentStatusRecord::Running,
+            ),
+        },
+    )
 }

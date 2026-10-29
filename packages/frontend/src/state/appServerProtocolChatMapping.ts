@@ -19,6 +19,7 @@ import type {
   ChatMessage,
   NormalizedMessage,
   PermissionOptionKind,
+  StoredImageAttachmentPayload,
   TimeSpan,
   ToolPresentationAction,
 } from "@openaide/app-shell-contracts";
@@ -265,9 +266,11 @@ function attachmentsFromParts(parts: MessagePart[]): Attachment[] | undefined {
         kind: "image",
         label: "Image",
         payload: {
-          previewUrl: part.dataUrl,
+          imageId: part.imageId,
           mimeType: part.mediaType,
-        },
+          sizeBytes: part.sizeBytes,
+          ...part.dimensions,
+        } satisfies StoredImageAttachmentPayload,
       }];
     }
     return [];
@@ -275,10 +278,17 @@ function attachmentsFromParts(parts: MessagePart[]): Attachment[] | undefined {
   return attachments.length ? attachments : undefined;
 }
 
+/** A stored preview image becomes a reference; its bytes load when the attachment is shown. */
 function attachmentPayload(attachment: Extract<MessagePart, { kind: "attachment" }>["attachment"]): Attachment["payload"] {
-  if (!attachment.previewUrl && !attachment.mediaType && attachment.sizeBytes === undefined) return undefined;
+  if (attachment.previewImageId && attachment.mediaType) {
+    return {
+      imageId: attachment.previewImageId,
+      mimeType: attachment.mediaType,
+      sizeBytes: attachment.sizeBytes ?? undefined,
+    } satisfies StoredImageAttachmentPayload;
+  }
+  if (!attachment.mediaType && attachment.sizeBytes === undefined) return undefined;
   return {
-    previewUrl: attachment.previewUrl,
     mimeType: attachment.mediaType ?? undefined,
     sizeBytes: attachment.sizeBytes ?? undefined,
   };
@@ -295,7 +305,9 @@ function agentMessageParts(parts: MessagePart[]): AgentMessagePart[] {
       return [{
         kind: "image",
         media_type: part.mediaType,
-        data_url: part.dataUrl,
+        image_id: part.imageId,
+        size_bytes: part.sizeBytes,
+        ...part.dimensions,
         uri: part.uri ?? undefined,
       }];
     }

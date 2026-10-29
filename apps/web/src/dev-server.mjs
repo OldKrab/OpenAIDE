@@ -23,6 +23,7 @@ import {
 } from "./dev-server-auth.mjs";
 import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
+import { appServerEnvironment } from "./app-server-environment.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
 import { createMobileStatus } from './mobile-status.mjs';
@@ -37,8 +38,11 @@ const prototypePort = process.env.OPENAIDE_WEB_PROTOTYPE_PORT
 const staticRoot = process.env.OPENAIDE_WEB_STATIC_ROOT
   ? path.resolve(process.env.OPENAIDE_WEB_STATIC_ROOT)
   : undefined;
-const stateRoot = path.resolve(process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "state"));
-const runtimeRoot = path.resolve(process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(repoRoot, ".openaide-web-dev", "runtime"));
+// A run that names no roots gets its own, never a deployed instance's: an App Server of
+// another version on the same state root would be asked to stop for this one.
+const defaultRoots = path.join(repoRoot, ".openaide-web-dev-default");
+const stateRoot = path.resolve(process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(defaultRoots, "state"));
+const runtimeRoot = path.resolve(process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(defaultRoots, "runtime"));
 const appServerPath = path.resolve(
   process.env.OPENAIDE_APP_SERVER_PATH
     ?? process.env.OPENAIDE_RUNTIME_PATH
@@ -415,20 +419,9 @@ async function startAppServer() {
 }
 
 function spawnAppServer() {
-  const {
-    OPENAIDE_PROJECT_ROOTS: _projectRoots,
-    ...baseEnv
-  } = process.env;
-  const webProjectRoots = process.env.OPENAIDE_WEB_PROJECT_ROOTS;
   return spawn(appServerPath, [], {
     cwd: repoRoot,
-    env: {
-      ...baseEnv,
-      ...(webProjectRoots ? { OPENAIDE_PROJECT_ROOTS: webProjectRoots } : {}),
-      OPENAIDE_STORAGE_ROOT: stateRoot,
-      OPENAIDE_RUNTIME_ROOT: runtimeRoot,
-      OPENAIDE_APP_SERVER_PROTOCOL: "app-server-handoff",
-    },
+    env: appServerEnvironment(process.env, { stateRoot, runtimeRoot }),
     stdio: ["pipe", "pipe", "inherit"],
   });
 }

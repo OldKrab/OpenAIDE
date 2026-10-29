@@ -365,7 +365,7 @@ impl ProtocolEdgeStdioDispatcher {
 }
 
 fn configured_project_roots_from_env() -> ConfiguredProjectRoots {
-    let Some(paths) = env::var_os("OPENAIDE_PROJECT_ROOTS") else {
+    let Some(paths) = crate::instance_env::var_os(crate::instance_env::PROJECT_ROOTS) else {
         return ConfiguredProjectRoots::default();
     };
     ConfiguredProjectRoots::from_workspace_roots(

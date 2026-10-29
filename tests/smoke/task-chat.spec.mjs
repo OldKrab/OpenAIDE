@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { encodedPng } from "./fixtures/png.mjs";
 import { startFullStackHarness } from "./full-stack-harness.mjs";
 
 test.describe.configure({ mode: "serial" });
@@ -30,8 +33,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await openPreparedNewTask(page);
     for (let index = 0; index < 16; index += 1) {
-      await send(page, index === 12 ? "smoke:navigation-long-message" : `Scroll restoration message ${index}`);
-      await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+      const text = index === 12 ? "smoke:navigation-long-message" : `Scroll restoration message ${index}`;
+      await send(page, text);
+      await waitForReply(page, text);
     }
     const taskPath = new URL(page.url()).pathname;
     const list = page.locator(".message-list");
@@ -56,12 +60,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
     await expect(page.getByLabel("New task")).toBeVisible();
     await send(page, "Another Task");
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    await waitForReply(page, "Another Task");
     const otherClient = await page.context().newPage();
     try {
       await otherClient.goto(`${harness.baseUrl}${taskPath}`);
       await send(otherClient, "Message received while the Task was away");
-      await expect(otherClient.getByLabel("Task status: Idle")).toHaveCount(1);
+      await waitForReply(otherClient, "Message received while the Task was away");
     } finally {
       await otherClient.close();
     }
@@ -70,6 +74,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       dispatchEvent(new PopStateEvent("popstate"));
     }, taskPath);
     await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+    await expect(page.getByText("Message received while the Task was away").first()).toBeVisible();
+    // The returning client resumes its retained copy instead of a complete baseline.
+    await expect.poll(() => taskSubscriptionOutcomes(taskPath.split("/").at(-1))).toContain("missedChanges");
     await expect.poll(distanceFromEnd).toBeLessThanOrEqual(2);
     const settledDistances = await list.evaluate(async (element) => {
       const distances = [];
@@ -87,8 +94,9 @@ test("keeps a reader's position when they scroll during a follow", async ({ page
   await page.setViewportSize({ width: 1440, height: 900 });
   await openPreparedNewTask(page);
   for (let index = 0; index < 8; index += 1) {
-    await send(page, index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`);
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    const text = index === 4 ? "smoke:navigation-long-message" : `Follow interruption message ${index}`;
+    await send(page, text);
+    await waitForReply(page, text);
   }
   const list = page.locator(".message-list");
   const distanceFromEnd = () => list.evaluate((element) => (
@@ -133,7 +141,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await openPreparedNewTask(page);
     await send(page, "Start scheduling test");
-    await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+    await waitForReply(page, "Start scheduling test");
     const editor = page.getByRole("textbox", { name: "Message" });
     await editor.fill("Review the results tomorrow");
     await page.getByRole("button", { name: "Send later", exact: true }).click();
@@ -508,6 +516,7 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
       const samples = [{
         at: 0,
         indicatorTop: currentIndicatorTop(),
+        indicatorTransitioning: indicatorIsTransitioning(),
         scrollTop: initialScrollTop,
         visibleRows: visibleChatRowCount(messageList),
       }];
@@ -519,6 +528,7 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
           samples.push({
             at: performance.now() - startedAt,
             indicatorTop: currentIndicatorTop(),
+            indicatorTransitioning: indicatorIsTransitioning(),
             scrollTop: messageList.scrollTop,
             visibleRows: visibleChatRowCount(messageList),
           });
@@ -561,6 +571,11 @@ async function prepareUserMessageNavigationObservation(page, markerIndex, select
     function currentIndicatorTop() {
       return document.querySelector(".user-message-current-indicator")?.getBoundingClientRect().top;
     }
+
+    function indicatorIsTransitioning() {
+      return document.querySelector(".user-message-current-indicator")?.getAnimations()
+        .some((animation) => animation.transitionProperty === "transform") ?? false;
+    }
   }, { index: markerIndex, selector });
 }
 
@@ -576,11 +591,16 @@ function expectSmoothNavigation(navigation, minimumPaintedPositions, hasRail = t
   expect(paintedPositions).toBeGreaterThanOrEqual(minimumPaintedPositions);
   expect(intermediateSamples.filter(({ visibleRows }) => visibleRows === 0),
     "Every intermediate navigation frame must contain Chat rows").toEqual([]);
-  // Initial, final, and at least two intermediate positions prove the
-  // selector animates without coupling the assertion to CI frame cadence.
-  if (hasRail) expect(new Set(navigation.samples
-    .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
-    .filter(Boolean)).size).toBeGreaterThanOrEqual(4);
+  if (hasRail) {
+    // A running transform transition proves the selector animates. Painted
+    // positions only confirm one intermediate frame: the easing covers most of
+    // the distance early, so a long throttled frame can skip the rest.
+    expect(navigation.samples.some(({ indicatorTransitioning }) => indicatorTransitioning),
+      "The current-message indicator must move by its transform transition").toBe(true);
+    expect(new Set(navigation.samples
+      .map(({ indicatorTop }) => Math.round(indicatorTop ?? 0))
+      .filter(Boolean)).size).toBeGreaterThanOrEqual(3);
+  }
   return paintedPositions;
 }
 
@@ -800,6 +820,48 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.firstLineInset).toBeLessThanOrEqual(12);
   expect(geometry.buttonDoesNotOverlapCode).toBe(true);
   expect(geometry.buttonInsidePre).toBe(true);
+});
+
+test("flashes copied inline code only at the click and leaves the bubble to confirm", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:code-block-copy");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+
+  const chip = page.locator("code.agent-inline-code-copy", { hasText: "inline" });
+  await chip.hover();
+  const hoverBackground = await chip.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+    return getComputedStyle(element).backgroundColor;
+  });
+  await chip.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("inline");
+  // The tint settles back to the hover look while the "Copied" bubble is still showing.
+  await expect.poll(() => chip.evaluate((element) =>
+    `${element.dataset.copyState}|${getComputedStyle(element).backgroundColor}`,
+  )).toBe(`copied|${hoverBackground}`);
+});
+
+test("keeps a reply's duration below an ending that has no line to share", async ({ page }) => {
+  await page.setViewportSize({ width: 1_200, height: 800 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:footer-after-list");
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+  const reply = page.locator(".chat-agent-block").filter({ hasText: "Two questions are still open" });
+  // The footer reserves its row only once the settled duration is shown.
+  await expect(reply.locator(".chat-action-time")).toHaveCount(1);
+  const footerClearsText = () => reply.evaluate((block) => {
+    const text = block.querySelector(":scope > .chat-agent");
+    const footer = block.querySelector(":scope > .chat-message-actions");
+    if (!text || !footer) throw new Error("Reply structure is incomplete.");
+    return footer.getBoundingClientRect().top >= text.getBoundingClientRect().bottom - 0.5;
+  });
+
+  await reply.hover();
+  expect(await footerClearsText()).toBe(true);
+  await page.setViewportSize({ width: 360, height: 640 });
+  expect(await footerClearsText()).toBe(true);
 });
 
 test("fits and inspects a Mermaid diagram inline and expanded without source dead space", async ({ page }) => {
@@ -1263,6 +1325,48 @@ test("sends an attachment-only first message through the real resolver boundary"
   await expect(page.getByLabel("Task status: Idle")).toBeVisible();
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`reserves stored images' height before they load at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await openPreparedNewTask(page);
+    await page.getByRole("button", { name: "Add context" }).click();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("menuitem", { name: /Attach images/ }).click(),
+    ]);
+    await chooser.setFiles({ name: "wide.png", mimeType: "image/png", buffer: encodedPng(400, 100) });
+    await expect(page.getByLabel("Attached context").getByLabel("Open wide.png")).toBeVisible();
+    await page.getByRole("textbox", { name: "Message" }).fill("smoke:agent-image");
+    await page.getByLabel("Send message").click();
+    await expect(page.getByLabel("Task chat").getByLabel("Open Agent image")).toBeVisible();
+
+    // Reload so both images load from App Server again; record each loading frame as it mounts.
+    await page.addInitScript(() => {
+      window.__loadingImageHeights = {};
+      new MutationObserver(() => {
+        for (const frame of document.querySelectorAll(".chat-stored-image[data-image-state=loading]")) {
+          const heights = window.__loadingImageHeights[frame.ariaLabel] ??= [];
+          heights.push(frame.getBoundingClientRect().height);
+        }
+      }).observe(document, { childList: true, subtree: true });
+    });
+    await page.reload();
+    const chat = page.getByLabel("Task chat");
+    // The sent image is 4:1 and the Agent image 1:2, each at most 240px tall.
+    for (const [label, aspect] of [["Image", 4], ["Agent image", 0.5]]) {
+      const opened = chat.getByLabel(`Open ${label}`);
+      await expect(opened.locator("img")).toBeVisible();
+      await expect.poll(() => opened.locator("img").evaluate((image) => image.complete)).toBe(true);
+      const loaded = await opened.evaluate((frame) => frame.getBoundingClientRect().height);
+      const imageBox = await opened.locator("img").boundingBox();
+      expect(Math.abs(imageBox.height - Math.min(imageBox.width / aspect, 240))).toBeLessThanOrEqual(1);
+      const loading = await page.evaluate((key) => window.__loadingImageHeights[key], `Loading ${label}`);
+      expect(loading?.length).toBeGreaterThan(0);
+      for (const height of loading) expect(Math.abs(height - loaded)).toBeLessThanOrEqual(1);
+    }
+  });
+}
+
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();
@@ -1517,6 +1621,21 @@ async function send(page, text) {
   await page.getByLabel("Send message").click();
 }
 
+/**
+ * Waits for the turn that sending `text` started to finish. "Idle" alone can still be the
+ * previous turn's status, so a finished reply (it carries its working time) must follow the
+ * sent message as the newest Chat row.
+ */
+async function waitForReply(page, text) {
+  await expect.poll(() => page.locator(".message-list-virtual-row").evaluateAll((rows, sent) => {
+    const index = (row) => Number(row.dataset.index);
+    const message = rows.find((row) => row.querySelector(".chat-user")?.textContent === sent);
+    const newest = rows.reduce((last, row) => (!last || index(row) > index(last) ? row : last), undefined);
+    return Boolean(message && newest && index(newest) > index(message) && newest.querySelector(".chat-action-time"));
+  }, text)).toBe(true);
+  await expect(page.getByLabel("Task status: Idle")).toHaveCount(1);
+}
+
 async function selectRenderedText(locator) {
   return locator.evaluate((element) => {
     const text = element.firstChild;
@@ -1678,4 +1797,11 @@ async function reportClientLivenessExpiredOnNextHeartbeat(page) {
     await removeFault();
     throw error;
   }
+}
+
+async function taskSubscriptionOutcomes(taskId) {
+  const log = await readFile(path.join(harness.stateRoot, "diagnostics/logs/openaide-app-server.jsonl"), "utf8");
+  return log.trim().split("\n").map((line) => JSON.parse(line))
+    .filter((line) => line.event === "task_subscription_resolved" && line.fields.task_id === taskId)
+    .map((line) => line.fields.outcome);
 }

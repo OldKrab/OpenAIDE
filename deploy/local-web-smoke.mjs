@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const baseUrl = new URL(process.argv[2] ?? process.env.OPENAIDE_WEB_SMOKE_URL ?? "http://127.0.0.1:5474");
+const baseUrl = new URL(process.argv[2] ?? process.env.OPENAIDE_WEB_SMOKE_URL ?? "http://127.0.0.1:5374");
 const endpoint = new URL("/__openaide-app-server/probe", baseUrl);
 const totalTimeoutMs = numberFromEnv("OPENAIDE_WEB_SMOKE_TIMEOUT_MS", 60_000);
 const sendTimeoutMs = numberFromEnv("OPENAIDE_WEB_SMOKE_SEND_TIMEOUT_MS", 45_000);
@@ -71,15 +71,30 @@ async function waitUntilTaskSendReady(initialSnapshot) {
       throw new Error(`task/acquire did not become send-ready within ${sendTimeoutMs}ms`);
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const opened = await request("task/open", { taskId }, Math.min(5_000, deadline - Date.now()));
-    snapshot = opened.task;
+    snapshot = await readTask(Math.min(5_000, deadline - Date.now()));
   }
+}
+
+// task/open carries no Task state (ADR-0074); read it the way Frontend does,
+// from a Task subscription baseline that is released at once.
+async function readTask(timeoutMs) {
+  const scope = { kind: "task", taskId };
+  const subscribed = await request("state/subscribe", { scope }, timeoutMs);
+  await request("state/unsubscribe", { scope }, timeoutMs).catch(() => {});
+  return subscribed.snapshot?.task;
 }
 
 async function cleanupTask() {
   if (!taskId || cleanup === "none") return;
-  await request("task/cancel", { taskId, ...(turnId ? { turnId } : {}) }, 10_000).catch(() => {});
-  await request("task/setArchived", { taskId, archived: true }, 10_000).catch(() => {});
+  await request("task/cancel", { taskId, ...(turnId ? { turnId } : {}) }, 10_000)
+    .catch((error) => reportCleanupFailure("task/cancel", error));
+  await request("task/archive", { taskId }, 10_000)
+    .catch((error) => reportCleanupFailure("task/archive", error));
+}
+
+/** Cleanup never fails the smoke, but a failed step is reported so a wrong call shows. */
+function reportCleanupFailure(method, error) {
+  console.error(`OpenAIDE local web smoke cleanup: ${method} failed: ${errorMessage(error)}`);
 }
 
 async function request(method, params, timeoutMs = 15_000) {

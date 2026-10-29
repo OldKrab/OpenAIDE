@@ -43,3 +43,38 @@ fn validate_base64_media(
     }
     Ok(decoded.len())
 }
+
+/// Width and height an image displays at, read from its header without decoding
+/// pixels. EXIF orientation is applied, as browsers do, so a portrait photo
+/// stored sideways reports its portrait size. `None` for an unreadable header.
+pub(crate) fn display_dimensions(
+    reader: impl std::io::BufRead + std::io::Seek,
+) -> Option<(u32, u32)> {
+    use image::ImageDecoder;
+
+    let mut decoder = image::ImageReader::new(reader)
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let turned = matches!(
+        decoder.orientation().ok()?,
+        image::metadata::Orientation::Rotate90
+            | image::metadata::Orientation::Rotate270
+            | image::metadata::Orientation::Rotate90FlipH
+            | image::metadata::Orientation::Rotate270FlipH
+    );
+    Some(if turned {
+        (height, width)
+    } else {
+        (width, height)
+    })
+}
+
+#[cfg(test)]
+#[path = "media_tests.rs"]
+pub(crate) mod tests;

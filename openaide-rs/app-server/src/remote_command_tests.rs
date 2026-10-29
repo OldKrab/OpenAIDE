@@ -46,6 +46,10 @@ fn refuses_what_it_cannot_read_rather_than_guessing() {
 fn every_failure_has_a_sentence_and_a_stable_class() {
     let failures = [
         Failure::NotRunning,
+        Failure::OtherVersion {
+            protocol_version: "other".into(),
+        },
+        Failure::Handoff("handoff_failed"),
         Failure::Launch(launch::LaunchError::Spawn),
         Failure::Client(ClientError::Unreachable),
         Failure::Client(ClientError::Refused {

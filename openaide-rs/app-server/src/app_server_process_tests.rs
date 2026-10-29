@@ -196,10 +196,15 @@ fn private_replacement_credential_gracefully_stops_published_endpoint() {
         &request,
     );
     assert!(replacement.starts_with("HTTP/1.1 200 OK\r\n"));
+    let logs = crate::logging::capture_test_logs();
     assert!(matches!(
         published.shutdown_when_requested().unwrap(),
         crate::app_lifecycle::ShutdownCompletion::CleanRelease
     ));
+    assert_eq!(
+        stop_reason(&logs, &record.server_id).as_deref(),
+        Some("replacement_requested")
+    );
 }
 
 #[test]
@@ -251,10 +256,26 @@ fn explicit_last_vscode_detach_gracefully_stops_published_endpoint() {
         .to_string(),
     );
     assert!(detached.starts_with("HTTP/1.1 200 OK\r\n"));
+    let logs = crate::logging::capture_test_logs();
     assert!(matches!(
         published.shutdown_when_requested().unwrap(),
         crate::app_lifecycle::ShutdownCompletion::CleanRelease
     ));
+    assert_eq!(
+        stop_reason(&logs, &record.server_id).as_deref(),
+        Some("last_client_detached")
+    );
+}
+
+/// The stop cause this endpoint logged; tests share one log stream, so match its id.
+fn stop_reason(logs: &crate::logging::TestLogCapture, server_id: &str) -> Option<String> {
+    logs.snapshot().into_iter().find_map(|entry| {
+        let fields = entry.get("fields")?;
+        (entry.get("event")?.as_str()? == "app_server_stop_requested"
+            && fields.get("server_id")?.as_str()? == server_id)
+            .then(|| fields.get("reason_code")?.as_str().map(str::to_string))
+            .flatten()
+    })
 }
 
 #[test]
@@ -293,7 +314,10 @@ fn inactive_last_client_expiry_enters_draining_until_a_client_reconnects() {
         &shutdown_sender,
         Duration::ZERO,
     ));
-    assert!(shutdown_receiver.try_recv().is_ok());
+    assert_eq!(
+        shutdown_receiver.try_recv(),
+        Ok(crate::app_lifecycle::ShutdownCause::LastClientExpired)
+    );
 
     let draining_probe = post_json(
         &record.endpoints[0].address,

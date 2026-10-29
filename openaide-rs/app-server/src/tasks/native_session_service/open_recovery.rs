@@ -84,7 +84,14 @@ impl NativeSessionService {
         })?;
         let load_ms = load_started.elapsed().as_millis();
         let replayed_plan = loaded.session.replayed_plan.clone();
-        let session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
+        // A Reload the user approved after a change elsewhere takes the Agent's values as
+        // they are; any other replay restores what this Task chose.
+        let loaded_session = if clear_reload_requirement_through.is_some() {
+            loaded.session
+        } else {
+            self.restore_chosen(&current_task, loaded.session)
+        };
+        let session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded_session);
         let loaded_session_id = session_start.session_id().to_string();
         let refreshed_title = native_session
             .title
@@ -238,6 +245,7 @@ impl NativeSessionService {
             }
         };
         let resume_ms = resume_started.elapsed().as_millis();
+        let session = self.restore_chosen(&current_task, session);
         let returned_config_catalog = session.config_catalog.is_some();
         let returned_commands_catalog = session.commands_catalog.is_some();
         let session_key = session.key();

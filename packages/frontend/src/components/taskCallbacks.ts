@@ -41,13 +41,14 @@ import {
   sendTaskPromptIntent,
 } from "../intents/taskMutationIntents";
 import { requestComposerHistory } from "../intents/taskReadIntents";
+import { requestChatImage } from "../intents/chatImageIntents";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
-import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 import { currentFrontendShell } from "../services/frontendShell";
 
 type TaskDependencies = Pick<
@@ -65,6 +66,12 @@ type TaskBackendConnection = Partial<Pick<
   AppServerSession,
   "request" | "subscribeState"
 >>;
+
+function canRequest(
+  connection: TaskBackendConnection | undefined,
+): connection is TaskBackendConnection & Pick<BackendConnection, "request"> {
+  return Boolean(connection?.request);
+}
 
 export function createTaskCallbacks({
   attachmentResources,
@@ -142,7 +149,9 @@ export function createTaskCallbacks({
       state.snapshot,
     ),
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
-    fileViewer: backendConnection?.request ? { request: backendConnection.request } : undefined,
+    // Pass the connection itself: callbacks are rebuilt on every App render, and
+    // the Task page keys its file-existence cache and file panel on this identity.
+    fileViewer: canRequest(backendConnection) ? backendConnection : undefined,
     loadComposerHistory: () => {
       const taskId = state.snapshot?.task.task_id;
       if (!taskId) return Promise.resolve([]);
@@ -203,6 +212,13 @@ export function createTaskCallbacks({
         // Preview is an optional enhancement; Tool text remains the recovery surface.
         return undefined;
       }
+    },
+    loadChatImage: (taskId, imageId) => {
+      if (!backendConnection?.request) return Promise.reject(new Error(appServerRequiredMessage()));
+      // The session object itself keys the diagnostics batch shared with route events.
+      const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
+      return requestChatImage(connection, taskId, imageId, (event, fields) =>
+        recordFrontendLifecycleEvent(connection, event, fields));
     },
     subscribeToolDetail: (artifactId) => {
       if (!state.snapshot) return () => undefined;
@@ -401,14 +417,11 @@ export function createTaskCallbacks({
             message: safeErrorMessage(error),
             catalog,
           });
+          // Any durable change the failed mutation made arrives through the
+          // Task subscription, so nothing is re-read here.
           globalThis.setTimeout(() => {
             dispatch({ type: "taskInput:configError:clear", taskId, mutationId });
           }, 10_000);
-          void refreshTaskSnapshotAfterMutationFailure({
-            dispatch,
-            request,
-            taskId,
-          });
         });
     },
   };

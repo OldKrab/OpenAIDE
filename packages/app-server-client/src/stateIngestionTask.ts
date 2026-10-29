@@ -3,16 +3,17 @@ import type {
   ChatItem,
   MessagePart,
   PendingRequestSnapshot,
-  SubscriptionSnapshot,
   TaskChatChange,
   TaskId,
+  TaskResumeSnapshot,
   TaskSnapshot,
 } from "./generated/protocol.js";
+import type { ReplicaSnapshot } from "./backendConnection.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
 
 export function updateTaskSnapshot(
-  snapshot: Extract<SubscriptionSnapshot, { kind: "task" }>,
+  snapshot: Extract<ReplicaSnapshot, { kind: "task" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   const task = snapshot.task;
@@ -40,8 +41,40 @@ export function updateTaskSnapshot(
   }
 }
 
+/**
+ * Rebuilds the Task from a copy retained at `resume.knownRevision` (ADR-0073). The
+ * missed changes go through the same ordered application as live events; the
+ * unrevisioned fields then take their current values.
+ */
+export function resumeTaskSnapshot(
+  retained: Extract<ReplicaSnapshot, { kind: "task" }>,
+  resume: TaskResumeSnapshot,
+): SnapshotUpdate {
+  if (retained.task.task.taskId !== resume.taskId || retained.task.revision !== resume.knownRevision) {
+    return { kind: "resyncRequired", reason: "taskRevisionGap" };
+  }
+  let snapshot = retained;
+  for (const { revision, changes } of resume.changes) {
+    if (revision !== snapshot.task.revision + 1) return { kind: "resyncRequired", reason: "taskRevisionGap" };
+    const update = applyTaskChanges(snapshot, revision, changes);
+    if (update.kind === "resyncRequired") return update;
+    snapshot = update.snapshot as typeof retained;
+  }
+  const task = snapshot.task;
+  return changed({
+    ...snapshot,
+    task: {
+      ...task,
+      task: { ...task.task, workspaceAvailable: resume.workspaceAvailable },
+      historySync: resume.historySync,
+      pendingRequests: resume.pendingRequests,
+      subagents: resume.subagents,
+    },
+  });
+}
+
 function applyTaskChanges(
-  snapshot: Extract<SubscriptionSnapshot, { kind: "task" }>,
+  snapshot: Extract<ReplicaSnapshot, { kind: "task" }>,
   revision: number,
   changes: Extract<AppServerEventPayload, { kind: "taskChanged" }>["changes"],
 ): SnapshotUpdate {
@@ -140,7 +173,7 @@ function updateChatItemText(task: TaskSnapshot, messageId: string, text: string)
   };
 }
 
-function appendTextToMessageParts(parts: MessagePart[], text: string): MessagePart[] {
+export function appendTextToMessageParts(parts: MessagePart[], text: string): MessagePart[] {
   const last = parts.at(-1);
   if (last?.kind !== "text") return [...parts, { kind: "text", text }];
   return [...parts.slice(0, -1), { ...last, text: last.text + text }];

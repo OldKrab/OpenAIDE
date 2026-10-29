@@ -150,6 +150,8 @@ impl NativeSessionService {
                         "turn_id": turn_id.as_str(),
                         "elapsed_ms": acquire_started.elapsed().as_millis(),
                         "prompt_elapsed_ms": prompt_started_at.elapsed().as_millis(),
+                        "error_code": error.code(),
+                        "error_kind": error.reason(),
                         "error": error.to_string(),
                     }),
                 );
@@ -392,7 +394,9 @@ impl NativeSessionService {
                 cancellation: cancellation.clone(),
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
             }) {
-                Ok(session) => Ok(OpenedNativeSession::Resumed(session)),
+                Ok(session) => Ok(OpenedNativeSession::Resumed(
+                    self.restore_chosen(task, session),
+                )),
                 Err(error) if is_session_resume_unsupported(&error) => self
                     .agent_gateway
                     .load_session(AgentSessionLoad {
@@ -407,7 +411,7 @@ impl NativeSessionService {
                     .map(|loaded| {
                         OpenedNativeSession::Loaded(TaskSessionStartGuard::new(
                             &self.agent_gateway,
-                            loaded.session,
+                            self.restore_chosen(task, loaded.session),
                         ))
                     })
                     .or_else(|error| {
@@ -426,6 +430,11 @@ impl NativeSessionService {
             },
             None => self.start_fresh(task, cancellation),
         }
+    }
+
+    /// A restored session gets back the values its Task chose; see `restore_chosen`.
+    fn restore_chosen(&self, task: &TaskRecord, session: AgentSession) -> AgentSession {
+        crate::tasks::config_preferences::restore_chosen(&self.agent_gateway, task, session)
     }
 
     fn start_replacement(

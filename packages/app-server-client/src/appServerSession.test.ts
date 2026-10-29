@@ -475,3 +475,106 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("AppServerSession Task resume", () => {
+  const scope = { kind: "task" as const, taskId: "task_1" as TaskId };
+
+  function resume(knownRevision: number, revisions: number[], cursor = "cursor_resume"): StateSubscribeResult {
+    return {
+      cursor: cursor as EventCursor,
+      scope,
+      snapshot: {
+        kind: "taskResume",
+        resume: {
+          taskId: "task_1" as TaskId,
+          knownRevision,
+          changes: revisions.map((revision) => ({
+            revision,
+            changes: { task: { ...taskSummary(), title: { value: `Revision ${revision}`, source: "user" as const } } },
+          })),
+          historySync: { state: "reloadAvailable", generation: 3 },
+          pendingRequests: [],
+          subagents: { totalCount: 2, runningCount: 1, attentionCount: 0, available: true },
+          workspaceAvailable: false,
+        },
+      },
+    };
+  }
+
+  async function sessionWithReleasedTask(replies: StateSubscribeResult[]) {
+    const params: unknown[] = [];
+    const raw = fakeConnection(async (method, value) => {
+      if (method === STATE_UNSUBSCRIBE) return { scope };
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      params.push(value);
+      const reply = replies.shift();
+      if (!reply) throw new Error("No subscribe reply left");
+      return reply;
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const ready = vi.fn();
+    const release = session.subscribeState(scope, { onSnapshot: vi.fn(), onBaselineReady: ready });
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
+    release();
+    return { raw, session, params };
+  }
+
+  it("offers the released copy's revision and installs it with only the missed changes", async () => {
+    const { session, params } = await sessionWithReleasedTask([taskSubscription("cursor_1", 4), resume(4, [5, 6])]);
+    const snapshots: unknown[] = [];
+
+    session.subscribeState(scope, { onSnapshot: (snapshot) => snapshots.push(snapshot) });
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope }, { scope, knownRevision: 4 }]);
+    const [snapshot] = snapshots as Array<Extract<StateSubscribeResult["snapshot"], { kind: "task" }>>;
+    expect(snapshot.kind).toBe("task");
+    expect(snapshot.task.revision).toBe(6);
+    expect(snapshot.task.task.title).toEqual({ value: "Revision 6", source: "user" });
+    // Unrevisioned state comes from the reply, not the retained copy.
+    expect(snapshot.task.task.workspaceAvailable).toBe(false);
+    expect(snapshot.task.historySync).toEqual({ state: "reloadAvailable", generation: 3 });
+    expect(snapshot.task.subagents.totalCount).toBe(2);
+    session.close();
+  });
+
+  it("subscribes again for a baseline when the missed changes do not continue the copy", async () => {
+    const { session, params } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4),
+      resume(4, [6]),
+      taskSubscription("cursor_2", 6),
+    ]);
+    const snapshots: number[] = [];
+
+    session.subscribeState(scope, {
+      onSnapshot: (snapshot) => {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+
+    await vi.waitFor(() => expect(snapshots).toEqual([6]));
+    expect(params).toEqual([{ scope }, { scope, knownRevision: 4 }, { scope }]);
+    session.close();
+  });
+
+  it("never offers a copy from before a recovery", async () => {
+    const { raw, session, params } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4),
+      taskSubscription("cursor_2", 7),
+    ]);
+    raw.invalidate();
+    raw.recover();
+    const snapshots: number[] = [];
+
+    session.subscribeState(scope, {
+      onSnapshot: (snapshot) => {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+
+    await vi.waitFor(() => expect(snapshots).toEqual([7]));
+    expect(params).toEqual([{ scope }, { scope }]);
+    session.close();
+  });
+});

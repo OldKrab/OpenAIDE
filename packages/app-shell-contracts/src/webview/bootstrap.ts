@@ -41,6 +41,11 @@ export type WebviewBootstrap = {
   agentId?: string;
   nativeSessionId?: string;
   projectId?: string;
+  /**
+   * With `surface: "task"` and `projectId` but no `taskId`: that Project's files page, shown over
+   * its New Task. Only shells that implement `openProjectFiles` route to it.
+   */
+  projectFiles?: boolean;
   /** Ordered Project Contexts visible in a multi-root App Shell navigation surface. */
   projectIds?: string[];
   settingsTab?: SettingsTabId;

@@ -10,6 +10,7 @@ import * as shell from "../services/frontendShell";
 
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AgentFileOpenContext } from "./agentFileOpen";
+import { ExistingFileReferences, ExistingFileReferencesContext } from "./existingFileReferences";
 
 describe("AgentMarkdown", () => {
   afterEach(() => {
@@ -49,7 +50,7 @@ describe("AgentMarkdown", () => {
 
     expect(html).toContain("<strong>example.com</strong>");
     expect(html).toContain("<ul>");
-    expect(html).toContain("<code>.com</code>");
+    expect(html).toContain(">.com</code>");
     expect(html).toContain("<table>");
   });
 
@@ -148,9 +149,36 @@ describe("AgentMarkdown", () => {
     });
   });
 
+  it("links inline code of any file type once the Task workspace confirms the file", async () => {
+    const check = vi.fn(async (paths: string[]) => paths.filter((path) => path === "cv/resume.pdf"));
+    const references = new ExistingFileReferences(check);
+    const openFile = vi.fn();
+    let tree: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <AgentFileOpenContext.Provider value={openFile}>
+          <ExistingFileReferencesContext.Provider value={references}>
+            <AgentMarkdown text={"See `cv/resume.pdf`, `src/missing.ts` and `/srv/app/run.log`."} />
+          </ExistingFileReferencesContext.Provider>
+        </AgentFileOpenContext.Provider>,
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(check).toHaveBeenCalledWith(["cv/resume.pdf", "src/missing.ts"]);
+    const links = tree!.root.findAllByProps({ role: "link" });
+    expect(links.map((link) => plainCodeText(link.props.children))).toEqual(["cv/resume.pdf", "/srv/app/run.log"]);
+    act(() => links[0]!.props.onClick({ preventDefault: vi.fn() }));
+    expect(openFile).toHaveBeenCalledWith("cv/resume.pdf", undefined);
+    expect(tree!.root.findAllByProps({ role: "button", title: "Copy" }).map((code) => plainCodeText(code.props.children)))
+      .toEqual(["src/missing.ts"]);
+  });
+
   it("leaves dotted identifiers that are not file paths as ordinary inline code", () => {
     const html = renderToStaticMarkup(<AgentMarkdown text={"Use `.com` domains."} />);
-    expect(html).toContain("<code>.com</code>");
+    expect(html).toContain(">.com</code>");
     expect(html).not.toContain("agent-file-ref");
   });
 
@@ -158,8 +186,8 @@ describe("AgentMarkdown", () => {
     const html = renderToStaticMarkup(
       <AgentMarkdown text={"Call `fileViewer/open` or `tool.openPath` after the user clicks."} />,
     );
-    expect(html).toContain("<code>fileViewer/open</code>");
-    expect(html).toContain("<code>tool.openPath</code>");
+    expect(html).toContain(">fileViewer/open</code>");
+    expect(html).toContain(">tool.openPath</code>");
     expect(html).not.toContain("agent-file-ref");
   });
 
@@ -227,6 +255,48 @@ describe("AgentMarkdown", () => {
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain("agent-markdown-code-block");
     expect(html.match(/aria-label="Copy code"/g)).toHaveLength(1);
+  });
+
+  it("copies inline code when it is tapped and confirms the copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<AgentMarkdown text={"Run `npm run build` first."} />);
+    });
+    const code = tree!.root.findByProps({ role: "button", title: "Copy" });
+
+    await act(async () => {
+      code.props.onClick(inlineCodeTap({ selected: false }));
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith("npm run build");
+    expect(tree!.root.findByType("code").props["data-copy-state"]).toBe("copied");
+    expect(tree!.root.findByProps({ "aria-live": "polite" }).props.children).toBe("Copied");
+  });
+
+  it("leaves a text selection or a link alone instead of copying inline code", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<AgentMarkdown text={"Run `npm run build` or see [`docs`](https://example.com)."} />);
+    });
+    const [plain, linked] = tree!.root.findAllByProps({ role: "button", title: "Copy" });
+
+    act(() => {
+      plain!.props.onClick(inlineCodeTap({ selected: true }));
+      linked!.props.onClick(inlineCodeTap({ inLink: true, selected: false }));
+    });
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("keeps fenced code without a language as a block instead of copyable inline code", () => {
+    const html = renderToStaticMarkup(<AgentMarkdown text={"```\nplain block\n```"} />);
+    expect(html).toContain('aria-label="Copy code"');
+    expect(html).not.toContain("agent-inline-code-copy");
   });
 
   it("recognizes explicit Mermaid fences only when Agent Chat enables diagrams", () => {
@@ -307,3 +377,15 @@ describe("AgentMarkdown", () => {
     expect(tree!.root.findByProps({ "aria-label": "Copy code failed" }).props.title).toBe("Copy failed");
   });
 });
+
+function inlineCodeTap({ inLink = false, selected }: { inLink?: boolean; selected: boolean }) {
+  const code = {
+    closest: () => (inLink ? {} : null),
+    ownerDocument: { getSelection: () => ({ isCollapsed: !selected, containsNode: () => selected }) },
+  };
+  return { currentTarget: code };
+}
+
+function plainCodeText(children: unknown): string {
+  return Array.isArray(children) ? children.join("") : String(children);
+}

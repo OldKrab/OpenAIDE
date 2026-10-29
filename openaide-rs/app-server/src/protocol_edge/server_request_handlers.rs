@@ -9,7 +9,9 @@ use openaide_app_server_protocol::server_requests::{
 use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
-use crate::app_lifecycle::{LifecycleState, ShutdownCompletion, ShutdownRequestOutcome};
+use crate::app_lifecycle::{
+    LifecycleState, ShutdownCause, ShutdownCompletion, ShutdownRequestOutcome,
+};
 #[cfg(test)]
 use crate::client_lifecycle::Delivery;
 use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
@@ -80,7 +82,7 @@ impl RpcGateway {
         )
     }
 
-    pub fn shutdown(&mut self) -> Result<ShutdownCompletion, RuntimeError> {
+    pub fn shutdown(&mut self, cause: ShutdownCause) -> Result<ShutdownCompletion, RuntimeError> {
         let previous = self.lifecycle.state();
         if matches!(
             self.lifecycle.request_shutdown(),
@@ -93,7 +95,7 @@ impl RpcGateway {
             serde_json::json!({
                 "from_status": format!("{previous:?}"),
                 "to_status": "Stopping",
-                "reason_code": "shutdown_requested",
+                "reason_code": cause.reason_code(),
             }),
         );
         match self.shutdown.shutdown() {
@@ -204,11 +206,23 @@ impl RpcGateway {
 
     pub fn expire_inactive_clients(&mut self, now: AppServerTime) -> Vec<ClientExpiryOutcome> {
         let batch = self.client_hub.expire_inactive_clients(now);
+        // A transport close logs its own grace entry; silence is only seen here.
+        for (client_instance_id, expires_at) in &batch.entered_reconnect_grace {
+            crate::logging::info(
+                "client_reconnect_grace_entered",
+                serde_json::json!({
+                    "client_instance_id": client_instance_id,
+                    "reason": "heartbeat_timeout",
+                    "grace_ms": expires_at.0.saturating_sub(now.0),
+                }),
+            );
+        }
         if !batch.expired.is_empty() {
             crate::logging::info(
                 "client_liveness_expired",
                 serde_json::json!({
                     "client_count": batch.expired.len(),
+                    "client_instance_ids": batch.expired,
                     "last_client_expired": batch.last_client_expired,
                 }),
             );
@@ -385,8 +399,15 @@ impl RpcGateway {
         &self,
         snapshot: &mut openaide_app_server_protocol::state::SubscriptionSnapshot,
     ) {
-        if let openaide_app_server_protocol::state::SubscriptionSnapshot::Task { task } = snapshot {
-            *task = self.task_with_pending_requests(task.clone());
+        use openaide_app_server_protocol::state::SubscriptionSnapshot;
+        match snapshot {
+            SubscriptionSnapshot::Task { task } => {
+                *task = self.task_with_pending_requests(task.clone());
+            }
+            SubscriptionSnapshot::TaskResume { resume } => {
+                resume.pending_requests = self.server_requests.pending_for_task(&resume.task_id);
+            }
+            _ => {}
         }
     }
 

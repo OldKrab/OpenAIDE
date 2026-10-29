@@ -476,17 +476,24 @@ describe("ChatRow", () => {
 
   it("renders typed Agent images, resources, and unsupported content explicitly", async () => {
     const { ChatRow } = await import("./ChatMessageView");
+    const { ChatImageProvider } = await import("./StoredChatImage");
+    const { createChatImageCache } = await import("../state/chatImageCache");
+    const cache = createChatImageCache();
+    await cache.load("task_1", "image-1", async () => "aW1hZ2U=");
     const imageHtml = renderToStaticMarkup(
-      <ChatRow
-        message={agentContentMessage("image", {
-          kind: "image",
-          media_type: "image/png",
-          data_url: "data:image/png;base64,aW1hZ2U=",
-          uri: "memory://diagram.png",
-        })}
-        onPermissionRespond={vi.fn()}
-        taskId="task_1"
-      />,
+      <ChatImageProvider cache={cache} taskId="task_1">
+        <ChatRow
+          message={agentContentMessage("image", {
+            kind: "image",
+            media_type: "image/png",
+            image_id: "image-1",
+            size_bytes: 5,
+            uri: "memory://diagram.png",
+          })}
+          onPermissionRespond={vi.fn()}
+          taskId="task_1"
+        />
+      </ChatImageProvider>,
     );
     const resourceHtml = renderToStaticMarkup(
       <ChatRow

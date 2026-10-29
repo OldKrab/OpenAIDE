@@ -411,9 +411,9 @@ pub struct TaskOpenParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskOpenResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed open. Task state arrives only through the Task
+/// subscription (ADR-0074).
+pub struct TaskOpenResult {}
 
 /// Explicitly replaces a live Task attachment with an authoritative Agent replay.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -425,9 +425,9 @@ pub struct TaskReloadNativeSessionParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskReloadNativeSessionResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed reload (ADR-0074). The replayed history and every other
+/// change reach the client on the Task subscription.
+pub struct TaskReloadNativeSessionResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -437,9 +437,9 @@ pub struct TaskMarkReadParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskMarkReadResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed mark-read (ADR-0074). Cleared unread and attention reach
+/// the client on the Task subscription.
+pub struct TaskMarkReadResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -481,6 +481,23 @@ pub struct ToolDetailSnapshot {
     pub output: Option<ActivityToolOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_outputs: Vec<TerminalOutputSnapshot>,
+}
+
+/// Loads one stored image of a Task by the id a Chat reference names (ADR-0075).
+/// Its Task Chat or a Subagent history of that Task may reference it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskImageParams {
+    pub task_id: TaskId,
+    pub image_id: String,
+}
+
+/// The image's bytes as base64. The reference that named the image carries its
+/// media type, and an id always names the same bytes, so a client may cache it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskImageResult {
+    pub data: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

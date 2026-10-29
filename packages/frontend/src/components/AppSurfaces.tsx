@@ -16,6 +16,7 @@ import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { ProjectRemoveDialog } from "./ProjectRemoveDialog";
+import { projectFilesRoute } from "./projectFilesRoute";
 import { currentFrontendShell, type DesktopUpdateCapability } from "../services/frontendShell";
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
@@ -204,6 +205,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
   };
   const requestNewTaskFocus = () => setNewTaskFocusRequestKey((key) => key + 1);
+  const { browse: browseProjectFiles, page: projectFilesPage } = projectFilesRoute(bootstrap, frontendShell);
   useBackNavigation(mobileNavigationOpen, () => closeMobileNavigation(), 60);
   useBackNavigation(planDrawerOpen, () => setPlanDrawerOpen(false), 50);
   useBackNavigation(projectFolderDialogOpen, () => setProjectFolderDialogOpen(false));
@@ -569,12 +571,16 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       renderableTaskSnapshot?.task.agent_name ?? routedActiveTask?.agent_name,
       mobileProject,
     ].filter(Boolean).join(" · ");
+    // Navigating from Task Navigation leaves the Terminal page even when it lands on the
+    // route the page opened from, such as New Task while New Task is already routed.
     const closeAfter = <T extends unknown[]>(callback: (...args: T) => void) => (...args: T) => {
       closeMobileNavigation();
+      terminalPage.closePage();
       callback(...args);
     };
     const openNewTaskFromNavigation = (projectId?: string) => {
       closeMobileNavigation({ restoreFocus: false });
+      terminalPage.closePage();
       requestNewTaskFocus();
       callbacks.navigation.openNewTask(projectId);
     };
@@ -603,6 +609,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onArchiveTask={callbacks.navigation.archiveTask}
         onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
         onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+        onBrowseProjectFiles={browseProjectFiles && ((projectId) => { closeMobileNavigation({ restoreFocus: false }); terminalPage.closePage(); browseProjectFiles(projectId); })}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
         onRemoveProject={(project) => { closeMobileNavigation({ restoreFocus: false }); prepareProjectRemoval(project); }}
         onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
@@ -742,6 +749,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               onRemoveProject={removeProjectById}
               onPlanDrawerOpenChange={setPlanDrawerOpen}
               planDrawerOpen={planDrawerOpen}
+              projectFilesPage={projectFilesPage}
               workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
             )}

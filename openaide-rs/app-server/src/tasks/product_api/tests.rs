@@ -987,6 +987,12 @@ fn new_task_reuses_the_last_confirmed_agent_config_options() {
                 first.task.task_id.as_str().to_string(),
                 "agent-full-access".to_string()
             ),
+            // The Send resumes the first session, which this Agent restores with its
+            // default mode; the Task's chosen value is reapplied.
+            (
+                first.task.task_id.as_str().to_string(),
+                "agent-full-access".to_string()
+            ),
             (
                 second.task.task_id.as_str().to_string(),
                 "agent-full-access".to_string()
@@ -4258,7 +4264,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         ..Default::default()
     });
     let (notifier, updates) = TaskUpdateNotifier::channel();
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -4266,8 +4271,8 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         agent.clone(),
         notifier,
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4355,7 +4360,6 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         block_set_config: AtomicBool::new(true),
         ..Default::default()
     });
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -4363,8 +4367,8 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4448,7 +4452,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         commands_catalog: Some(command_catalog()),
         ..Default::default()
     });
-    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
     let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
@@ -4457,8 +4460,8 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         agent.clone(),
         notifier,
     )
-    .unwrap()
-    .with_task_subscription_presence(task_subscription_presence.clone());
+    .unwrap();
+    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -7420,12 +7423,13 @@ fn send_commits_inline_image_as_image_chat_content() {
             "/tmp/openaide-unit-workspace/app",
         ))
         .unwrap();
+    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
+        notifier,
     )
     .unwrap();
     let accepted = api
@@ -7443,14 +7447,42 @@ fn send_commits_inline_image_as_image_chat_content() {
     assert_eq!(accepted.task.chat.items[0].parts.len(), 2);
     let MessagePart::Image {
         media_type,
-        data_url,
+        image_id,
+        size_bytes,
         uri,
+        ..
     } = &accepted.task.chat.items[0].parts[1]
     else {
         panic!("expected Image part");
     };
     assert_eq!(media_type, "image/png");
-    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(*size_bytes, 5);
+    assert_eq!(
+        store.read_chat_image("task-existing", image_id).unwrap(),
+        Some(b"image".to_vec()),
+        "Chat names the Task's stored image instead of carrying its bytes"
+    );
+    // Live subscribers receive the change drafted before the journal stored the
+    // bytes; it must name the same stored image as the committed Chat.
+    let published = std::iter::from_fn(|| updates.try_recv().ok())
+        .find_map(|update| {
+            let TaskUpdateKind::Changed(change) = update.kind else {
+                return None;
+            };
+            change.changes.chat.into_iter().find_map(|chat| match chat {
+                openaide_app_server_protocol::events::TaskChatChange::Append { item }
+                    if item.role == openaide_app_server_protocol::snapshot::ChatRole::User =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+        })
+        .expect("Send must publish the user message");
+    assert_eq!(
+        published.parts[1], accepted.task.chat.items[0].parts[1],
+        "the published user message names the stored image"
+    );
     assert_eq!(uri, &None);
     wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
     assert!(
@@ -7511,14 +7543,21 @@ fn send_commits_inline_image_without_an_empty_text_part() {
     assert_eq!(accepted.task.chat.items[0].parts.len(), 1);
     let MessagePart::Image {
         media_type,
-        data_url,
+        image_id,
+        size_bytes,
         uri,
+        ..
     } = &accepted.task.chat.items[0].parts[0]
     else {
         panic!("expected inline Image message part");
     };
     assert_eq!(media_type, "image/png");
-    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(*size_bytes, 5);
+    assert_eq!(
+        store.read_chat_image("task-existing", image_id).unwrap(),
+        Some(b"image".to_vec()),
+        "Chat names the Task's stored image instead of carrying its bytes"
+    );
     assert_eq!(uri, &None);
     assert_eq!(accepted.task.task.title, None);
     assert_eq!(store.read_task("task-existing").unwrap().title, None);
@@ -10597,3 +10636,6 @@ fn wait_until(condition: impl Fn() -> bool) {
 
 #[path = "config_preferences_tests.rs"]
 mod config_preferences_tests;
+
+#[path = "config_restore_tests.rs"]
+mod config_restore_tests;

@@ -1,6 +1,6 @@
 import {
   applySubscriptionEvent,
-  createSubscriptionIngestionState,
+  installSubscriptionReply,
   type SubscriptionIngestionState,
 } from "./stateIngestion.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
@@ -21,11 +21,13 @@ import type {
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
   BackendUnsubscribe,
+  ReplicaSnapshot,
 } from "./backendConnection.js";
 
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
+const MAX_RETAINED_TASK_COPIES = 16;
 
 type ScopeReplica = {
   scope: SubscriptionScope;
@@ -51,6 +53,10 @@ export function createAppServerSession(
   logger = createDiagnosticsLogger("openaide-app-server-session"),
 ): AppServerSession {
   const replicas = new Map<string, ScopeReplica>();
+  // Task copies kept after their last observer leaves, least recently released first.
+  // Returning to the Task offers the copy's revision instead of paying for a baseline
+  // (ADR-0073). A copy is trusted only within the generation that installed it.
+  const retainedTaskCopies = new Map<string, Extract<ReplicaSnapshot, { kind: "task" }>>();
   const statusListeners = new Set<(status: AppServerSessionStatus) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
@@ -197,6 +203,7 @@ export function createAppServerSession(
       stopRecoveryBaseline();
       stopRecoveryFailure();
       replicas.clear();
+      retainedTaskCopies.clear();
       statusListeners.clear();
       invalidationListeners.clear();
       recoveryBaselineListeners.clear();
@@ -221,6 +228,7 @@ export function createAppServerSession(
       replica_count: replicas.size,
     });
     updateStatus({ status: "recovering", generation, reason: event.reason });
+    retainedTaskCopies.clear();
     for (const replica of replicas.values()) invalidateReplica(replica);
     notifyListeners(invalidationListeners, event, logger, "generation_invalidation");
   }
@@ -311,23 +319,42 @@ export function createAppServerSession(
 
   async function refreshReplicaUntilReady(replica: ScopeReplica, targetGeneration: number) {
     let attempt = 0;
+    // Only the first attempt offers a retained copy; a rejected resume falls back to a baseline.
+    let retained = takeRetainedTaskCopy(scopeKey(replica.scope));
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
       attempt += 1;
       const startedAt = Date.now();
+      const knownRevision = retained?.task.revision;
       try {
         logger.info("app_server_state_baseline_request_started", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
+          known_revision_offered: knownRevision !== undefined,
         });
-        const result = await connection.request(STATE_SUBSCRIBE, { scope: replica.scope });
+        const result = await connection.request(
+          STATE_SUBSCRIBE,
+          knownRevision === undefined ? { scope: replica.scope } : { scope: replica.scope, knownRevision },
+        );
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
         const snapshot = initialization?.snapshot;
         if (!snapshot) throw new Error("App Server session is not initialized");
-        replica.state = createSubscriptionIngestionState(result, {
+        const offered = retained;
+        retained = undefined;
+        const state = installSubscriptionReply(result, {
           stateRootId: snapshot.stateRoot.stateRootId,
           clientInstanceId: snapshot.client.clientInstanceId,
-        });
+        }, offered);
+        if (!state) {
+          logger.warn("app_server_state_resume_rejected", {
+            ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+            generation: targetGeneration,
+            attempt,
+            duration_ms: Date.now() - startedAt,
+          });
+          continue;
+        }
+        replica.state = state;
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
@@ -340,6 +367,8 @@ export function createAppServerSession(
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
+          reply_kind: result.snapshot.kind,
+          missed_change_count: result.snapshot.kind === "taskResume" ? result.snapshot.resume.changes.length : 0,
           duration_ms: Date.now() - startedAt,
         });
         return;
@@ -430,11 +459,29 @@ export function createAppServerSession(
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
     replicas.delete(key);
+    retainTaskCopy(key, replica);
     logger.info("app_server_state_subscription_released", {
       ...scopeDiagnosticFields(replica.scope, key),
       generation,
     });
     void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
+  }
+
+  function retainTaskCopy(key: string, replica: ScopeReplica) {
+    const snapshot = replica.state?.snapshot;
+    if (replica.refreshing || snapshot?.kind !== "task") return;
+    retainedTaskCopies.delete(key);
+    retainedTaskCopies.set(key, snapshot);
+    for (const oldest of retainedTaskCopies.keys()) {
+      if (retainedTaskCopies.size <= MAX_RETAINED_TASK_COPIES) break;
+      retainedTaskCopies.delete(oldest);
+    }
+  }
+
+  function takeRetainedTaskCopy(key: string) {
+    const snapshot = retainedTaskCopies.get(key);
+    retainedTaskCopies.delete(key);
+    return snapshot;
   }
 
   function updateStatus(next: AppServerSessionStatus) {

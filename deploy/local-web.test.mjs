@@ -444,11 +444,12 @@ test("local web can run an opt-in send-path smoke check after start", () => {
   assert.match(script, /local-web-smoke\.mjs" "http:\/\/\$host:\$port"/);
   assert.match(smoke, /\/__openaide-app-server\/probe/);
   assert.match(smoke, /"task\/acquire"/);
-  assert.match(smoke, /"task\/open"/);
+  assert.match(smoke, /"state\/subscribe"/);
   assert.doesNotMatch(smoke, /taskRevision/);
   assert.match(smoke, /"task\/send"/);
   assert.match(smoke, /"task\/cancel"/);
-  assert.match(smoke, /"task\/setArchived"/);
+  assert.match(smoke, /"task\/archive", \{ taskId \}/);
+  assert.doesNotMatch(smoke, /setArchived/);
 });
 
 test("local web supports durable user systemd daemon mode", () => {
@@ -592,6 +593,75 @@ echo "bye"
   assert.equal(caller.status, 0, caller.stderr);
   assert.match(caller.stdout, /Service PATH source: caller/);
   assert.match(caller.stderr, /Agents may not start/);
+});
+
+test("a start forwards a staged App Server binary and refuses a missing one", (t) => {
+  const fixture = systemdStartFixture(t, "app-server-path");
+  const systemdRunLog = join(fixture.fixtureRoot, "systemd-run.log");
+  writeFileSync(join(fixture.fakeBin, "systemd-run"), `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "${systemdRunLog}"
+exit 0
+`);
+  writeFileSync(join(fixture.fakeBin, "curl"), "#!/usr/bin/env bash\nexit 0\n");
+  const appServer = join(fixture.fixtureRoot, "deployed", "openaide-app-server");
+  mkdirSync(join(fixture.fixtureRoot, "deployed"));
+  writeFileSync(appServer, "");
+  for (const file of [join(fixture.fakeBin, "systemd-run"), join(fixture.fakeBin, "curl"), appServer]) {
+    chmodSync(file, 0o755);
+  }
+  // A staged binary must not trigger a target/debug build, so the build step runs.
+  const start = (path) => runSystemdStartFixture(fixture, { OPENAIDE_APP_SERVER_PATH: path, OPENAIDE_WEB_SKIP_BUILD: "0" });
+
+  const staged = start(appServer);
+  assert.equal(staged.status, 0, staged.stderr);
+  assert.match(readFileSync(systemdRunLog, "utf8"), new RegExp(`--setenv OPENAIDE_APP_SERVER_PATH=${appServer}( |$)`, "m"));
+  assert.match(staged.stdout, new RegExp(`App Server: ${appServer}$`, "m"));
+
+  rmSync(systemdRunLog);
+  const missing = start(join(fixture.fixtureRoot, "deployed", "missing"));
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /OPENAIDE_APP_SERVER_PATH is not an executable App Server/);
+  assert.throws(() => readFileSync(systemdRunLog, "utf8"), { code: "ENOENT" });
+});
+
+test("unnamed ports and roots and a role's App Server binary stay apart from the Driver's", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-defaults-"));
+  const fixtureDeploy = join(fixtureRoot, "deploy");
+  cpSync(new URL(".", import.meta.url), fixtureDeploy, { recursive: true });
+  // The machine's ignored defaults would name roots; this checks the script's own.
+  rmSync(join(fixtureDeploy, "local-web.env"), { force: true });
+  writeFileSync(join(fixtureDeploy, "local-web.fixture.env"), "OPENAIDE_WEB_PORT=5593\n");
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  const usage = (env) => {
+    const caller = { ...process.env };
+    delete caller.OPENAIDE_WEB_STATE_ROOT;
+    delete caller.OPENAIDE_WEB_RUNTIME_ROOT;
+    delete caller.OPENAIDE_APP_SERVER_PATH;
+    delete caller.OPENAIDE_WEB_PORT;
+    delete caller.OPENAIDE_WEB_VITE_PORT;
+    const result = spawnSync("bash", [join(fixtureDeploy, "local-web.sh"), "usage"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+      env: { ...caller, OPENAIDE_WEB_ROLE: "", ...env },
+    });
+    assert.equal(result.status, 2);
+    return result.stderr;
+  };
+
+  const unnamed = usage({});
+  assert.match(unnamed, /OPENAIDE_WEB_PORT=5374$/m);
+  assert.match(unnamed, /OPENAIDE_WEB_VITE_PORT=5373$/m);
+  assert.match(unnamed, new RegExp(`OPENAIDE_WEB_STATE_ROOT=${fixtureRoot}/\\.openaide-web-dev-default/state$`, "m"));
+  assert.match(unnamed, new RegExp(`OPENAIDE_WEB_RUNTIME_ROOT=${fixtureRoot}/\\.openaide-web-dev-default/runtime$`, "m"));
+  const devServer = readFileSync(new URL("../apps/web/src/dev-server.mjs", import.meta.url), "utf8");
+  assert.match(devServer, /path\.join\(repoRoot, "\.openaide-web-dev-default"\)/);
+
+  // An Agent inherits the Driver's binary path; a role run must not take it.
+  const inherited = usage({ OPENAIDE_WEB_ROLE: "fixture", OPENAIDE_APP_SERVER_PATH: "/driver/openaide-app-server" });
+  assert.match(inherited, /OPENAIDE_APP_SERVER_PATH=<target\/debug\/openaide-app-server>/);
+  writeFileSync(join(fixtureDeploy, "local-web.fixture.local.env"), "OPENAIDE_APP_SERVER_PATH=/role/openaide-app-server\n");
+  assert.match(usage({ OPENAIDE_WEB_ROLE: "fixture" }), /OPENAIDE_APP_SERVER_PATH=\/role\/openaide-app-server /);
+  assert.match(usage({ OPENAIDE_APP_SERVER_PATH: "/caller/openaide-app-server" }), /OPENAIDE_APP_SERVER_PATH=\/caller\/openaide-app-server /);
 });
 
 function systemdStartFixture(t, name) {

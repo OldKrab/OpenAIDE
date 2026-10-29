@@ -174,5 +174,8 @@ fn expired_last_client_requests_app_server_shutdown() {
     );
 
     assert_eq!(heartbeat.status, 200);
-    assert!(shutdown_receiver.try_recv().is_ok());
+    assert_eq!(
+        shutdown_receiver.try_recv(),
+        Ok(crate::app_lifecycle::ShutdownCause::LastClientDetached)
+    );
 }

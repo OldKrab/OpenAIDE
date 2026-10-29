@@ -173,6 +173,13 @@ pub(super) fn ensure_task_loaded(
         }
         (replayed_id, task)
     };
+    if let RecoveredTask::Available {
+        projection,
+        journal_sequence,
+    } = &mut task
+    {
+        migrate_inline_images(&task_dir, projection, *journal_sequence)?;
+    }
     let epoch_overlay = epoch_task_overlays
         .read()
         .expect("Task epoch overlays poisoned")
@@ -200,6 +207,55 @@ pub(super) fn ensure_task_loaded(
         .expect("Task journal projections poisoned")
         .insert(replayed_id, task);
     Ok(true)
+}
+
+/// Moves a Chat's inline images into files, records missing image dimensions,
+/// and publishes a compacted generation that holds only references (ADR-0075). A failure leaves the previous
+/// generation authoritative, so the Task fails to load and the next open retries.
+fn migrate_inline_images(
+    task_dir: &std::path::Path,
+    projection: &mut crate::storage::task_journal::TaskProjection,
+    journal_sequence: u64,
+) -> Result<(), RuntimeError> {
+    let started_at = std::time::Instant::now();
+    let mut migrated = projection.clone();
+    let result =
+        super::super::images::migrate_projection(task_dir, &mut migrated).and_then(|moved| {
+            if moved {
+                split::compact(
+                    task_dir,
+                    &migrated,
+                    journal_sequence,
+                    &crate::storage::task_journal::frame::FaultInjector::disabled(),
+                )?;
+            }
+            Ok(moved)
+        });
+    match result {
+        Ok(false) => Ok(()),
+        Ok(true) => {
+            crate::logging::info(
+                "chat_images_migrated",
+                serde_json::json!({
+                    "task_id": projection.task.task_id,
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
+            *projection = migrated;
+            Ok(())
+        }
+        Err(error) => {
+            crate::logging::warn(
+                "chat_images_migration_failed",
+                serde_json::json!({
+                    "task_id": projection.task.task_id,
+                    "error_kind": error.reason(),
+                    "duration_ms": started_at.elapsed().as_millis(),
+                }),
+            );
+            Err(error)
+        }
+    }
 }
 
 pub(super) fn publish_catalog(

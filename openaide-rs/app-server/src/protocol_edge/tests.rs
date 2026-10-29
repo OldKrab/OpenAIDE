@@ -74,6 +74,7 @@ mod client_probe;
 mod devices;
 mod gateway_lock_wait;
 mod replacement_impact;
+mod task_resume;
 mod terminals;
 
 #[test]
@@ -87,6 +88,7 @@ fn rejects_product_request_before_initialize() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(1),
@@ -275,6 +277,7 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(4),
@@ -299,6 +302,7 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(6),
@@ -366,6 +370,7 @@ fn update_shutdown_barrier_is_recovered_by_the_same_desktop_client() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(4),
@@ -406,6 +411,7 @@ fn initialize_unknown_task_route_keeps_the_client_usable() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -484,6 +490,7 @@ fn project_add_publishes_project_without_task_history() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -598,6 +605,7 @@ fn project_add_survives_gateway_restart() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -680,6 +688,7 @@ fn project_remove_hides_a_project_without_deleting_its_folder() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(4),
@@ -807,6 +816,7 @@ fn workspace_root_change_replaces_both_navigation_sections() {
                         section,
                         project_ids: None,
                     },
+                    known_revision: None,
                 },
             ),
             AppServerTime(2),
@@ -967,6 +977,7 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -1022,6 +1033,7 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -1076,6 +1088,7 @@ fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -1206,6 +1219,7 @@ fn background_agent_status_update_is_queued_for_local_http_subscribers() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -1229,6 +1243,7 @@ fn repeated_task_navigation_subscription_does_not_restart_catalog_discovery() {
             section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
             project_ids: None,
         },
+        known_revision: None,
     };
 
     response_value(gateway.handle_inbound(
@@ -2037,6 +2052,7 @@ fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2076,6 +2092,7 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
                     task_id: TaskId::from("task-1"),
                     artifact_id: "artifact-2".to_string(),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -2090,6 +2107,7 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
                     task_id: TaskId::from("task-1"),
                     artifact_id: "artifact-1".to_string(),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(4),
@@ -2181,6 +2199,7 @@ fn task_subscription_delivers_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -2216,6 +2235,7 @@ fn task_request_waits_when_subscribed_client_lacks_response_capability() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2239,6 +2259,7 @@ fn task_request_opened_after_subscription_is_delivered_immediately() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2280,6 +2301,7 @@ fn task_permission_routes_to_all_connected_capable_clients_without_subscription_
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -2310,6 +2332,7 @@ fn opening_task_permission_publishes_pending_request_in_task_state_stream() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2348,6 +2371,7 @@ fn stopping_task_publishes_empty_request_set_after_pending_question_is_interrupt
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2401,6 +2425,7 @@ fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2465,6 +2490,7 @@ fn client_response_resolves_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2532,6 +2558,7 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2584,6 +2611,7 @@ fn committed_task_summary_change_publishes_task_updated_to_navigation() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2633,6 +2661,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-new"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(3),
@@ -2647,6 +2676,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(4),
@@ -2694,6 +2724,7 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2765,6 +2796,7 @@ fn client_response_error_keeps_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2806,6 +2838,7 @@ fn unsubscribe_after_initialize_removes_subscription() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: scope.clone(),
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2834,6 +2867,7 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
+                known_revision: None,
             },
         ),
         AppServerTime(2),
@@ -2986,6 +3020,37 @@ fn authenticated_transport_activity_refreshes_client_liveness() {
             client_instance_id: ClientInstanceId::from("client-1"),
             last_client: true,
         }]
+    );
+}
+
+#[test]
+fn a_silent_client_logs_entering_reconnect_grace_and_its_expiry() {
+    let logs = crate::logging::capture_test_logs();
+    let mut gateway = initialized_gateway("client-silent", "conn-silent");
+
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(11))
+        .is_empty());
+    assert_eq!(gateway.expire_inactive_clients(AppServerTime(21)).len(), 1);
+
+    let events = logs
+        .snapshot()
+        .into_iter()
+        .filter(|entry| entry.to_string().contains("client-silent"))
+        .collect::<Vec<_>>();
+    let event = |name: &str| {
+        events
+            .iter()
+            .find(|entry| entry["event"] == name)
+            .unwrap_or_else(|| panic!("missing {name} in {events:?}"))
+            .clone()
+    };
+    let entered = event("client_reconnect_grace_entered");
+    assert_eq!(entered["fields"]["reason"], "heartbeat_timeout");
+    assert_eq!(entered["fields"]["grace_ms"], 10);
+    assert_eq!(
+        event("client_liveness_expired")["fields"]["client_instance_ids"],
+        json!(["client-silent"])
     );
 }
 
@@ -4463,10 +4528,7 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskMarkReadParams,
-    ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskSnapshot,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task mark-read unavailable in test gateway".to_string(),
@@ -4479,10 +4541,7 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskOpenParams,
-    ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskSnapshot,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task open unavailable in test gateway".to_string(),
@@ -5187,4 +5246,92 @@ fn client_server_request(client_id: &str) -> ServerRequestDraft {
         title: "Secret needed".to_string(),
         params: json!({ "key": "agent.secret" }),
     }
+}
+
+fn file_access_git(root: &std::path::Path, args: &[&str]) {
+    assert!(std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid"
+        ])
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap()
+        .status
+        .success());
+}
+
+#[test]
+fn file_access_resolves_a_project_and_only_its_own_worktrees() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let mut add_project = |name: &str, request_id: &str| {
+        let root = store.root().join("workspace").join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        file_access_git(&root, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("file.txt"), name).unwrap();
+        file_access_git(&root, &["add", "."]);
+        file_access_git(&root, &["commit", "-qm", "initial"]);
+        let added = response_value(gateway.handle_inbound(
+            connection_id.clone(),
+            request(request_id, "project/add", json!({ "workspaceRoot": root })),
+            AppServerTime(2),
+        ));
+        let project_id: openaide_app_server_protocol::ids::ProjectId =
+            serde_json::from_value(added["result"]["project"]["projectId"].clone()).unwrap();
+        (root, project_id)
+    };
+    let (first_root, first) = add_project("first", "2");
+    let (second_root, second) = add_project("second", "3");
+    let linked = store.root().join("workspace/first-linked");
+    file_access_git(
+        &first_root,
+        &["worktree", "add", "-qb", "review", linked.to_str().unwrap()],
+    );
+    let linked_id = gateway
+        .worktrees
+        .refresh_project(&first_root)
+        .unwrap()
+        .unwrap()
+        .repository
+        .worktrees
+        .into_iter()
+        .find(|worktree| !worktree.is_main)
+        .unwrap()
+        .worktree_id;
+    gateway.worktrees.refresh_project(&second_root).unwrap();
+    let client = ClientInstanceId::from("client-1");
+
+    let (root, kind) = gateway
+        .file_workspace_root(&client, None, Some(&first), None)
+        .unwrap();
+    assert_eq!(std::path::Path::new(&root), first_root);
+    assert_eq!(kind, "projectRoot");
+
+    let (root, kind) = gateway
+        .file_workspace_root(&client, None, Some(&first), Some(&linked_id))
+        .unwrap();
+    assert_eq!(
+        std::fs::canonicalize(root).unwrap(),
+        std::fs::canonicalize(&linked).unwrap()
+    );
+    assert_eq!(kind, "worktree");
+
+    // A worktree identifier from another repository does not widen a Project's reach.
+    assert!(gateway
+        .file_workspace_root(&client, None, Some(&second), Some(&linked_id))
+        .is_err());
+    // The scope must be exactly one of a Task and a Project.
+    assert!(gateway
+        .file_workspace_root(&client, None, None, None)
+        .is_err());
+    assert!(gateway
+        .file_workspace_root(&client, Some(&"task-1".into()), Some(&first), None)
+        .is_err());
 }

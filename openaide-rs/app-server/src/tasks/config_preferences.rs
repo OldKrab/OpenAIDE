@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::{AgentSession, AgentSessionSetConfigOptionRequest};
@@ -7,6 +8,7 @@ use crate::protocol::model::{
     ConfigOptionsCatalog,
 };
 use crate::storage::agent_config_preferences::{AgentConfigPreference, AgentConfigPreferences};
+use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 
 const MAX_RECONCILIATION_PASSES: usize = 2;
@@ -23,20 +25,8 @@ pub(crate) fn apply_to_prepared_session(
         return Ok(session);
     }
 
-    let mut failed_options = HashSet::new();
-    for _ in 0..MAX_RECONCILIATION_PASSES {
-        let before = session.config_catalog.clone();
-        apply_pass(
-            agent_gateway,
-            &preferences,
-            &mut session,
-            &mut failed_options,
-        );
-        if session.config_catalog == before || preferences_match_session(&preferences, &session) {
-            break;
-        }
-    }
-    if !failed_options.is_empty() || !preferences_match_session(&preferences, &session) {
+    let failed_options = reconcile(agent_gateway, &preferences.options, &mut session);
+    if !failed_options.is_empty() || !preferences_match_session(&preferences.options, &session) {
         crate::logging::warn(
             "agent_config_preferences_not_settled",
             serde_json::json!({
@@ -51,9 +41,65 @@ pub(crate) fn apply_to_prepared_session(
     Ok(session)
 }
 
+/// Puts a restored session back to the values its Task last chose, when the Agent restored
+/// it with others, often its defaults. Best effort: a value the catalog no longer offers is
+/// skipped, a rejected one is logged, and the session keeps whatever the Agent last
+/// confirmed. Its catalog stays authoritative, so the controls show the actual values.
+pub(crate) fn restore_chosen(
+    agent_gateway: &AgentGateway,
+    task: &TaskRecord,
+    mut session: AgentSession,
+) -> AgentSession {
+    let chosen = &task.config_mutation.chosen;
+    if chosen.is_empty() || session.config_catalog.is_none() {
+        return session;
+    }
+    if preferences_match_session(chosen, &session) {
+        return session;
+    }
+    let started = Instant::now();
+    crate::logging::info(
+        "task_config_restore_started",
+        serde_json::json!({ "task_id": task.task_id, "agent_id": session.agent_id }),
+    );
+    let failed_options = reconcile(agent_gateway, chosen, &mut session);
+    let settled = preferences_match_session(chosen, &session);
+    let fields = serde_json::json!({
+        "task_id": task.task_id,
+        "agent_id": session.agent_id,
+        "outcome": if settled { "settled" } else { "unsettled" },
+        "failed_count": failed_options.len(),
+        "duration_ms": started.elapsed().as_millis(),
+    });
+    if settled {
+        crate::logging::info("task_config_restore_completed", fields);
+    } else {
+        crate::logging::warn("task_config_restore_completed", fields);
+    }
+    session
+}
+
+/// Applies [`preferences`] in catalog order with one bounded second pass, for values a
+/// preceding option reset. Returns the options the Agent rejected.
+fn reconcile(
+    agent_gateway: &AgentGateway,
+    preferences: &[AgentConfigPreference],
+    session: &mut AgentSession,
+) -> HashSet<String> {
+    let mut failed_options = HashSet::new();
+    for _ in 0..MAX_RECONCILIATION_PASSES {
+        let before = session.config_catalog.clone();
+        apply_pass(agent_gateway, preferences, session, &mut failed_options);
+        if session.config_catalog == before || preferences_match_session(preferences, session) {
+            break;
+        }
+    }
+    failed_options
+}
+
 fn apply_pass(
     agent_gateway: &AgentGateway,
-    preferences: &AgentConfigPreferences,
+    preferences: &[AgentConfigPreference],
     session: &mut AgentSession,
     failed_options: &mut HashSet<String>,
 ) {
@@ -63,7 +109,6 @@ fn apply_pass(
             continue;
         }
         let Some(preference) = preferences
-            .options
             .iter()
             .find(|preference| preference.id == option_id)
         else {
@@ -143,8 +188,11 @@ pub(crate) fn supports_preference(
     }
 }
 
-fn preferences_match_session(preferences: &AgentConfigPreferences, session: &AgentSession) -> bool {
-    preferences.options.iter().all(|preference| {
+fn preferences_match_session(
+    preferences: &[AgentConfigPreference],
+    session: &AgentSession,
+) -> bool {
+    preferences.iter().all(|preference| {
         current_option(session, &preference.id)
             .filter(|option| supports_preference(option, preference))
             .is_none_or(|option| option.current_value == preference.value)

@@ -14,6 +14,7 @@ env_override_names=(
   OPENAIDE_WEB_STATE_ROOT
   OPENAIDE_WEB_RUNTIME_ROOT
   OPENAIDE_WEB_STATIC_ROOT
+  OPENAIDE_APP_SERVER_PATH
   OPENAIDE_WEB_PROJECT_ROOTS
   OPENAIDE_WEB_PID_FILE
   OPENAIDE_WEB_LOG_FILE
@@ -61,6 +62,8 @@ if [[ -n "${OPENAIDE_WEB_ROLE:-}" ]]; then
       exit 2
       ;;
   esac
+  # An Agent inherits the Driver's App Server binary; a role runs its own files' binary.
+  unset OPENAIDE_APP_SERVER_PATH
   role_env_file="$repo_root/deploy/local-web.$OPENAIDE_WEB_ROLE.env"
   if [[ -f "$role_env_file" ]]; then
     set -a
@@ -101,11 +104,16 @@ done
 
 command="${1:-refresh}"
 host="${OPENAIDE_WEB_HOST:-127.0.0.1}"
-port="${OPENAIDE_WEB_PORT:-5474}"
-vite_port="${OPENAIDE_WEB_VITE_PORT:-5473}"
+# Unnamed ports stay off every role's: a restart stops whatever listens on them, and the Driver
+# uses 5474/5473 and the Target 5574/5573.
+port="${OPENAIDE_WEB_PORT:-5374}"
+vite_port="${OPENAIDE_WEB_VITE_PORT:-5373}"
 prototype_port="${OPENAIDE_WEB_PROTOTYPE_PORT:-}"
-state_root="${OPENAIDE_WEB_STATE_ROOT:-$repo_root/.openaide-web-dev/state}"
-runtime_root="${OPENAIDE_WEB_RUNTIME_ROOT:-$repo_root/.openaide-web-dev/runtime}"
+# Unnamed roots stay apart from every role's, as in apps/web/src/dev-server.mjs.
+state_root="${OPENAIDE_WEB_STATE_ROOT:-$repo_root/.openaide-web-dev-default/state}"
+runtime_root="${OPENAIDE_WEB_RUNTIME_ROOT:-$repo_root/.openaide-web-dev-default/runtime}"
+# An instance with its own App Server binary is not replaced by a rebuild of target/debug.
+app_server_path="${OPENAIDE_APP_SERVER_PATH:-}"
 static_root="${OPENAIDE_WEB_STATIC_ROOT:-$repo_root/.openaide-web-dev/static-$port}"
 source_static_root="$repo_root/packages/frontend/dist"
 project_roots="${OPENAIDE_WEB_PROJECT_ROOTS:-$repo_root}"
@@ -124,6 +132,9 @@ fi
 state_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$state_root")"
 runtime_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$runtime_root")"
 static_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$static_root")"
+if [[ -n "$app_server_path" ]]; then
+  app_server_path="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$app_server_path")"
+fi
 
 usage() {
   cat <<EOF
@@ -137,6 +148,7 @@ Optional env:
   OPENAIDE_WEB_STATE_ROOT=$state_root
   OPENAIDE_WEB_RUNTIME_ROOT=$runtime_root
   OPENAIDE_WEB_STATIC_ROOT=$static_root
+  OPENAIDE_APP_SERVER_PATH=${app_server_path:-<target/debug/openaide-app-server>}  never built by this script
   OPENAIDE_WEB_BUILD=1
   OPENAIDE_WEB_DAEMON=systemd
   OPENAIDE_WEB_SERVICE_PATH=<PATH>  the systemd unit's PATH; defaults to the login shell's
@@ -233,13 +245,18 @@ build_static_frontend() {
 build_if_requested() {
   # A systemd instance builds with the PATH it will run with; see local-web-service-path.sh.
   local PATH="${service_path:-$PATH}"
-  if [[ "${OPENAIDE_WEB_BUILD:-0}" == "1" ]]; then
+  if [[ -n "$app_server_path" ]]; then
+    # The deploy that staged this binary owns it; a missing one is a deploy error.
+    if [[ ! -x "$app_server_path" ]]; then
+      echo "OPENAIDE_APP_SERVER_PATH is not an executable App Server: $app_server_path" >&2
+      exit 2
+    fi
+  elif [[ "${OPENAIDE_WEB_BUILD:-0}" == "1" || ! -x "$repo_root/target/debug/openaide-app-server" ]]; then
     (cd "$repo_root" && npm run app-server:build)
-    build_static_frontend
   fi
 
-  if [[ ! -x "$repo_root/target/debug/openaide-app-server" ]]; then
-    (cd "$repo_root" && npm run app-server:build)
+  if [[ "${OPENAIDE_WEB_BUILD:-0}" == "1" ]]; then
+    build_static_frontend
   fi
 
   if [[ ! -f "$static_root/index.html" ]]; then
@@ -330,6 +347,10 @@ start_server() {
   if [[ -n "${OPENAIDE_ACP_TRACE_DIR:-}" ]]; then
     trace_env_args+=(OPENAIDE_ACP_TRACE_DIR="$OPENAIDE_ACP_TRACE_DIR")
   fi
+  local app_server_env_args=()
+  if [[ -n "$app_server_path" ]]; then
+    app_server_env_args+=(OPENAIDE_APP_SERVER_PATH="$app_server_path")
+  fi
 
   setsid env \
     NODE_OPTIONS="$node_options" \
@@ -346,6 +367,7 @@ start_server() {
     OPENAIDE_WEB_PROJECT_ROOTS="$project_roots" \
     OPENAIDE_WEB_STATIC_ROOT="$static_root" \
     "${trace_env_args[@]}" \
+    "${app_server_env_args[@]}" \
     npm run web:dev 9>&- > "$log_file" 2>&1 < /dev/null &
 
   echo "$!" > "$pid_file"
@@ -362,6 +384,7 @@ start_server() {
   echo "Log file: $log_file"
   echo "State root: $state_root"
   echo "Static root: $static_root"
+  echo "App Server: ${app_server_path:-$repo_root/target/debug/openaide-app-server}"
   smoke_if_requested
 }
 
@@ -393,6 +416,10 @@ start_systemd_server() {
   if [[ -n "${OPENAIDE_ACP_TRACE_DIR:-}" ]]; then
     systemd_trace_env_args+=(--setenv "OPENAIDE_ACP_TRACE_DIR=$OPENAIDE_ACP_TRACE_DIR")
   fi
+  local systemd_app_server_env_args=()
+  if [[ -n "$app_server_path" ]]; then
+    systemd_app_server_env_args+=(--setenv "OPENAIDE_APP_SERVER_PATH=$app_server_path")
+  fi
   systemd-run --user \
     --unit "$systemd_unit" \
     --description "OpenAIDE local web on $host:$port" \
@@ -421,6 +448,7 @@ start_systemd_server() {
     --setenv "OPENAIDE_WEB_STATIC_ROOT=$static_root" \
     --setenv "OPENAIDE_ACP_NATIVE_SUBAGENTS=${OPENAIDE_ACP_NATIVE_SUBAGENTS:-}" \
     "${systemd_trace_env_args[@]}" \
+    "${systemd_app_server_env_args[@]}" \
     "$npm_bin" run web:dev >/dev/null
   echo "$static_root" > "$static_root_file"
   if ! wait_for_web_ready; then
@@ -438,6 +466,7 @@ start_systemd_server() {
   echo "Log file: $log_file"
   echo "State root: $state_root"
   echo "Static root: $static_root"
+  echo "App Server: ${app_server_path:-$repo_root/target/debug/openaide-app-server}"
   smoke_if_requested
 }
 

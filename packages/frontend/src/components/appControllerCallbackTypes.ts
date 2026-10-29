@@ -142,6 +142,8 @@ export type TaskCallbacks = {
   subscribeToolDetail: (artifactId: string) => () => void;
   /** Lazily loads a validated workspace image without exposing a caller-selected path. */
   loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
+  /** Reads one stored Chat image of a Task as base64; rejects when it cannot be loaded. */
+  loadChatImage: (taskId: string, imageId: string) => Promise<string>;
   revealAttachment: (attachmentId: string) => Promise<void>;
   moveAttachment: (attachmentId: string, targetIndex: number) => void;
   removeAttachment: (attachmentId: string) => void;

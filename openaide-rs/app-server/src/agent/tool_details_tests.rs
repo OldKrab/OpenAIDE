@@ -1,5 +1,80 @@
 use super::*;
-use crate::agent::acp_schema::Terminal;
+use crate::agent::acp_schema::{ImageContent, Terminal, TextContent};
+
+fn details_of(tool_call: ToolCall) -> ActivityToolDetails {
+    let AgentEvent::ToolCall(tool) = tool_call_event(&tool_call) else {
+        panic!("expected tool event");
+    };
+    *tool.details.expect("tool details")
+}
+
+#[test]
+fn claude_raw_output_repeating_content_is_stored_once() {
+    let text = "fn main() {\n    println!(\"repeated in the fenced content\");\n}";
+    let details = details_of(
+        ToolCall::new("tool-1", "Read main.rs")
+            .kind(ToolKind::Read)
+            .content(vec![ToolCallContent::from(ContentBlock::Text(
+                TextContent::new(format!("```\n{text}\n```")),
+            ))])
+            .raw_output(Value::String(text.to_string())),
+    );
+    assert_eq!(details.content.len(), 1);
+    assert!(details.output.is_none(), "the text is already in content");
+
+    let data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let details = details_of(
+        ToolCall::new("tool-2", "Read image.png")
+            .kind(ToolKind::Read)
+            .content(vec![ToolCallContent::from(ContentBlock::Image(
+                ImageContent::new(data, "image/png"),
+            ))])
+            .raw_output(serde_json::json!([{
+                "type": "image",
+                "source": { "type": "base64", "data": data, "media_type": "image/png" },
+            }])),
+    );
+    assert!(matches!(
+        details.content.first(),
+        Some(ActivityToolContent::Image { .. })
+    ));
+    assert!(details.output.is_none(), "the image is already in content");
+}
+
+#[test]
+fn raw_output_with_anything_beyond_content_is_kept() {
+    let fenced = |text: &str| {
+        vec![ToolCallContent::from(ContentBlock::Text(TextContent::new(
+            format!("```console\n{text}\n```"),
+        )))]
+    };
+    let shown = "a line long enough to count as repeated output text";
+    let different = details_of(
+        ToolCall::new("tool-1", "Run")
+            .kind(ToolKind::Execute)
+            .content(fenced(shown))
+            .raw_output(serde_json::json!([
+                shown,
+                "another line that the content never showed"
+            ])),
+    );
+    assert!(
+        different.output.is_some(),
+        "a string missing from content is kept"
+    );
+
+    let structured = details_of(
+        ToolCall::new("tool-2", "Run")
+            .kind(ToolKind::Execute)
+            .content(fenced(shown))
+            .raw_output(serde_json::json!({ "stdout": shown, "exit_code": 0 })),
+    );
+    assert_eq!(
+        structured.output.and_then(|output| output.exit_code),
+        Some(0),
+        "an object carries fields beyond the text"
+    );
+}
 
 #[test]
 fn terminal_reference_preserves_details_without_inventing_output_text() {

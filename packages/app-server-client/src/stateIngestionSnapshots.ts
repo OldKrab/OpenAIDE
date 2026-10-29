@@ -2,20 +2,21 @@ import type {
   AppServerEventPayload,
   ClientSnapshot,
   SubscriptionScope,
-  SubscriptionSnapshot,
 } from "./generated/protocol.js";
+import type { ReplicaSnapshot } from "./backendConnection.js";
 import {
   filterTaskNavigationForScope,
   replaceNavigationProjectEntries,
   updateExistingNavigationTask,
 } from "./stateIngestionTaskNavigation.js";
+import { updateSubagentHistorySnapshot } from "./stateIngestionSubagentHistory.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
 
 export function updateSubscriptionSnapshot(
   scope: SubscriptionScope,
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   if (payload.kind === "snapshotReplaced") {
@@ -52,12 +53,7 @@ export function updateSubscriptionSnapshot(
         ? changed({ kind: "subagentCatalog", catalog: payload.catalog })
         : unchanged(snapshot);
     case "subagentHistory":
-      return payload.kind === "subagentHistoryUpdated"
-        && payload.history.taskId === snapshot.history.taskId
-        && payload.history.subagentId === snapshot.history.subagentId
-        && payload.history.revision >= snapshot.history.revision
-        ? changed({ kind: "subagentHistory", history: payload.history })
-        : unchanged(snapshot);
+      return updateSubagentHistorySnapshot(snapshot, payload);
     case "toolDetail":
       if ((payload.kind !== "toolDetailUpdated" && payload.kind !== "toolDetailChanged")
         || payload.taskId !== snapshot.taskId
@@ -105,7 +101,7 @@ export function updateSubscriptionSnapshot(
 
 function updateFromClientSnapshot(
   scope: SubscriptionScope,
-  snapshot: SubscriptionSnapshot,
+  snapshot: ReplicaSnapshot,
   clientSnapshot: ClientSnapshot,
 ): SnapshotUpdate {
   switch (snapshot.kind) {
@@ -136,7 +132,7 @@ function updateFromClientSnapshot(
 
 function updateTaskNavigationSnapshot(
   scope: SubscriptionScope,
-  snapshot: Extract<SubscriptionSnapshot, { kind: "taskNavigation" }>,
+  snapshot: Extract<ReplicaSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   if (payload.kind === "navigationReplaced") {

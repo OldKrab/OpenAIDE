@@ -1,24 +1,34 @@
+//! Subagent catalogs and histories of a Task (ADR-0046). The Task journal worker
+//! writes them in the Task's queue order, each history as a Chat stream
+//! (ADR-0076): a streamed change is a write the caller does not wait for, and a
+//! lifecycle change is a barrier.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{AgentPlan, NormalizedMessage};
-use crate::storage::cursor;
+use crate::protocol::model::{AgentPlan, ChatMessage, NormalizedMessage, ToolPermissionOutcome};
 use crate::storage::records::StoredMessage;
+use crate::storage::task_journal::{CommitReceipt, TaskWrite};
 
 use super::Store;
 
-mod history;
-use history::{
-    advance_history_meta, append_history_frame, durable_create_empty, load_history, HistoryFile,
-    TextAppend, COMPACT_AFTER_FRAMES, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE,
-};
+mod legacy;
+mod state;
+mod stream;
+mod writes;
+pub(crate) use state::SubagentState;
+pub use state::{CommittedSubagentBatch, CommittedSubagentRevision};
+use stream::{HistoryChange, SubagentChat, STREAM_HEAD_FILE};
+pub(crate) use writes::{SubagentOperation, SubagentWrite};
 
 const SUBAGENTS_DIR: &str = "subagents";
 const CATALOG_FILE: &str = "catalog.json";
-const SCHEMA_VERSION: u16 = 1;
+/// Version 2 marks a Task whose histories may be Chat streams, so an App Server
+/// that reads only ADR-0046 histories rejects the catalog without changing it.
+const CATALOG_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,22 +95,26 @@ pub struct SubagentHistoryProjection {
     pub current_plan: Option<AgentPlan>,
 }
 
+#[derive(Debug, Clone)]
+pub enum CommittedSubagentChange {
+    /// A message added after every existing message.
+    Append(ChatMessage),
+    /// A complete replacement of the message with the same identity.
+    Upsert(ChatMessage),
+    /// Text added to the last text part of the message.
+    AppendText { message_id: String, text: String },
+    /// The whole current plan; `None` clears it.
+    Plan(Option<AgentPlan>),
+}
+
 impl Store {
     pub fn subagent_catalog(
         &self,
         task_id: &str,
     ) -> Result<SubagentCatalogProjection, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let catalog = load_catalog(&self.subagent_root(task_id))?;
-        Ok(SubagentCatalogProjection {
-            revision: catalog.revision,
-            entries: catalog.entries,
-        })
+        self.subagent_state()
+            .catalog(&self.subagent_root(task_id), task_id)
     }
 
     pub fn subagent_history(
@@ -110,24 +124,12 @@ impl Store {
     ) -> Result<SubagentHistoryProjection, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
         validate_subagent_id(subagent_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let root = self.subagent_root(task_id);
-        let catalog = load_catalog(&root)?;
-        let record = catalog
-            .entries
-            .iter()
-            .find(|entry| entry.subagent_id == subagent_id)
-            .ok_or_else(|| RuntimeError::TaskNotFound("subagent_id".to_string()))?;
-        if !record.history_available {
-            return Err(RuntimeError::Storage(
-                "Subagent history is unavailable".to_string(),
-            ));
-        }
-        let history = load_history(&root.join(subagent_id))?;
+        let history = self.subagent_state().history(
+            &self.subagent_root(task_id),
+            task_id,
+            subagent_id,
+            true,
+        )?;
         Ok(SubagentHistoryProjection {
             revision: history.revision,
             messages: history.messages,
@@ -144,12 +146,12 @@ impl Store {
     ) -> Result<crate::protocol::model::MessagePage, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
         validate_subagent_id(subagent_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let history = load_history(&self.subagent_root(task_id).join(subagent_id))?;
+        let history = self.subagent_state().history(
+            &self.subagent_root(task_id),
+            task_id,
+            subagent_id,
+            false,
+        )?;
         let end = history
             .messages
             .iter()
@@ -180,13 +182,7 @@ impl Store {
         task_id: &str,
         native_session_id: &str,
     ) -> Result<SubagentRecord, RuntimeError> {
-        crate::storage::id::validate_task_id(task_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        load_catalog(&self.subagent_root(task_id))?
+        self.subagent_catalog(task_id)?
             .entries
             .into_iter()
             .find(|entry| entry.native_session_id == native_session_id)
@@ -206,57 +202,22 @@ impl Store {
         capabilities: SubagentCapabilitiesRecord,
         details: Vec<SubagentDetailRecord>,
     ) -> Result<SubagentRecord, RuntimeError> {
-        crate::storage::id::validate_task_id(task_id)?;
         if parent_native_session_id.is_empty() || native_session_id.is_empty() {
             return Err(RuntimeError::InvalidParams(
                 "subagent native session id".to_string(),
             ));
         }
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let root = self.subagent_root(task_id);
-        let mut catalog = load_catalog(&root)?;
-        if let Some(existing) = catalog
-            .entries
-            .iter()
-            .find(|entry| entry.native_session_id == native_session_id)
-        {
-            return Ok(existing.clone());
-        }
-        let parent_subagent_id = catalog
-            .entries
-            .iter()
-            .find(|entry| entry.native_session_id == parent_native_session_id)
-            .map(|entry| entry.subagent_id.clone());
-        let subagent_id = format!("subagent_{}", uuid::Uuid::new_v4().simple());
-        let spawned_order = catalog.next_spawn_order.saturating_add(1);
-        catalog.next_spawn_order = spawned_order;
-        let record = SubagentRecord {
-            subagent_id: subagent_id.clone(),
-            native_session_id: native_session_id.to_string(),
-            parent_native_session_id: parent_native_session_id.to_string(),
-            parent_subagent_id,
-            name,
-            delegated_task,
-            status: SubagentStatusRecord::WaitingForActivity,
-            capabilities,
-            spawned_order,
-            history_revision: 0,
-            history_available: true,
-            details,
-        };
-        let history_dir = root.join(&subagent_id);
-        let mut history = HistoryFile::default();
-        history.message_meta.task_id = task_id.to_string();
-        crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
-        durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
-        catalog.entries.push(record.clone());
-        catalog.revision = catalog.revision.saturating_add(1);
-        write_catalog(&root, &catalog)?;
-        Ok(record)
+        self.commit_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::Spawn {
+                parent_native_session_id: parent_native_session_id.to_string(),
+                name,
+                delegated_task,
+                capabilities,
+                details,
+            },
+        )
     }
 
     pub fn update_subagent_status(
@@ -265,10 +226,11 @@ impl Store {
         native_session_id: &str,
         status: SubagentStatusRecord,
     ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_record(task_id, native_session_id, |record| {
-            record.status = status;
-            Ok(())
-        })
+        self.commit_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::SetStatus(status),
+        )
     }
 
     /// Applies an Agent-reported identity patch. `None` leaves a field as it is.
@@ -280,18 +242,15 @@ impl Store {
         delegated_task: Option<String>,
         cancel: Option<bool>,
     ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_record(task_id, native_session_id, |record| {
-            if let Some(name) = name {
-                record.name = name;
-            }
-            if let Some(delegated_task) = delegated_task {
-                record.delegated_task = delegated_task;
-            }
-            if let Some(cancel) = cancel {
-                record.capabilities.cancel = cancel;
-            }
-            Ok(())
-        })
+        self.commit_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::UpdateIdentity {
+                name,
+                delegated_task,
+                cancel,
+            },
+        )
     }
 
     /// Replaces stored details that share a label with an incoming one and
@@ -302,149 +261,41 @@ impl Store {
         native_session_id: &str,
         details: Vec<SubagentDetailRecord>,
     ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_record(task_id, native_session_id, |record| {
-            for detail in details {
-                match record
-                    .details
-                    .iter_mut()
-                    .find(|stored| stored.label == detail.label)
-                {
-                    Some(stored) => stored.value = detail.value,
-                    None => record.details.push(detail),
-                }
-            }
-            Ok(())
-        })
+        self.commit_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::MergeDetails(details),
+        )
     }
 
+    /// Queues a message, or with `upsert` a replacement of the message with its
+    /// identity. Returns once the write is queued; publication follows its commit.
     pub fn append_subagent_message(
         &self,
         task_id: &str,
         native_session_id: &str,
-        mut message: NormalizedMessage,
+        message: NormalizedMessage,
         upsert: bool,
-    ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_history(task_id, native_session_id, |history| {
-            let identity = message.identity();
-            if upsert {
-                if let Some(stored) = history
-                    .messages
-                    .iter_mut()
-                    .find(|stored| stored.chat.identity == identity)
-                {
-                    message.preserve_created_at_from(&stored.chat.message);
-                    stored.chat.message = message;
-                    advance_history_meta(history);
-                    return Ok(None);
-                }
-            }
-            let sequence = history
-                .messages
-                .last()
-                .map(|stored| stored.sequence.saturating_add(1))
-                .unwrap_or(1);
-            history.messages.push(StoredMessage {
-                sequence,
-                chat: crate::protocol::model::ChatMessage {
-                    cursor: cursor::from_sequence(sequence),
-                    message_id: identity.clone(),
-                    identity,
-                    message_type: message.message_type().to_string(),
-                    message,
-                    timing: Default::default(),
-                },
-            });
-            advance_history_meta(history);
-            Ok(None)
-        })
+    ) -> Result<CommitReceipt, RuntimeError> {
+        self.stream_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::AppendMessage { message, upsert },
+        )
     }
 
+    /// Queues one streamed chunk of the message with its identity.
     pub fn append_subagent_message_part(
         &self,
         task_id: &str,
         native_session_id: &str,
         message: NormalizedMessage,
-    ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_history(task_id, native_session_id, |history| {
-            let identity = message.identity();
-            if let Some(stored) = history
-                .messages
-                .iter_mut()
-                .find(|stored| stored.chat.identity == identity)
-            {
-                let append = match (&mut stored.chat.message, message) {
-                    (
-                        NormalizedMessage::AgentMessage { role, parts, .. },
-                        NormalizedMessage::AgentMessage {
-                            role: incoming_role,
-                            parts: incoming_parts,
-                            ..
-                        },
-                    ) if *role == incoming_role && incoming_parts.len() == 1 => {
-                        let part = incoming_parts.into_iter().next().expect("one checked part");
-                        if let crate::protocol::model::AgentMessagePart::Text { text: chunk } = part
-                        {
-                            if let Some(crate::protocol::model::AgentMessagePart::Text { text }) =
-                                parts.last_mut()
-                            {
-                                text.push_str(&chunk);
-                            } else {
-                                parts.push(crate::protocol::model::AgentMessagePart::Text {
-                                    text: chunk.clone(),
-                                });
-                            }
-                            Some(TextAppend {
-                                identity,
-                                role: *role,
-                                text: chunk,
-                            })
-                        } else {
-                            parts.push(part);
-                            None
-                        }
-                    }
-                    (
-                        NormalizedMessage::User {
-                            text, attachments, ..
-                        },
-                        NormalizedMessage::User {
-                            text: chunk,
-                            attachments: incoming_attachments,
-                            ..
-                        },
-                    ) => {
-                        text.push_str(&chunk);
-                        attachments.extend(incoming_attachments);
-                        None
-                    }
-                    _ => {
-                        return Err(RuntimeError::Storage(
-                            "Subagent message chunk does not match its stored message".to_string(),
-                        ))
-                    }
-                };
-                advance_history_meta(history);
-                return Ok(append);
-            }
-            let sequence = history
-                .messages
-                .last()
-                .map(|stored| stored.sequence.saturating_add(1))
-                .unwrap_or(1);
-            history.messages.push(StoredMessage {
-                sequence,
-                chat: crate::protocol::model::ChatMessage {
-                    cursor: cursor::from_sequence(sequence),
-                    message_id: identity.clone(),
-                    identity,
-                    message_type: message.message_type().to_string(),
-                    message,
-                    timing: Default::default(),
-                },
-            });
-            advance_history_meta(history);
-            Ok(None)
-        })
+    ) -> Result<CommitReceipt, RuntimeError> {
+        self.stream_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::AppendMessagePart(message),
+        )
     }
 
     pub fn set_subagent_plan(
@@ -452,124 +303,70 @@ impl Store {
         task_id: &str,
         native_session_id: &str,
         plan: AgentPlan,
-    ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_history(task_id, native_session_id, |history| {
-            history.current_plan = (!plan.entries.is_empty()).then_some(plan);
-            Ok(None)
-        })
+    ) -> Result<CommitReceipt, RuntimeError> {
+        self.stream_subagent_write(task_id, native_session_id, SubagentOperation::SetPlan(plan))
     }
 
+    /// Records a permission decision as a barrier, so its caller learns whether
+    /// it was saved.
     pub fn record_subagent_permission_outcome(
         &self,
         task_id: &str,
         native_session_id: &str,
         tool_call_id: &str,
-        outcome: crate::protocol::model::ToolPermissionOutcome,
-    ) -> Result<SubagentRecord, RuntimeError> {
-        self.mutate_subagent_history(task_id, native_session_id, |history| {
-            let Some(outcomes) = history.messages.iter_mut().find_map(|stored| {
-                let NormalizedMessage::Activity { steps, .. } = &mut stored.chat.message else {
-                    return None;
-                };
-                steps.iter_mut().find_map(|step| match step {
-                    crate::protocol::model::ActivityStep::Tool {
-                        tool_call_id: Some(id),
-                        permission_outcomes,
-                        ..
-                    } if id == tool_call_id => Some(permission_outcomes),
-                    _ => None,
-                })
-            }) else {
-                return Err(RuntimeError::Storage(
-                    "Subagent permission outcome has no matching tool call".to_string(),
-                ));
-            };
-            if let Some(existing) = outcomes
-                .iter_mut()
-                .find(|existing| existing.request_id == outcome.request_id)
-            {
-                *existing = outcome;
-            } else {
-                outcomes.push(outcome);
-            }
-            advance_history_meta(history);
-            Ok(None)
-        })
+        outcome: ToolPermissionOutcome,
+    ) -> Result<(), RuntimeError> {
+        self.commit_subagent_write(
+            task_id,
+            native_session_id,
+            SubagentOperation::RecordPermissionOutcome {
+                tool_call_id: tool_call_id.to_string(),
+                outcome,
+            },
+        )
+        .map(|_| ())
     }
 
-    fn mutate_subagent_record(
+    /// Commits one write after every earlier write of the Task and returns the
+    /// Subagent's committed record.
+    fn commit_subagent_write(
         &self,
         task_id: &str,
         native_session_id: &str,
-        mutate: impl FnOnce(&mut SubagentRecord) -> Result<(), RuntimeError>,
+        operation: SubagentOperation,
     ) -> Result<SubagentRecord, RuntimeError> {
         crate::storage::id::validate_task_id(task_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let root = self.subagent_root(task_id);
-        let mut catalog = load_catalog(&root)?;
-        let record = catalog
-            .entries
-            .iter_mut()
-            .find(|entry| entry.native_session_id == native_session_id)
-            .ok_or_else(|| RuntimeError::TaskNotFound("subagent native session".to_string()))?;
-        mutate(record)?;
-        let result = record.clone();
-        catalog.revision = catalog.revision.saturating_add(1);
-        write_catalog(&root, &catalog)?;
-        Ok(result)
-    }
-
-    fn mutate_subagent_history(
-        &self,
-        task_id: &str,
-        native_session_id: &str,
-        mutate: impl FnOnce(&mut HistoryFile) -> Result<Option<TextAppend>, RuntimeError>,
-    ) -> Result<SubagentRecord, RuntimeError> {
-        crate::storage::id::validate_task_id(task_id)?;
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let root = self.subagent_root(task_id);
-        let mut catalog = load_catalog(&root)?;
-        let record = catalog
-            .entries
-            .iter_mut()
-            .find(|entry| entry.native_session_id == native_session_id)
-            .ok_or_else(|| RuntimeError::TaskNotFound("subagent native session".to_string()))?;
-        let history_dir = root.join(&record.subagent_id);
-        let mut history = match load_history(&history_dir) {
-            Ok(history) => history,
-            Err(error) => {
-                record.history_available = false;
-                catalog.revision = catalog.revision.saturating_add(1);
-                write_catalog(&root, &catalog)?;
-                return Err(error);
-            }
+        let write = SubagentWrite {
+            native_session_id: native_session_id.to_string(),
+            operation,
         };
-        let append = mutate(&mut history)?;
-        history.revision = history.revision.saturating_add(1);
-        history.journal_frames = history.journal_frames.saturating_add(1);
-        append_history_frame(&history_dir.join(HISTORY_JOURNAL_FILE), &history, append)?;
-        if history.journal_frames >= COMPACT_AFTER_FRAMES {
-            history.journal_frames = 0;
-            crate::storage::atomic::write_json(&history_dir.join(HISTORY_SNAPSHOT_FILE), &history)?;
-            durable_create_empty(&history_dir.join(HISTORY_JOURNAL_FILE))?;
-        }
-        record.history_revision = history.revision;
-        record.history_available = true;
-        if record.status == SubagentStatusRecord::WaitingForActivity {
-            record.status = SubagentStatusRecord::Running;
-        }
-        let result = record.clone();
-        catalog.revision = catalog.revision.saturating_add(1);
-        write_catalog(&root, &catalog)?;
-        Ok(result)
+        self.inner
+            .task_journal
+            .submit(TaskWrite::barrier_subagent(task_id.to_string(), write))?
+            .wait()?;
+        self.subagent_record_by_native(task_id, native_session_id)
+    }
+
+    /// Queues one write without waiting for its commit; dropping the receipt
+    /// leaves the write to the worker, which logs its failure.
+    fn stream_subagent_write(
+        &self,
+        task_id: &str,
+        native_session_id: &str,
+        operation: SubagentOperation,
+    ) -> Result<CommitReceipt, RuntimeError> {
+        crate::storage::id::validate_task_id(task_id)?;
+        let write = SubagentWrite {
+            native_session_id: native_session_id.to_string(),
+            operation,
+        };
+        self.inner
+            .task_journal
+            .submit(TaskWrite::stream_subagent(task_id.to_string(), write))
+    }
+
+    fn subagent_state(&self) -> &SubagentState {
+        self.inner.task_journal.subagents()
     }
 
     fn subagent_root(&self, task_id: &str) -> PathBuf {
@@ -581,13 +378,81 @@ impl Store {
     }
 }
 
+/// Describes what `change` did to `history`, which held `message_count` messages
+/// before it.
+fn committed_change(
+    history: &SubagentChat,
+    change: &HistoryChange,
+    message_count: usize,
+) -> Option<CommittedSubagentChange> {
+    let find = |identity: &str| {
+        history
+            .messages
+            .iter()
+            .find(|stored| stored.chat.identity == identity)
+            .map(|stored| &stored.chat)
+    };
+    Some(match change {
+        HistoryChange::AppendText { identity, text } => CommittedSubagentChange::AppendText {
+            message_id: find(identity)?.message_id.clone(),
+            text: text.clone(),
+        },
+        HistoryChange::Upsert(identity) => {
+            let message = find(identity)?.clone();
+            if history.messages.len() > message_count {
+                CommittedSubagentChange::Append(message)
+            } else {
+                CommittedSubagentChange::Upsert(message)
+            }
+        }
+        HistoryChange::Plan => CommittedSubagentChange::Plan(history.current_plan.clone()),
+    })
+}
+
+/// Returns which of `image_ids` any Subagent history of the Task still names, so
+/// the Chat compaction sweep keeps those image files (ADR-0075). It scans the
+/// stored bytes of every history file, in either format, instead of parsing
+/// them, and runs only for old files Chat no longer references.
+pub(crate) fn subagent_image_references(
+    task_dir: &Path,
+    image_ids: &[String],
+) -> Result<std::collections::HashSet<String>, RuntimeError> {
+    let mut found = std::collections::HashSet::new();
+    let entries = match fs::read_dir(task_dir.join(SUBAGENTS_DIR)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        for file in fs::read_dir(entry.path())? {
+            let file = file?;
+            if file.file_name() == STREAM_HEAD_FILE || !file.file_type()?.is_file() {
+                continue;
+            }
+            match fs::read(file.path()) {
+                Ok(bytes) => {
+                    crate::storage::chat_images::ids_mentioned_in(&bytes, image_ids, &mut found)
+                }
+                // A concurrent compaction removed an old generation.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(found)
+}
+
 fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {
     let path = root.join(CATALOG_FILE);
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(CatalogFile {
-                schema_version: SCHEMA_VERSION,
+                schema_version: CATALOG_SCHEMA_VERSION,
                 ..Default::default()
             })
         }
@@ -598,12 +463,18 @@ fn load_catalog(root: &Path) -> Result<CatalogFile, RuntimeError> {
     Ok(catalog)
 }
 
-fn write_catalog(root: &Path, catalog: &CatalogFile) -> Result<(), RuntimeError> {
-    crate::storage::atomic::write_json(&root.join(CATALOG_FILE), catalog)
+/// Writes the catalog at the current schema version, which it then holds.
+fn write_catalog(root: &Path, catalog: &mut CatalogFile) -> Result<(), RuntimeError> {
+    let previous = std::mem::replace(&mut catalog.schema_version, CATALOG_SCHEMA_VERSION);
+    let written = crate::storage::atomic::write_json(&root.join(CATALOG_FILE), catalog);
+    if written.is_err() {
+        catalog.schema_version = previous;
+    }
+    written
 }
 
 fn validate_schema(version: u16) -> Result<(), RuntimeError> {
-    if version == SCHEMA_VERSION {
+    if (1..=CATALOG_SCHEMA_VERSION).contains(&version) {
         Ok(())
     } else {
         Err(RuntimeError::Storage(

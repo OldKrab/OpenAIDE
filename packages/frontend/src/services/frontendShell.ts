@@ -184,6 +184,13 @@ export type FrontendShell = {
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent): void;
     openTask(taskId: string, title?: string, agentId?: string): void;
+    /**
+     * Routes to a Project's files page (`projectFiles` in the bootstrap), so reload and Back keep
+     * it. A shell without it leaves the page as Frontend presentation state over the current surface.
+     */
+    openProjectFiles?(projectId: string): void;
+    /** Leaves the routed files page: back to where it was opened from, else that Project's New Task. */
+    closeProjectFiles?(projectId: string): void;
     closeSettings?(taskId?: string, projectId?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
     /** Writes the open Agent into the Settings route so refresh stays on that detail. */

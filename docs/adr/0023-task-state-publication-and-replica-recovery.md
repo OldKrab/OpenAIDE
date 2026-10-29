@@ -6,7 +6,7 @@ This ADR defines the ordered publication, history-synchronization, and connectio
 
 ## Scope-Local Publication
 
-- `state/subscribe` returns one complete authoritative baseline and its scope-local revision. Baselines are used for initial subscription, stream replacement, revision-gap recovery, and explicit complete history replacement.
+- `state/subscribe` returns one complete authoritative baseline and its scope-local revision. Baselines are used for initial subscription, stream replacement, revision-gap recovery, and explicit complete history replacement. A Task subscription that offers a known revision may instead be told its copy is current or receive only the missed changes, as amended by [ADR-0073](0073-task-subscription-resumes-from-a-known-revision.md).
 - Each subscribed scope has an independent ordered stream. A Task scope does not advance through unrelated Project, Agent, Navigation, or other Task events.
 - Each durable transaction that changes `TaskSnapshot` increments one Task revision and publishes exactly one `taskChanged` event. Tool-detail-only terminal appends advance only their independently ordered Tool-detail scope, as clarified by ADR-0028.
 - Focused Task changes include appended or upserted Chat items, text appended to a stable message id, status, lifecycle, title or summary, complete configuration and command catalogs, Send capability, history state, and other accepted Task fields.
@@ -45,7 +45,7 @@ Each result reconciles Agent title metadata and advances a bound Task's activity
 
 ## Native Session Synchronization
 
-Opening an existing Task returns stored state immediately and recovers a known binding without first listing it. With no deferred reload requirement, recovery resumes that binding directly and attaches the update consumer; a resume result may replace current catalogs but leaves stored Chat unchanged. If resume is unsupported, recovery uses load as the only restore operation for that attachment. Catalog demand remains asynchronous observation and cannot block controls.
+Opening an existing Task is acknowledged without its state, which the Task subscription supplies ([ADR-0074](0074-task-open-is-an-acknowledgement.md)), and recovers a known binding without first listing it. With no deferred reload requirement, recovery resumes that binding directly and attaches the update consumer; a resume result may replace current catalogs but leaves stored Chat unchanged. If resume is unsupported, recovery uses load as the only restore operation for that attachment. Catalog demand remains asynchronous observation and cannot block controls.
 
 App Server compares a listed Agent timestamp with its own activity baseline for the bound session: the later of `localHistoryUpdatedAt` and the last own session operation. An own session operation is a lifecycle request App Server itself issued on that session: opening it through `session/new`, `session/load`, or `session/resume`, a completed `session/set_config_option`, and `session/close`, including the autonomous idle close. Agents rewrite session bookkeeping for these requests and advance the listed timestamp without changing history, so App Server persists the operation time with the Task; a close is recorded both before the request and after it completes, so a catalog page cannot observe the Agent's write first.
 
