@@ -70,12 +70,13 @@ use crate::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveOlderParams,
     TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
-    TaskClosePlanResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
-    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
-    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
+    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
+    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
     TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
     TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
     TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
@@ -653,6 +654,7 @@ protocol_method!(
     TaskToolImagePreviewParams,
     TaskToolImagePreviewResult
 );
+protocol_method!(TaskImage, TASK_IMAGE, TaskImageParams, TaskImageResult);
 protocol_method!(
     FileViewerOpen,
     FILE_VIEWER_OPEN,

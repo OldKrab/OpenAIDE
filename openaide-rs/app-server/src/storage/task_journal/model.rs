@@ -509,6 +509,12 @@ impl super::frame::FramedRecord for JournalFrame {
             .unwrap_or_else(legacy_chat_schema_version);
         match schema_version {
             super::split::CHAT_SCHEMA_VERSION => {}
+            // Version 2 frames differ only in carrying inline images, which
+            // hydration moves out before the Chat is used.
+            2 => {
+                value["schema_version"] =
+                    serde_json::Value::from(super::split::CHAT_SCHEMA_VERSION);
+            }
             1 => {
                 super::split::migrate_v1_tool_presentations(&mut value);
                 value["schema_version"] =

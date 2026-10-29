@@ -17,7 +17,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.insert_str(
         output.len() - ";\n".len(),
-        " | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE",
+        " | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;\n");
@@ -78,6 +78,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenParams;\n");
     output.push_str("  [TERMINALS_ATTACH]: TerminalsAttachParams;\n");
     output.push_str("  [TERMINALS_CLOSE]: TerminalsCloseParams;\n");
+    output.push_str("  [TASK_IMAGE]: TaskImageParams;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;\n");
@@ -208,6 +209,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenResult;\n");
     output.push_str("  [TERMINALS_ATTACH]: TerminalsAttachResult;\n");
     output.push_str("  [TERMINALS_CLOSE]: TerminalsCloseResult;\n");
+    output.push_str("  [TASK_IMAGE]: TaskImageResult;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;\n");

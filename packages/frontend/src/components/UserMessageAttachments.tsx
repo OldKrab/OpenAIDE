@@ -1,10 +1,14 @@
 import { Download, Eye, FolderOpen, type LucideIcon } from "lucide-react";
 import { attachmentImageLayout, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { FileKindIcon } from "./ComposerFileMentions";
+import { StoredChatImagePlaceholder, useStoredChatImage, type StoredChatImageReference } from "./StoredChatImage";
 
 export interface UserMessageAttachmentItem {
   id: string;
+  /** An image the client holds itself, such as a local preview not yet stored by App Server. */
   image?: AttachmentImagePreviewSource;
+  /** A stored Task image (ADR-0075), loaded through the Chat image cache when shown. */
+  storedImage?: StoredChatImageReference;
   label: string;
 }
 
@@ -23,17 +27,14 @@ export function UserMessageAttachments({
   return (
     <div className="chat-attachment-list" data-layout={attachmentImageLayout(attachments.length)}>
       {attachments.map((attachment, index) => attachment.image ? (
-            <button
-              aria-label={`Open ${attachment.label}`}
-              className="chat-image-attachment chat-attachment-interactive"
-              data-attachment-tooltip={attachment.label}
+            <ImageAttachmentButton image={attachment.image} key={attachment.id} onOpenImage={onOpenImage} />
+          ) : attachment.storedImage ? (
+            <StoredImageAttachment
               key={attachment.id}
-              onClick={() => onOpenImage(attachment.image as AttachmentImagePreviewSource)}
-              type="button"
-            >
-              <img className="chat-image-preview" src={attachment.image.url} alt={`${attachment.label} preview`} />
-              <AttachmentAction action="preview" />
-            </button>
+              label={attachment.label}
+              onOpenImage={onOpenImage}
+              reference={attachment.storedImage}
+            />
           ) : onOpenFile && fileAction ? (
             <button
               aria-label={`${fileAction === "download" ? "Download" : "Reveal"} ${attachment.label}`}
@@ -55,6 +56,44 @@ export function UserMessageAttachments({
           ))}
     </div>
   );
+}
+
+function ImageAttachmentButton({
+  image,
+  onOpenImage,
+}: {
+  image: AttachmentImagePreviewSource;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+}) {
+  return (
+    <button
+      aria-label={`Open ${image.label}`}
+      className="chat-image-attachment chat-attachment-interactive"
+      data-attachment-tooltip={image.label}
+      onClick={() => onOpenImage(image)}
+      type="button"
+    >
+      <img className="chat-image-preview" src={image.url} alt={`${image.label} preview`} />
+      <AttachmentAction action="preview" />
+    </button>
+  );
+}
+
+/** A sent Image App Server stored for the Task; it loads when shown and opens once loaded. */
+function StoredImageAttachment({
+  label,
+  onOpenImage,
+  reference,
+}: {
+  label: string;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+  reference: StoredChatImageReference;
+}) {
+  const state = useStoredChatImage(reference);
+  if (state.status !== "ready") {
+    return <StoredChatImagePlaceholder className="chat-image-attachment" label={label} state={state} />;
+  }
+  return <ImageAttachmentButton image={{ label, url: state.url }} onOpenImage={onOpenImage} />;
 }
 
 function AttachmentAction({ action }: { action: "download" | "preview" | "reveal" }) {

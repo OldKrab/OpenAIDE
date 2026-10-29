@@ -903,3 +903,42 @@ fn task_record(task_id: &str) -> TaskRecord {
         preparation: TaskPreparationRecord::Ready,
     }
 }
+
+#[test]
+fn chat_image_reads_only_the_requested_tasks_images_after_its_access_check() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut prepared = task_record("task-2");
+    prepared.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
+        lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "other-client",
+        )),
+    };
+    store.write_task(&task_record("task-1")).unwrap();
+    store.write_task(&task_record("task-3")).unwrap();
+    store.write_task(&prepared).unwrap();
+    let tasks = temp.path().join("task-store-v1/tasks");
+    let image_id = crate::storage::chat_images::store(&tasks.join("task-1"), b"image").unwrap();
+    crate::storage::chat_images::store(&tasks.join("task-2"), b"image").unwrap();
+    let snapshots = TaskSnapshotStore::new(store);
+    let client_id = openaide_app_server_protocol::ids::ClientInstanceId::from("test-client");
+    let load = |task_id: &str, image_id: &str| {
+        snapshots.chat_image_for_client(&client_id, &TaskId::from(task_id), image_id)
+    };
+
+    assert_eq!(load("task-1", &image_id).unwrap(), b"image");
+    assert_eq!(
+        load("task-3", &image_id).unwrap_err().code,
+        ProtocolErrorCode::NotFound,
+        "an id of another Task is not found"
+    );
+    assert_eq!(
+        load("task-2", &image_id).unwrap_err().code,
+        ProtocolErrorCode::NotFound,
+        "a Prepared Task leased to another client is not readable"
+    );
+    assert_eq!(
+        load("task-1", "../task-2/images/x").unwrap_err().code,
+        ProtocolErrorCode::NotFound
+    );
+}

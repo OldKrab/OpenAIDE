@@ -97,6 +97,7 @@ pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_SET_PINNED: &str = "task/setPinned";
 pub const TASK_CLOSE_PLAN: &str = "task/closePlan";
 pub const TASK_TOOL_IMAGE_PREVIEW: &str = "task/toolImagePreview";
+pub const TASK_IMAGE: &str = "task/image";
 pub const FILE_VIEWER_OPEN: &str = "fileViewer/open";
 pub const FILE_VIEWER_OPEN_FROM_HANDLE: &str = "fileViewer/openFromHandle";
 pub const FILE_VIEWER_REFRESH: &str = "fileViewer/refresh";
@@ -219,6 +220,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_SET_PINNED,
     TASK_CLOSE_PLAN,
     TASK_TOOL_IMAGE_PREVIEW,
+    TASK_IMAGE,
     FILE_VIEWER_LIST_DIRECTORY,
     FILE_VIEWER_SEARCH,
     FILE_VIEWER_EXISTING_FILES,

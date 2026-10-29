@@ -47,6 +47,7 @@ import {
   TASK_SET_CONFIG_OPTION,
   TASK_SET_PINNED,
   TASK_TOOL_IMAGE_PREVIEW,
+  TASK_IMAGE,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -4328,6 +4329,26 @@ describe("app controller callbacks", () => {
       mediaType: "image/png",
       dataUrl: "data:image/png;base64,aW1hZ2U=",
     });
+  });
+
+  it("loads a stored Chat image by Task and image id and records metadata-only telemetry", async () => {
+    const request = vi.fn(async (method: string) => method === TASK_IMAGE ? { data: "aW1hZ2U=" } : { recorded: 2 });
+
+    const data = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state: createInitialState(),
+    }).task.loadChatImage("task_2", "image_1");
+
+    expect(data).toBe("aW1hZ2U=");
+    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_2", imageId: "image_1" });
+    const telemetry = postHostMessage.mock.calls
+      .map(([message]) => (message as { payload: Record<string, unknown> }).payload)
+      .filter((payload) => String(payload.event).startsWith("chat_image_load_"));
+    expect(telemetry).toEqual([
+      { event: "chat_image_load_started", task_id: "task_2", image_id: "image_1", cache_hit: false },
+      expect.objectContaining({ event: "chat_image_load_completed", task_id: "task_2", image_id: "image_1", size_bytes: 5 }),
+    ]);
+    expect(JSON.stringify(telemetry)).not.toContain("aW1hZ2U=");
   });
 
   it("task callbacks no-op when there is no active snapshot", () => {

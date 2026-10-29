@@ -1,34 +1,113 @@
 use super::*;
 
 #[test]
-fn projects_legacy_user_data_image_markdown_as_typed_message_parts() {
-    let item = project_chat_item(&ChatMessage {
+fn projects_stored_and_pending_image_references_and_omits_an_image_without_bytes() {
+    let image_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string();
+    // SHA-256 of `image`: the id the journal writer stores a draft's bytes under.
+    let pending_id = "6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d".to_string();
+    let user = project_chat_item(&ChatMessage {
         cursor: "user-image".to_string(),
         identity: "user-image".to_string(),
         message_type: "user".to_string(),
         message_id: "user-image".to_string(),
         message: NormalizedMessage::User {
             id: "user-image".to_string(),
-            text: "Before [@image](data:image/png;base64,aW1hZ2U=) after".to_string(),
+            text: "Look".to_string(),
             created_at: "2026-07-16T00:00:00Z".to_string(),
-            attachments: vec![],
+            attachments: vec![
+                Attachment {
+                    kind: "image".to_string(),
+                    label: "Image".to_string(),
+                    path: None,
+                    payload: Some(serde_json::json!({
+                        "imageId": image_id,
+                        "mimeType": "image/png",
+                        "sizeBytes": 5,
+                    })),
+                },
+                Attachment {
+                    kind: "image".to_string(),
+                    label: "Draft".to_string(),
+                    path: None,
+                    payload: Some(serde_json::json!({
+                        "data": "aW1hZ2U=",
+                        "mimeType": "image/png",
+                    })),
+                },
+            ],
         },
         timing: Default::default(),
     });
-
     assert_eq!(
-        item.parts,
+        user.parts,
         vec![
             MessagePart::Text {
-                text: "Before ".to_string(),
+                text: "Look".to_string(),
             },
             MessagePart::Image {
                 media_type: "image/png".to_string(),
-                data_url: "data:image/png;base64,aW1hZ2U=".to_string(),
+                image_id: image_id.clone(),
+                size_bytes: 5,
                 uri: None,
             },
-            MessagePart::Text {
-                text: " after".to_string(),
+            MessagePart::Image {
+                media_type: "image/png".to_string(),
+                image_id: pending_id.clone(),
+                size_bytes: 5,
+                uri: None,
+            },
+        ]
+    );
+
+    let agent = project_chat_item(&ChatMessage {
+        cursor: "agent-image".to_string(),
+        identity: "agent-image".to_string(),
+        message_type: "agent_message".to_string(),
+        message_id: "agent-image".to_string(),
+        message: NormalizedMessage::AgentMessage {
+            id: "agent-image".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![
+                AgentMessagePart::Image {
+                    media_type: "image/png".to_string(),
+                    data: String::new(),
+                    image_id: Some(image_id.clone()),
+                    size_bytes: Some(5),
+                    uri: None,
+                },
+                AgentMessagePart::Image {
+                    media_type: "image/png".to_string(),
+                    data: "aW1hZ2U=".to_string(),
+                    image_id: None,
+                    size_bytes: None,
+                    uri: None,
+                },
+                AgentMessagePart::Image {
+                    media_type: "image/png".to_string(),
+                    data: String::new(),
+                    image_id: None,
+                    size_bytes: None,
+                    uri: None,
+                },
+            ],
+            created_at: "2026-07-16T00:00:00Z".to_string(),
+        },
+        timing: Default::default(),
+    });
+    assert_eq!(
+        agent.parts,
+        vec![
+            MessagePart::Image {
+                media_type: "image/png".to_string(),
+                image_id,
+                size_bytes: 5,
+                uri: None,
+            },
+            MessagePart::Image {
+                media_type: "image/png".to_string(),
+                image_id: pending_id,
+                size_bytes: 5,
+                uri: None,
             },
         ]
     );

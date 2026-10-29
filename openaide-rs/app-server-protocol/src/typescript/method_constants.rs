@@ -32,8 +32,8 @@ use crate::methods::{
 };
 use crate::methods::{
     DEVICES_APPROVE_JOIN_REQUEST, DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE,
-    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE, TASK_ATTENTION_WAIT, TERMINALS_ATTACH,
-    TERMINALS_CLOSE, TERMINALS_OPEN,
+    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE, TASK_ATTENTION_WAIT, TASK_IMAGE,
+    TERMINALS_ATTACH, TERMINALS_CLOSE, TERMINALS_OPEN,
 };
 use crate::methods::{
     FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY,
@@ -272,6 +272,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const TERMINALS_CLOSE = {:?} as const;\n",
         TERMINALS_CLOSE
+    ));
+    output.push_str(&format!(
+        "export const TASK_IMAGE = {:?} as const;\n",
+        TASK_IMAGE
     ));
     output.push_str(&format!(
         "export const ATTACHMENT_LIST_ROOTS = {:?} as const;\n",

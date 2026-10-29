@@ -12,14 +12,15 @@ use crate::storage::records::TaskRecord;
 use super::artifact;
 use super::frame;
 use super::model::{
-    ArtifactOperation, CommittedChatTextAppend, CommittedTaskBatch, CompactionMode, JournalFrame,
-    TaskJournalQueueMetrics, TaskOperation, TaskProjection, TaskStorageFailure,
-    TaskStorageFatalFailure, TaskWrite, ToolArtifactProjection,
+    ArtifactOperation, CommittedTaskBatch, CompactionMode, JournalFrame, TaskJournalQueueMetrics,
+    TaskOperation, TaskProjection, TaskStorageFailure, TaskStorageFatalFailure, TaskWrite,
+    ToolArtifactProjection,
 };
 use super::projection::{apply_operations, validate_operations};
 use super::scheduler::{QueuedWrite, Scheduler};
 use reduce::reduce_batch;
 mod admission;
+mod chat_changes;
 mod compaction;
 pub(super) mod failure;
 mod maintenance;
@@ -438,6 +439,15 @@ fn commit_batch(
         .expect("Task journal projections poisoned")
         .get(task_id)
         .cloned();
+    if current_task.is_some() {
+        // Images leave the write before the no-op check, so a replayed message
+        // matches its stored reference. A new Task's directory does not exist
+        // yet; its images are written just before its first frame below.
+        super::images::externalize_operations(
+            &tasks_root.join(task_id),
+            &mut reduced.task_operations,
+        )?;
+    }
     semantic_noops::remove(current_task.as_ref(), &mut reduced.task_operations)?;
     if reduced.task_operations.is_empty()
         && reduced.artifacts.is_empty()
@@ -595,6 +605,11 @@ fn commit_batch(
         })?;
         failure::ensure_status(task_dir)?;
     }
+    // Every image file is synced before the frame that references it (ADR-0075).
+    super::images::externalize_operations(
+        journal.parent().expect("Task journal path has a parent"),
+        &mut reduced.task_operations,
+    )?;
     let frame = JournalFrame {
         format_version: 1,
         schema_version: super::split::CHAT_SCHEMA_VERSION,
@@ -616,7 +631,8 @@ fn commit_batch(
         RecoveredTask::Unavailable { error } => return Err(RuntimeError::Storage(error.clone())),
     };
     let task_revision = next_projection.task.revision;
-    let chat_text_appends = committed_chat_text_appends(&frame.operations, next_projection)?;
+    let chat_text_appends =
+        chat_changes::committed_chat_text_appends(&frame.operations, next_projection)?;
     let mut artifact_changes = Vec::new();
     for (artifact_id, committed_head, operations) in planned_artifacts {
         let mut artifact_heads = artifact_heads
@@ -684,43 +700,6 @@ fn commit_batch(
         replaced_artifact_ids,
         artifact_changes,
     }))
-}
-
-fn committed_chat_text_appends(
-    operations: &[TaskOperation],
-    projection: &TaskProjection,
-) -> Result<Vec<CommittedChatTextAppend>, RuntimeError> {
-    operations
-        .iter()
-        .filter_map(|operation| {
-            let TaskOperation::AppendText {
-                identity,
-                text,
-                task_updated_at: Some(_),
-                ..
-            } = operation
-            else {
-                return None;
-            };
-            Some((identity, text))
-        })
-        .map(|(identity, text)| {
-            let message_id = projection
-                .messages
-                .iter()
-                .find(|stored| stored.chat.identity == *identity)
-                .map(|stored| stored.chat.message_id.clone())
-                .ok_or_else(|| {
-                    RuntimeError::Internal(
-                        "Committed streamed Chat change is missing from its projection".to_string(),
-                    )
-                })?;
-            Ok(CommittedChatTextAppend {
-                message_id,
-                text: text.clone(),
-            })
-        })
-        .collect()
 }
 
 fn quarantine_or_abort(tasks_root: &Path, task_id: &str) {
@@ -821,4 +800,4 @@ fn journal_path(tasks_root: &Path, task_id: &str) -> Result<PathBuf, RuntimeErro
 
 #[cfg(test)]
 #[path = "store_tests.rs"]
-mod tests;
+pub(super) mod tests;

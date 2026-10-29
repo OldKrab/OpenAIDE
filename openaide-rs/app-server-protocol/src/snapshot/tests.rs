@@ -64,7 +64,7 @@ fn chat_is_part_based() {
                     label: "src/main.rs".to_string(),
                     media_type: Some("text/x-rust".to_string()),
                     size_bytes: Some(42),
-                    preview_url: None,
+                    preview_image_id: None,
                 },
             },
         ],

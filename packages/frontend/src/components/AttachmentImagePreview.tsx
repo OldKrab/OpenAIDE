@@ -6,6 +6,7 @@ import {
   type ImagePreviewViewportSource,
 } from "./ImagePreviewViewport";
 import { PopupDialog } from "./Popup";
+import type { StoredChatImageReference } from "./StoredChatImage";
 
 export type AttachmentImagePreviewSource = ImagePreviewViewportSource;
 
@@ -63,6 +64,16 @@ export function composerImagePreview(attachment: ComposerAttachment): Attachment
   return { label: attachment.label, url: attachment.preview_url };
 }
 
+/** A Chat attachment that names a stored Task image; its bytes load when it is shown. */
+export function storedChatImageReference(attachment: Attachment): StoredChatImageReference | undefined {
+  const imageId = payloadString(attachment.payload, "imageId");
+  const mediaType = payloadString(attachment.payload, "mimeType");
+  if (!imageId || !mediaType) return undefined;
+  const sizeBytes = (attachment.payload as Record<string, unknown>).sizeBytes;
+  return { imageId, mediaType, ...(typeof sizeBytes === "number" ? { sizeBytes } : {}) };
+}
+
+/** An image the client still holds itself, such as a local preview before App Server stores it. */
 export function chatImagePreview(attachment: Attachment): AttachmentImagePreviewSource | undefined {
   const previewUrl = payloadString(attachment.payload, "preview_url") ?? payloadString(attachment.payload, "previewUrl");
   if (previewUrl && previewUrl.startsWith("data:image/")) return { label: attachment.label, url: previewUrl };
