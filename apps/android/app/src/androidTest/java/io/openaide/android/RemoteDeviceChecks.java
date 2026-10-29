@@ -33,7 +33,7 @@ public final class RemoteDeviceChecks extends InstrumentationTestCase {
 
         AtomicReference<String> connectionProblem = new AtomicReference<>("connection did not finish");
         CountDownLatch connected = new CountDownLatch(1);
-        RemotePairing.connect(context, problem -> { connectionProblem.set(problem); connected.countDown(); });
+        RemotePairing.connect(context, (problem, reason) -> { connectionProblem.set(problem); connected.countDown(); });
         assertTrue("Connection timed out", connected.await(40, TimeUnit.SECONDS));
         assertNull(connectionProblem.get());
 

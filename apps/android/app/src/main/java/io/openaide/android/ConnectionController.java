@@ -3,6 +3,7 @@ package io.openaide.android;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -74,16 +75,13 @@ final class ConnectionController extends ContextWrapper {
         String action = message.optString("action");
         if (action.equals("cancel_switch")) { reply.done(switcher.cancel() ? "cancelled" : "unchanged", null); return; }
         ConnectionStore store = new ConnectionStore(this);
-        ConnectionStore.PairedServer selected = store.usesPaired() ? store.pairedServer() : null;
         // The switcher names an SSH Computer by its prefixed id; Settings' own row sends "use_ssh".
         String target = action.equals("use_computer") ? message.optString("id")
             : action.equals("use_ssh") ? ComputerSwitch.SSH_PREFIX + message.optString("id") : null;
         String operationId = message.has("operationId") ? message.optString("operationId") : null;
         if (action.equals("forget_computer")) { forget(message.optString("id"), operationId, reply); return; }
         // An SSH Computer in use is a source of its own, so returning to this phone is a switch.
-        SshComputers.Computer ssh = store.usesSsh() ? store.sshComputer() : null;
-        String source = selected != null ? selected.id : ssh != null ? ComputerSwitch.SSH_PREFIX + ssh.id : null;
-        switcher.request(source, target, operationId, reply);
+        switcher.request(store.inUseTarget(), target, operationId, reply);
     }
 
     /** Forgets a paired computer; the one in use is left through the switch first, and forgotten only once it took effect. */
@@ -348,7 +346,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("remote", store.usesPaired() || ssh != null).put("paired", !store.pairedServers().isEmpty())
                 .put("computer", ssh != null ? ssh.name : computer == null ? "" : computer.name)
                 .put("computers", computers(store))
-                .put("thisDeviceReady", thisDeviceReady(store))
+                .put("thisDeviceReady", thisDeviceReady(this, store))
                 .put("sshComputers", sshComputers(store))
                 .put("ssh", sshStatus(ssh))
                 .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("phoneAvailable", BundledRuntime.installable()).put("sshNotice", sshNotice)
@@ -368,9 +366,9 @@ final class ConnectionController extends ContextWrapper {
      * Whether the switcher may offer this phone: its workspace started here before, and
      * Termux and the permission to run commands in it are still in place.
      */
-    private boolean thisDeviceReady(ConnectionStore store) {
-        return store.localWorkspaceStarted() && installed("com.termux")
-            && checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED;
+    static boolean thisDeviceReady(Context context, ConnectionStore store) {
+        return store.localWorkspaceStarted() && installed(context, "com.termux")
+            && context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** Every paired computer, with the one remote work goes to marked. */
@@ -409,8 +407,10 @@ final class ConnectionController extends ContextWrapper {
             .put("updateAvailable", status.updateAvailable).put("suggestLinger", status.suggestLinger);
     }
 
-    private boolean installed(String name) {
-        try { getPackageManager().getPackageInfo(name, 0); return true; }
+    private boolean installed(String name) { return installed(this, name); }
+
+    private static boolean installed(Context context, String name) {
+        try { context.getPackageManager().getPackageInfo(name, 0); return true; }
         catch (PackageManager.NameNotFoundException error) { return false; }
     }
 
