@@ -20,5 +20,5 @@ Status: accepted
 
 ## Consequences
 
-- `task/markRead` and `task/reloadNativeSession` still return complete Task copies. They are outside Task switching and are not changed here.
+- `task/markRead` and `task/reloadNativeSession` follow the same rule: each returns an acknowledgement once its change commits, and the change reaches the client on the Task subscription. Both changes ride the same unreleased 3.0 major version.
 - The open logs its outcome and duration as before. A route that never becomes ready shows which of the two acceptances is missing.

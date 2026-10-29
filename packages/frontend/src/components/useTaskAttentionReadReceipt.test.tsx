@@ -62,7 +62,6 @@ describe("Task attention read receipt", () => {
 function Harness({ request, taskId }: { request: ReturnType<typeof vi.fn>; taskId?: string }) {
   useTaskAttentionReadReceipt({
     backendConnection: { request } as unknown as Pick<BackendConnection, "request">,
-    dispatch: vi.fn(),
     revision: 1,
     taskId,
     unread: true,

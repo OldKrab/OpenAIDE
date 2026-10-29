@@ -470,33 +470,43 @@ impl TaskProductApi {
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )?;
-        let snapshot = crate::tasks::snapshot::build_snapshot(
-            &self.store,
-            &task_id,
-            crate::chat_history::ChatHistoryPolicy::default().task_snapshot_tail_limit(),
-        )
-        .map_err(runtime_error)?;
-        self.project_task_snapshot(snapshot)
+        self.subscriber_view_for_test(&task_id)
     }
 
+    /// Marks read like `task/mark_read`, then reads the Task as a subscriber sees it.
     pub(crate) fn mark_read_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.mark_task_read(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
-        )
+        )?;
+        self.subscriber_view_for_test(&task_id)
     }
 
+    /// Reloads like `task/reloadNativeSession`, then reads the Task as a subscriber sees it.
     pub(crate) fn reload_native_session_for_test(
         &self,
         params: openaide_app_server_protocol::task::TaskReloadNativeSessionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         self.reload_native_session(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
+        )?;
+        self.subscriber_view_for_test(&task_id)
+    }
+
+    fn subscriber_view_for_test(&self, task_id: &str) -> Result<TaskSnapshot, ProtocolError> {
+        let snapshot = crate::tasks::snapshot::build_snapshot(
+            &self.store,
+            task_id,
+            crate::chat_history::ChatHistoryPolicy::default().task_snapshot_tail_limit(),
         )
+        .map_err(runtime_error)?;
+        self.project_task_snapshot(snapshot)
     }
 
     pub(crate) fn set_config_option_for_test(

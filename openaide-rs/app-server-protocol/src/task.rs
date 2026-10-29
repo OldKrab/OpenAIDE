@@ -425,9 +425,9 @@ pub struct TaskReloadNativeSessionParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskReloadNativeSessionResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed reload (ADR-0074). The replayed history and every other
+/// change reach the client on the Task subscription.
+pub struct TaskReloadNativeSessionResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -437,9 +437,9 @@ pub struct TaskMarkReadParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskMarkReadResult {
-    pub task: TaskSnapshot,
-}
+/// Acknowledges a committed mark-read (ADR-0074). Cleared unread and attention reach
+/// the client on the Task subscription.
+pub struct TaskMarkReadResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

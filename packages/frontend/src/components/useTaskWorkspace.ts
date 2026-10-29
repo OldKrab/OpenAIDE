@@ -27,7 +27,6 @@ export function useTaskWorkspace({
 }: TaskWorkspaceOptions) {
   useTaskAttentionReadReceipt({
     backendConnection,
-    dispatch,
     revision: state.snapshot?.revision,
     taskId: bootstrap.surface === "task" && state.snapshot && bootstrap.taskId === state.snapshot.task.task_id
       ? state.snapshot.task.task_id

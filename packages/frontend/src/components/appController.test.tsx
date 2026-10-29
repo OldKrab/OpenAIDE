@@ -554,11 +554,8 @@ describe("app controller mounted lifecycle", () => {
     const initial = clientSnapshot();
     if (!initial.activeTask) throw new Error("expected active task fixture");
     initial.activeTask.task.unread = true;
-    const acknowledged = protocolTaskSnapshot("task_1", "Task");
-    acknowledged.task.unread = false;
-    acknowledged.revision = 2;
     const request = vi.fn(async (method: string, _params?: unknown) => {
-      if (method === TASK_MARK_READ) return { task: acknowledged };
+      if (method === TASK_MARK_READ) return {};
       throw new Error(method);
     });
     backendConnection = {
@@ -581,7 +578,8 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(request).toHaveBeenCalledWith(TASK_MARK_READ, { taskId: "task_1" });
-    expect(latestController?.state.snapshot?.task.unread).toBe(false);
+    // The reply is an acknowledgement (ADR-0074); cleared unread arrives on the subscription.
+    expect(latestController?.state.snapshot?.task.unread).toBe(true);
   });
 
   it("uses App Server Agent snapshots for new-task Agent selection", async () => {

@@ -1249,11 +1249,11 @@ export type TaskOpenResult = Record<symbol, never>;
 
 export type TaskReloadNativeSessionParams = { taskId: TaskId, clientMutationId: ClientMutationId, };
 
-export type TaskReloadNativeSessionResult = { task: TaskSnapshot, };
+export type TaskReloadNativeSessionResult = Record<symbol, never>;
 
 export type TaskMarkReadParams = { taskId: TaskId, };
 
-export type TaskMarkReadResult = { task: TaskSnapshot, };
+export type TaskMarkReadResult = Record<symbol, never>;
 
 export type TaskListParams = { lifecycle: TaskListLifecycle, projectId?: ProjectId | null, cursor?: TaskListCursor | null, };
 
