@@ -43,9 +43,9 @@ public class ConnectionFailureTest {
     }
 
     @Test public void lastConnectedIsFiledUnderTheSwitchTarget() {
-        assertEquals("local", ConnectionFailure.placeKey(null));
-        assertEquals("a".repeat(64), ConnectionFailure.placeKey("a".repeat(64)));
-        assertEquals("ssh:build-1", ConnectionFailure.placeKey(ComputerSwitch.SSH_PREFIX + "build-1"));
+        assertEquals("local", ConnectionFailure.computerKey(null));
+        assertEquals("a".repeat(64), ConnectionFailure.computerKey("a".repeat(64)));
+        assertEquals("ssh:build-1", ConnectionFailure.computerKey(ComputerSwitch.SSH_PREFIX + "build-1"));
     }
 
     @Test public void theLastConnectedLineReadsAsASentence() {

@@ -5,17 +5,17 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The places the connection screen offers when the computer in use cannot be used
- * (ADR-0070): every other place the user can work. Kept free of Android so the
+ * The computers the connection screen offers when the computer in use cannot be used
+ * (ADR-0070): every other computer the user can work on. Kept free of Android so the
  * rules can be tested.
  */
 final class SwitchChoices {
     private SwitchChoices() {}
 
-    /** One place to switch to. [target] is a {@link ComputerSwitch} target: null for this phone. */
+    /** One computer to switch to. [target] is a {@link ComputerSwitch} target: null for this phone. */
     static final class Choice {
         final String target;
-        /** Names the place in a sentence: "this phone" or the computer's name. */
+        /** Names the computer in a sentence: "this phone" or the computer's name. */
         final String name;
 
         Choice(String target, String name) { this.target = target; this.name = name; }
@@ -25,7 +25,7 @@ final class SwitchChoices {
     }
 
     /**
-     * Every place but [inUse] (null for this phone): this phone when its workspace is
+     * Every computer but [inUse] (null for this phone): this phone when its workspace is
      * [thisPhoneReady], then the paired computers, then the SSH Computers, each in the
      * order the phone keeps them.
      */

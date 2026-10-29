@@ -24,7 +24,7 @@ import java.util.Map;
 /**
  * The native screen shown while the workspace is not open: its status, "Try again",
  * and, after a failure, what the user can do instead (ADR-0070): when this computer
- * last worked, and a direct switch to every other place.
+ * last worked, and a direct switch to every other computer.
  *
  * Owned by one activity and used on the main thread only. It decides nothing about
  * connecting: the activity connects and reports progress and failures here, and a
@@ -38,7 +38,7 @@ final class ConnectionScreen {
         /** "Open workspace" and "Try again". */
         void openWorkspace();
         void openConnectionSettings();
-        /** A switch took effect: reload the profile and connect to the new place. */
+        /** A switch took effect: reload the profile and connect to the new computer. */
         void selectionChanged();
     }
 
@@ -160,22 +160,22 @@ final class ConnectionScreen {
 
     /**
      * A connect to the computer in use failed. Shows the sentence ([reason] is the
-     * failure class, or null), when this computer last worked, and the other places to
+     * failure class, or null), when this computer last worked, and the other computers to
      * work. Returns the sentence shown, which says "offline" instead of "can't reach"
      * when the phone has no working internet.
      */
     String failed(String message, ConnectionProfile.Kind kind, String reason, int attempt) {
         ConnectionFailure.Classification classification = ConnectionFailure.classify(kind, reason, online());
         failure = ConnectionFailure.message(classification, message);
-        List<SwitchChoices.Choice> places = SwitchChoices.list(ConnectionController.thisDeviceReady(activity, store),
+        List<SwitchChoices.Choice> others = SwitchChoices.list(ConnectionController.thisDeviceReady(activity, store),
             store.pairedServers(), store.sshComputers(), store.inUseTarget());
         Map<String, Object> fields = new HashMap<>();
         fields.put("profile_kind", kind.name().toLowerCase(Locale.ROOT));
         if (reason != null) fields.put("error_class", reason);
-        fields.put("switch_choices", places.size());
+        fields.put("switch_choices", others.size());
         diagnostics.record("connection_failure_shown", classification.word, attempt, 0, fields);
         connect.setText("Try again");
-        buildChoices(places);
+        buildChoices(others);
         showFailure();
         return failure;
     }
@@ -197,25 +197,25 @@ final class ConnectionScreen {
         choices.setVisibility(choices.getChildCount() > 0 ? View.VISIBLE : View.GONE);
     }
 
-    private void buildChoices(List<SwitchChoices.Choice> places) {
+    private void buildChoices(List<SwitchChoices.Choice> others) {
         choices.removeAllViews();
-        for (SwitchChoices.Choice place : places) {
-            Button button = secondaryButton(place.label());
-            button.setOnClickListener(view -> switchTo(place));
+        for (SwitchChoices.Choice choice : others) {
+            Button button = secondaryButton(choice.label());
+            button.setOnClickListener(view -> switchTo(choice));
             choices.addView(button, centered(dp(260), dp(48), 4));
         }
     }
 
-    /** Connects [place] before the selection changes; while it connects, only Cancel is offered. */
-    private void switchTo(SwitchChoices.Choice place) {
+    /** Connects [choice] before the selection changes; while it connects, only Cancel is offered. */
+    private void switchTo(SwitchChoices.Choice choice) {
         // The controls change first: a request that is refused at once answers before it returns.
         connect.setVisibility(View.GONE);
         setup.setVisibility(View.GONE);
         choices.setVisibility(View.GONE);
         lastConnected.setVisibility(View.GONE);
         cancel.setVisibility(View.VISIBLE);
-        status.setText(place.connectingText());
-        switcher.request(store.inUseTarget(), place.target, null, (outcome, problem) -> {
+        status.setText(choice.connectingText());
+        switcher.request(store.inUseTarget(), choice.target, null, (outcome, problem) -> {
             if (activity.isDestroyed()) return;
             if (problem != null) failure = problem;
             // A switch that took effect replaces this screen next; every other answer leaves the selection as it was.

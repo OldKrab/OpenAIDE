@@ -52,10 +52,10 @@ final class ConnectionFailure {
     static final String LOCAL_KEY = "local";
 
     /**
-     * The key a place is filed under, the same one a switch targets: "local" for this
+     * The key a computer is filed under, the same one a switch targets: "local" for this
      * phone ([target] null), a paired computer's id, or "ssh:" and an SSH Computer's id.
      */
-    static String placeKey(String target) { return target == null ? LOCAL_KEY : target; }
+    static String computerKey(String target) { return target == null ? LOCAL_KEY : target; }
 
     /** The muted line under a failure, given the relative time as the phone words it. */
     static String lastConnectedLine(String relative) { return "Last connected " + relative; }

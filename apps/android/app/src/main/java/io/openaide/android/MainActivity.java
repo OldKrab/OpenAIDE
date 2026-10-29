@@ -316,7 +316,7 @@ public final class MainActivity extends Activity {
         connecting = false;
         connected = true;
         getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("configured", true).apply();
-        // Filed under the place in use, so a later failure can say when it last worked.
+        // Filed under the computer in use, so a later failure can say when it last worked.
         connections.recordConnected(connections.inUseTarget(), System.currentTimeMillis());
         Log.i("OpenAIDE", "connection_end outcome=ready duration_ms=" + (SystemClock.elapsedRealtime() - started));
         diagnostics.record("connection", "ready", attempt, SystemClock.elapsedRealtime() - started);
