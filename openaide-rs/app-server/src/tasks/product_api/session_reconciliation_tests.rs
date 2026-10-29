@@ -98,7 +98,10 @@ fn healthy_history_refresh_logs_only_the_context_summary() {
         .filter(|entry| context_ids.contains(&entry["fields"]["context_id"]))
         .map(|entry| entry["event"].clone())
         .collect::<Vec<_>>();
-    assert!(page_events.is_empty(), "healthy pages logged {page_events:?}");
+    assert!(
+        page_events.is_empty(),
+        "healthy pages logged {page_events:?}"
+    );
     assert!(!logs.iter().any(|entry| {
         entry["event"] == "native_session_history_reconciled"
             && entry["fields"]["project_id"] == project_id.as_str()
