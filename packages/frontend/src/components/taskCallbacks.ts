@@ -67,6 +67,12 @@ type TaskBackendConnection = Partial<Pick<
   "request" | "subscribeState"
 >>;
 
+function canRequest(
+  connection: TaskBackendConnection | undefined,
+): connection is TaskBackendConnection & Pick<BackendConnection, "request"> {
+  return Boolean(connection?.request);
+}
+
 export function createTaskCallbacks({
   attachmentResources,
   asyncOperations,
@@ -143,7 +149,9 @@ export function createTaskCallbacks({
       state.snapshot,
     ),
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
-    fileViewer: backendConnection?.request ? { request: backendConnection.request } : undefined,
+    // Pass the connection itself: callbacks are rebuilt on every App render, and
+    // the Task page keys its file-existence cache and file panel on this identity.
+    fileViewer: canRequest(backendConnection) ? backendConnection : undefined,
     loadComposerHistory: () => {
       const taskId = state.snapshot?.task.task_id;
       if (!taskId) return Promise.resolve([]);
