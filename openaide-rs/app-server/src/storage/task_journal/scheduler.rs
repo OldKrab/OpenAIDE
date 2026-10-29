@@ -14,7 +14,7 @@ mod tests;
 // Stream deltas vary widely in size, so admission bounds retained payload bytes
 // rather than write count. One noisy Task can consume at most a quarter.
 const GLOBAL_STREAM_BYTE_CAPACITY: usize = 8 * 1024 * 1024;
-const PER_TASK_STREAM_BYTE_CAPACITY: usize = 2 * 1024 * 1024;
+pub(super) const PER_TASK_STREAM_BYTE_CAPACITY: usize = 2 * 1024 * 1024;
 const CONTROL_CAPACITY: usize = 64;
 const MAX_BATCH_AGE: Duration = Duration::from_millis(32);
 const MAX_BATCH_BYTES: usize = 64 * 1024;
@@ -365,7 +365,7 @@ fn enqueue(
     entry.queued_bytes = entry.queued_bytes.saturating_add(write_bytes);
     entry.queued_operations = entry
         .queued_operations
-        .saturating_add(write.operations.len() + write.artifacts.len());
+        .saturating_add(write.operation_count());
     match boundary {
         CommitBoundary::Stream | CommitBoundary::TextStream => {
             entry.stream_bytes += write_bytes;
@@ -414,7 +414,14 @@ fn take_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
     let mut operations = 0;
     while let Some(front) = task.writes.front() {
         let next_bytes = front.write.estimated_bytes();
-        let next_operations = front.write.operations.len() + front.write.artifacts.len();
+        let next_operations = front.write.operation_count();
+        // A batch holds only Task writes or only Subagent writes, so each kind
+        // commits through its own path in queue order.
+        if batch.first().is_some_and(|first: &QueuedWrite| {
+            first.write.is_subagent() != front.write.is_subagent()
+        }) {
+            break;
+        }
         if !batch.is_empty()
             && (bytes + next_bytes > MAX_BATCH_BYTES
                 || operations + next_operations > MAX_BATCH_OPERATIONS)
@@ -487,7 +494,7 @@ fn take_text_barrier_batch(state: &mut SchedulerState, task_id: &str) -> Vec<Que
         match write.write.boundary {
             CommitBoundary::TextStream => {
                 let next_bytes = write.write.estimated_bytes();
-                let next_operations = write.write.operations.len() + write.write.artifacts.len();
+                let next_operations = write.write.operation_count();
                 if !selected.is_empty()
                     && (selected_bytes + next_bytes > MAX_BATCH_BYTES
                         || selected_operations + next_operations > MAX_BATCH_OPERATIONS)
@@ -511,7 +518,7 @@ fn take_text_barrier_batch(state: &mut SchedulerState, task_id: &str) -> Vec<Que
 
     for write in &selected {
         let bytes = write.write.estimated_bytes();
-        let operations = write.write.operations.len() + write.write.artifacts.len();
+        let operations = write.write.operation_count();
         task.queued_bytes = task.queued_bytes.saturating_sub(bytes);
         task.queued_operations = task.queued_operations.saturating_sub(operations);
         match write.write.boundary {

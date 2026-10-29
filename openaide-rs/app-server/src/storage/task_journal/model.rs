@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ActivityToolDetails;
 use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
+use crate::storage::subagents::{CommittedSubagentBatch, SubagentWrite};
 
 /// Complete normalized Task state reconstructed by journal replay.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,6 +27,9 @@ pub struct TaskWrite {
     pub(super) operations: Vec<TaskOperation>,
     pub(super) artifacts: Vec<ArtifactWrite>,
     pub(super) compaction: CompactionMode,
+    /// A Subagent write rides the Task's queue but never shares a batch with Task
+    /// writes; it has no other operations or artifacts (ADR-0076).
+    pub(super) subagent: Option<Box<SubagentWrite>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +59,7 @@ impl TaskWrite {
             }],
             artifacts: replacement_writes(artifacts),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -69,6 +74,7 @@ impl TaskWrite {
             }],
             artifacts: Vec::new(),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -97,6 +103,7 @@ impl TaskWrite {
             }],
             artifacts: writes,
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -115,6 +122,7 @@ impl TaskWrite {
             operations,
             artifacts: writes,
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -129,6 +137,7 @@ impl TaskWrite {
             operations: Vec::new(),
             artifacts: terminal_writes(terminal_appends),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -178,6 +187,7 @@ impl TaskWrite {
             operations: Vec::new(),
             artifacts: Vec::new(),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -199,6 +209,7 @@ impl TaskWrite {
             }],
             artifacts: Vec::new(),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -222,6 +233,7 @@ impl TaskWrite {
                 },
             }],
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -234,6 +246,7 @@ impl TaskWrite {
             operations: Vec::new(),
             artifacts: Vec::new(),
             compaction: CompactionMode::None,
+            subagent: None,
         }
     }
 
@@ -246,6 +259,7 @@ impl TaskWrite {
             operations: Vec::new(),
             artifacts: Vec::new(),
             compaction: CompactionMode::Force,
+            subagent: None,
         }
     }
 
@@ -258,10 +272,56 @@ impl TaskWrite {
             operations: Vec::new(),
             artifacts: Vec::new(),
             compaction: CompactionMode::IfWorthwhile,
+            subagent: None,
         }
     }
 
+    /// A Subagent write the caller does not wait for (ADR-0076).
+    pub(crate) fn stream_subagent(task_id: String, write: SubagentWrite) -> Self {
+        // The stream lane refuses a write larger than its capacity; such a rare
+        // write commits as a barrier, whose receipt the caller may still drop.
+        let boundary = if write.estimated_bytes() > super::scheduler::PER_TASK_STREAM_BYTE_CAPACITY
+        {
+            CommitBoundary::Barrier
+        } else {
+            CommitBoundary::Stream
+        };
+        Self::subagent(task_id, boundary, write)
+    }
+
+    /// A Subagent write whose receipt reports its own outcome.
+    pub(crate) fn barrier_subagent(task_id: String, write: SubagentWrite) -> Self {
+        Self::subagent(task_id, CommitBoundary::Barrier, write)
+    }
+
+    fn subagent(task_id: String, boundary: CommitBoundary, write: SubagentWrite) -> Self {
+        Self {
+            task_id,
+            boundary,
+            operations: Vec::new(),
+            artifacts: Vec::new(),
+            compaction: CompactionMode::None,
+            subagent: Some(Box::new(write)),
+        }
+    }
+
+    pub(super) fn is_subagent(&self) -> bool {
+        self.subagent.is_some()
+    }
+
+    /// Operations the write adds to a batch; a Subagent write counts as one.
+    pub(super) fn operation_count(&self) -> usize {
+        self.operations.len() + self.artifacts.len() + usize::from(self.is_subagent())
+    }
+
     pub(super) fn estimated_bytes(&self) -> usize {
+        self.subagent
+            .as_ref()
+            .map_or(0, |write| write.estimated_bytes())
+            .saturating_add(self.operation_bytes())
+    }
+
+    fn operation_bytes(&self) -> usize {
         self.operations
             .iter()
             .map(TaskOperation::estimated_bytes)
@@ -436,9 +496,11 @@ pub struct CommittedChatTextAppend {
 }
 
 /// Exact durable result emitted after the journal sync completes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct CommittedTaskBatch {
     pub task_id: String,
+    /// Present for a batch of Subagent writes, whose Task fields are unchanged.
+    pub subagent: Option<CommittedSubagentBatch>,
     pub journal_sequence: u64,
     /// Revision after this physical batch. Stream text advances it once per
     /// coalesced batch instead of once per ACP chunk.

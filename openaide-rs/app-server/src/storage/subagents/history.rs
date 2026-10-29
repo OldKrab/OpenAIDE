@@ -106,16 +106,6 @@ pub(super) enum HistoryChange {
     Plan,
 }
 
-impl HistoryChange {
-    pub(super) fn kind(&self) -> &'static str {
-        match self {
-            Self::AppendText(_) => "append_text",
-            Self::Upsert(_) => "upsert",
-            Self::Plan => "plan",
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct TextAppend {
     pub(super) identity: String,
@@ -366,13 +356,6 @@ pub(super) fn encode_change_frame(
     let mut bytes = serde_json::to_vec(&frame)?;
     bytes.push(b'\n');
     Ok(Some(bytes))
-}
-
-/// Whether the journal can take `frame_bytes` more before it outgrows its snapshot.
-pub(super) fn journal_has_room(dir: &Path, frame_bytes: u64) -> Result<bool, RuntimeError> {
-    let snapshot = fs::metadata(dir.join(HISTORY_SNAPSHOT_FILE))?.len();
-    let journal = fs::metadata(dir.join(HISTORY_JOURNAL_FILE))?.len();
-    Ok(journal.saturating_add(frame_bytes) <= journal_budget(snapshot))
 }
 
 /// Appends one encoded frame; it is accepted once its newline is durable.

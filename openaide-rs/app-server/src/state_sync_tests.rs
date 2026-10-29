@@ -2,7 +2,7 @@ use openaide_app_server_protocol::client::{
     ClientCapabilities, RequestedSurface, ShellDescriptor, ShellKind,
 };
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope, TaskChanges};
-use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, SubagentId, TaskId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ProjectCollectionSnapshot, TaskHistorySyncSnapshot,
 };
@@ -55,91 +55,6 @@ fn task_subscription_presence_follows_subscribe_unsubscribe_and_client_expiry() 
         .unwrap();
     stream.drop_client_subscriptions(&context.client_instance_id);
     assert!(!presence.has_subscribers("task-1"));
-}
-
-/// Answers any scope with an Agents baseline after recording whether the Subagent
-/// history was already watched while the baseline was read.
-struct PresenceObservingSnapshots {
-    presence: TaskSubscriptionPresence,
-    watched_during_read: std::cell::Cell<Option<bool>>,
-    fail: bool,
-}
-
-impl SnapshotProvider for PresenceObservingSnapshots {
-    fn snapshot(
-        &self,
-        ctx: &ClientContext,
-        _scope: &SubscriptionScope,
-        token: &SnapshotReadToken,
-    ) -> Result<SubscriptionSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
-        self.watched_during_read.set(Some(
-            self.presence
-                .watches_subagent_history("task-1", "subagent-1"),
-        ));
-        if self.fail {
-            return Err(openaide_app_server_protocol::errors::ProtocolError {
-                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotFound,
-                message: "Subagent history not found".to_string(),
-                recoverable: false,
-                target: None,
-            });
-        }
-        snapshots().snapshot(ctx, &SubscriptionScope::Agents, token)
-    }
-}
-
-#[test]
-fn subagent_history_presence_is_registered_before_the_baseline_is_read() {
-    let presence = TaskSubscriptionPresence::default();
-    let mut stream =
-        StateStream::with_task_subscription_presence(StateRootId::from("root-1"), presence.clone());
-    let context = ctx("client-1", "conn-1");
-    let scope = SubscriptionScope::SubagentHistory {
-        task_id: TaskId::from("task-1"),
-        subagent_id: SubagentId::from("subagent-1"),
-    };
-    let mut provider = PresenceObservingSnapshots {
-        presence: presence.clone(),
-        watched_during_read: Default::default(),
-        fail: true,
-    };
-
-    assert!(stream
-        .subscribe(&context, scope.clone(), &provider, AppServerTime(1))
-        .is_err());
-    assert_eq!(provider.watched_during_read.get(), Some(true));
-    assert!(
-        !presence.watches_subagent_history("task-1", "subagent-1"),
-        "a failed subscribe leaves no presence behind"
-    );
-
-    provider.fail = false;
-    stream
-        .subscribe(&context, scope.clone(), &provider, AppServerTime(2))
-        .unwrap();
-    // A change committed after this read is published; one before it is in the baseline.
-    assert_eq!(provider.watched_during_read.get(), Some(true));
-    assert!(presence.watches_subagent_history("task-1", "subagent-1"));
-    assert!(!presence.watches_subagent_history("task-1", "subagent-2"));
-
-    provider.fail = true;
-    assert!(stream
-        .subscribe(&context, scope.clone(), &provider, AppServerTime(3))
-        .is_err());
-    assert!(
-        presence.watches_subagent_history("task-1", "subagent-1"),
-        "a failed resync keeps the existing subscription's presence"
-    );
-
-    stream.unsubscribe(&context, scope.clone(), AppServerTime(4));
-    assert!(!presence.watches_subagent_history("task-1", "subagent-1"));
-
-    provider.fail = false;
-    stream
-        .subscribe(&context, scope, &provider, AppServerTime(5))
-        .unwrap();
-    stream.drop_client_subscriptions(&context.client_instance_id);
-    assert!(!presence.watches_subagent_history("task-1", "subagent-1"));
 }
 
 #[test]

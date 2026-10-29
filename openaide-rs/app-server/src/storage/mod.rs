@@ -43,7 +43,6 @@ struct StoreInner {
     settings_write_lock: Mutex<()>,
     project_write_lock: Mutex<()>,
     worktree_write_lock: Mutex<()>,
-    subagent_write_lock: Mutex<()>,
     /// Sole durable owner for Task, Chat, and Tool-detail state.
     task_journal: task_journal::TaskJournalStore,
     task_commit_handler: Arc<RwLock<Option<TaskCommitHandler>>>,
@@ -131,7 +130,6 @@ impl Store {
                 settings_write_lock: Mutex::new(()),
                 project_write_lock: Mutex::new(()),
                 worktree_write_lock: Mutex::new(()),
-                subagent_write_lock: Mutex::new(()),
                 task_journal,
                 task_commit_handler,
                 task_commit_dispatch_stop,

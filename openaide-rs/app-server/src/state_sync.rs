@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, SubagentId, TaskId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
 use openaide_app_server_protocol::state::{
     StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope, SubscriptionSnapshot,
     TaskResumeSnapshot,
@@ -41,14 +41,7 @@ pub struct StateEventDelivery {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskSubscriptionPresence {
     subscribers: Arc<Mutex<HashMap<TaskId, HashSet<ClientInstanceId>>>>,
-    /// Clients watching one Subagent history. A history subscriber is registered
-    /// before its baseline is read, so a change skipped because nobody was watching
-    /// committed before that read and is part of the baseline.
-    subagent_history_subscribers:
-        Arc<Mutex<HashMap<SubagentHistoryKey, HashSet<ClientInstanceId>>>>,
 }
-
-type SubagentHistoryKey = (TaskId, SubagentId);
 
 impl TaskSubscriptionPresence {
     fn observe_subscribed(&self, client_instance_id: ClientInstanceId, task_id: TaskId) {
@@ -81,55 +74,6 @@ impl TaskSubscriptionPresence {
                 subscribers.remove(client_instance_id);
                 !subscribers.is_empty()
             });
-        self.subagent_history_subscribers
-            .lock()
-            .expect("Subagent history presence poisoned")
-            .retain(|_, subscribers| {
-                subscribers.remove(client_instance_id);
-                !subscribers.is_empty()
-            });
-    }
-
-    fn observe_subagent_history_subscribed(
-        &self,
-        client_instance_id: ClientInstanceId,
-        task_id: TaskId,
-        subagent_id: SubagentId,
-    ) {
-        self.subagent_history_subscribers
-            .lock()
-            .expect("Subagent history presence poisoned")
-            .entry((task_id, subagent_id))
-            .or_default()
-            .insert(client_instance_id);
-    }
-
-    fn observe_subagent_history_unsubscribed(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        task_id: &TaskId,
-        subagent_id: &SubagentId,
-    ) {
-        let mut subscribers = self
-            .subagent_history_subscribers
-            .lock()
-            .expect("Subagent history presence poisoned");
-        let key = (task_id.clone(), subagent_id.clone());
-        if let Some(history_subscribers) = subscribers.get_mut(&key) {
-            history_subscribers.remove(client_instance_id);
-            if history_subscribers.is_empty() {
-                subscribers.remove(&key);
-            }
-        }
-    }
-
-    /// Whether any client watches this Subagent history, so a change must be sent.
-    pub(crate) fn watches_subagent_history(&self, task_id: &str, subagent_id: &str) -> bool {
-        self.subagent_history_subscribers
-            .lock()
-            .expect("Subagent history presence poisoned")
-            .keys()
-            .any(|(task, subagent)| task.as_str() == task_id && subagent.as_str() == subagent_id)
     }
 
     pub(crate) fn has_subscribers(&self, task_id: &str) -> bool {
@@ -145,15 +89,6 @@ impl TaskSubscriptionPresence {
     #[cfg(test)]
     pub(crate) fn subscribe_for_test(&self, client_instance_id: ClientInstanceId, task_id: TaskId) {
         self.observe_subscribed(client_instance_id, task_id);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn watch_subagent_history_for_test(&self, task_id: &str, subagent_id: &str) {
-        self.observe_subagent_history_subscribed(
-            ClientInstanceId::from("client-watching-subagent"),
-            TaskId::from(task_id),
-            SubagentId::from(subagent_id),
-        );
     }
 }
 
@@ -210,32 +145,11 @@ impl StateStream {
     ) -> Result<(StateSubscribeResult, bool), openaide_app_server_protocol::errors::ProtocolError>
     {
         let token = self.read_token_for_scope(&scope);
-        if let SubscriptionScope::SubagentHistory {
-            task_id,
-            subagent_id,
-        } = &scope
-        {
-            self.task_subscription_presence
-                .observe_subagent_history_subscribed(
-                    ctx.client_instance_id.clone(),
-                    task_id.clone(),
-                    subagent_id.clone(),
-                );
-        }
         let snapshot = match &scope {
             SubscriptionScope::Task { task_id } => {
-                self.task_snapshot(ctx, task_id, known_revision, snapshot_provider, &token)
+                self.task_snapshot(ctx, task_id, known_revision, snapshot_provider, &token)?
             }
-            _ => snapshot_provider.snapshot(ctx, &scope, &token),
-        };
-        let snapshot = match snapshot {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                if !self.has_subscription(&ctx.client_instance_id, &scope) {
-                    self.observe_scope_left(&ctx.client_instance_id, &scope);
-                }
-                return Err(error);
-            }
+            _ => snapshot_provider.snapshot(ctx, &scope, &token)?,
         };
         let subscription_added =
             self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
@@ -266,34 +180,12 @@ impl StateStream {
             subscription.client_instance_id != ctx.client_instance_id || subscription.scope != scope
         });
         if self.subscriptions.len() != removed {
-            self.observe_scope_left(&ctx.client_instance_id, &scope);
+            if let SubscriptionScope::Task { task_id } = &scope {
+                self.task_subscription_presence
+                    .observe_unsubscribed(&ctx.client_instance_id, task_id);
+            }
         }
         StateUnsubscribeResult { scope }
-    }
-
-    fn has_subscription(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        scope: &SubscriptionScope,
-    ) -> bool {
-        self.subscriptions.iter().any(|subscription| {
-            &subscription.client_instance_id == client_instance_id && &subscription.scope == scope
-        })
-    }
-
-    fn observe_scope_left(&self, client_instance_id: &ClientInstanceId, scope: &SubscriptionScope) {
-        match scope {
-            SubscriptionScope::Task { task_id } => self
-                .task_subscription_presence
-                .observe_unsubscribed(client_instance_id, task_id),
-            SubscriptionScope::SubagentHistory {
-                task_id,
-                subagent_id,
-            } => self
-                .task_subscription_presence
-                .observe_subagent_history_unsubscribed(client_instance_id, task_id, subagent_id),
-            _ => {}
-        }
     }
 
     pub fn publish_committed(

@@ -12,9 +12,7 @@ use std::sync::{Arc, Weak};
 
 use super::super::{Store, StoreInner};
 use super::history::journal_budget;
-use super::{
-    load_upgraded_history, task_dir, HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE, SUBAGENTS_DIR,
-};
+use super::{HISTORY_JOURNAL_FILE, HISTORY_SNAPSHOT_FILE, SUBAGENTS_DIR};
 use crate::protocol::errors::RuntimeError;
 
 impl Store {
@@ -34,16 +32,12 @@ impl Store {
         }
     }
 
-    /// Upgrades one history under the Subagent write lock, as a load would.
+    /// Upgrades one history unless a live Subagent's writer holds it open.
     fn upgrade_subagent_history(&self, history_dir: &Path) -> Result<bool, RuntimeError> {
-        let _guard = self
-            .inner
-            .subagent_write_lock
-            .lock()
-            .expect("Subagent store lock poisoned");
-        let subagent_root = history_dir.parent().unwrap_or(history_dir);
-        let (_, upgraded) = load_upgraded_history(&task_dir(subagent_root), history_dir)?;
-        Ok(upgraded)
+        self.inner
+            .task_journal
+            .subagents()
+            .upgrade_unopened(history_dir)
     }
 }
 

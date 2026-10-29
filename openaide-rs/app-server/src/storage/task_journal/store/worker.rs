@@ -13,6 +13,9 @@ pub(super) fn run(
 ) {
     loop {
         match scheduler.next() {
+            NextWork::Batch { task_id, writes } if writes[0].write.is_subagent() => {
+                super::subagent_batch::commit(&context, &task_id, writes, &commit_subscribers);
+            }
             NextWork::Batch { task_id, writes } => {
                 context.faults.panic_if_armed();
                 let result = commit_batch(&context, &task_id, &writes);
@@ -52,7 +55,7 @@ pub(super) fn run(
     }
 }
 
-fn broadcast<T: Clone>(subscribers: &Mutex<Vec<mpsc::Sender<T>>>, event: T) {
+pub(super) fn broadcast<T: Clone>(subscribers: &Mutex<Vec<mpsc::Sender<T>>>, event: T) {
     subscribers
         .lock()
         .expect("Task journal subscribers poisoned")

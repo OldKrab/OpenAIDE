@@ -212,7 +212,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 )?;
             }
             // The parent's own Tool rows show this delegation in its Chat.
-            return self.publish_subagent_catalog();
+            return Ok(());
         }
         if parent_interaction {
             record = self.mutations.store().update_subagent_status(
@@ -220,23 +220,25 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 &record.native_session_id,
                 crate::storage::subagents::SubagentStatusRecord::WaitingForActivity,
             )?;
-            self.publish_subagent_history(self.mutations.store().append_subagent_message(
+            self.mutations.store().append_subagent_message(
                 &self.task_id,
                 &record.native_session_id,
                 codex_subagent_notice(
+                    // The persisted catalog's history revision may trail the
+                    // history, so it cannot name a new message.
                     format!(
                         "{}:codex:interaction:{}",
                         record.subagent_id,
-                        record.history_revision.saturating_add(1),
+                        uuid::Uuid::new_v4().simple(),
                     ),
                     &format!("{actor} interacted with this subagent"),
                     "The inter-agent message is unavailable because Codex does not expose it to clients.",
                     &now,
                 ),
                 false,
-            )?);
+            )?;
         } else if prompt_unavailable {
-            self.publish_subagent_history(self.mutations.store().append_subagent_message(
+            self.mutations.store().append_subagent_message(
                 &self.task_id,
                 &record.native_session_id,
                 codex_subagent_notice(
@@ -246,7 +248,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                     &now,
                 ),
                 true,
-            )?);
+            )?;
         }
         let identity = subagent_lifecycle_identity(&record.subagent_id);
         self.mutations.commit_existing_task(
@@ -283,7 +285,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 Ok(TaskMutationResult::Changed)
             },
         )?;
-        self.publish_subagent_catalog()
+        Ok(())
     }
 
     fn subagent_session_update(
@@ -297,7 +299,6 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             .mutations
             .store()
             .subagent_record_by_native(&self.task_id, native_session_id)?;
-        // The catalog republished below covers a nested target's revision too.
         if let AgentEvent::Subagent(subagent) = &event {
             self.append_codex_subagent_interaction(subagent, "Parent Agent", &now)?;
         }
@@ -316,7 +317,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                         .or_insert_with(|| super::TextChunkRoutes::new(record.subagent_id.clone()))
                         .message_id(super::TextChannel::User, source_message_id)
                 };
-                self.publish_subagent_history(self.mutations.store().append_subagent_message_part(
+                self.mutations.store().append_subagent_message_part(
                     &self.task_id,
                     native_session_id,
                     NormalizedMessage::User {
@@ -325,7 +326,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                         created_at: now,
                         attachments: Vec::new(),
                     },
-                )?);
+                )?;
             }
             AgentEvent::MessageChunk {
                 role,
@@ -348,7 +349,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                         .or_insert_with(|| super::TextChunkRoutes::new(record.subagent_id.clone()))
                         .message_id(channel, source_message_id)
                 };
-                self.publish_subagent_history(self.mutations.store().append_subagent_message_part(
+                self.mutations.store().append_subagent_message_part(
                     &self.task_id,
                     native_session_id,
                     NormalizedMessage::AgentMessage {
@@ -357,35 +358,35 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                         parts: vec![part],
                         created_at: now,
                     },
-                )?);
+                )?;
             }
             AgentEvent::Plan(plan) => {
-                self.publish_subagent_history(self.mutations
+                self.mutations
                     .store()
-                    .set_subagent_plan(&self.task_id, native_session_id, plan)?);
+                    .set_subagent_plan(&self.task_id, native_session_id, plan)?;
             }
             AgentEvent::ToolUpdate(mut update) => {
                 if let Some(mut tool) = update.summary.take() {
                     tool.scope_id = Some(record.subagent_id.clone());
                     let message =
                         crate::agent::normalizer::normalize_event(AgentEvent::ToolCall(tool), &now);
-                    self.publish_subagent_history(self.mutations.store().append_subagent_message(
+                    self.mutations.store().append_subagent_message(
                         &self.task_id,
                         native_session_id,
                         message,
                         true,
-                    )?);
+                    )?;
                 }
             }
             AgentEvent::ToolCall(ref mut tool) => {
                 tool.scope_id = Some(record.subagent_id.clone());
                 let message = crate::agent::normalizer::normalize_event(event, &now);
-                self.publish_subagent_history(self.mutations.store().append_subagent_message(
+                self.mutations.store().append_subagent_message(
                     &self.task_id,
                     native_session_id,
                     message,
                     true,
-                )?);
+                )?;
             }
             AgentEvent::ConfigOptionsChanged(_)
             | AgentEvent::CommandsChanged(_)
@@ -398,15 +399,15 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             | AgentEvent::BackgroundCommandFinished { .. } => {}
             other => {
                 let message = crate::agent::normalizer::normalize_event(other, &now);
-                self.publish_subagent_history(self.mutations.store().append_subagent_message(
+                self.mutations.store().append_subagent_message(
                     &self.task_id,
                     native_session_id,
                     message,
                     false,
-                )?);
+                )?;
             }
         }
-        self.publish_subagent_catalog()
+        Ok(())
     }
 
     fn subagent_details_changed(
@@ -426,7 +427,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
                 .collect(),
         )?;
-        self.publish_subagent_catalog()
+        Ok(())
     }
 
     fn subagent_identity_changed(
@@ -441,7 +442,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             event.delegated_task,
             event.cancel,
         )?;
-        self.publish_subagent_catalog()
+        Ok(())
     }
 
     fn subagent_state_changed(
@@ -458,7 +459,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                     &event.native_session_id,
                     crate::storage::subagents::SubagentStatusRecord::Running,
                 )?;
-                return self.publish_subagent_catalog();
+                return Ok(());
             }
             AgentNativeSubagentState::Completed => (
                 crate::storage::subagents::SubagentStatusRecord::Completed,
@@ -498,7 +499,7 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 }
             },
         )?;
-        self.publish_subagent_catalog()
+        Ok(())
     }
 
     fn request_question(
@@ -516,16 +517,15 @@ impl AgentSessionEventSink for TaskSessionEventSink {
 }
 
 impl TaskSessionEventSink {
-    /// Records a Codex interaction in the target child's history; returns whether
-    /// it did, so the caller republishes the catalog.
+    /// Records a Codex interaction in the target child's history.
     pub(super) fn append_codex_subagent_interaction(
         &self,
         subagent: &crate::agent::events::AgentSubagent,
         actor: &str,
         now: &str,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<(), RuntimeError> {
         if subagent.activity != "interacted" {
-            return Ok(false);
+            return Ok(());
         }
         let record = match self
             .mutations
@@ -536,10 +536,10 @@ impl TaskSessionEventSink {
             // Legacy codex-acp clients flatten subagents into Tool calls and never
             // announce a native child. Keep the parent activity without inventing
             // child history, and do not terminate the otherwise healthy prompt.
-            Err(RuntimeError::TaskNotFound(_)) => return Ok(false),
+            Err(RuntimeError::TaskNotFound(_)) => return Ok(()),
             Err(error) => return Err(error),
         };
-        self.publish_subagent_history(self.mutations.store().append_subagent_message(
+        self.mutations.store().append_subagent_message(
             &self.task_id,
             &record.native_session_id,
             codex_subagent_notice(
@@ -552,8 +552,8 @@ impl TaskSessionEventSink {
                 now,
             ),
             true,
-        )?);
-        Ok(true)
+        )?;
+        Ok(())
     }
 }
 
