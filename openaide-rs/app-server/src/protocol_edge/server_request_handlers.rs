@@ -206,11 +206,23 @@ impl RpcGateway {
 
     pub fn expire_inactive_clients(&mut self, now: AppServerTime) -> Vec<ClientExpiryOutcome> {
         let batch = self.client_hub.expire_inactive_clients(now);
+        // A transport close logs its own grace entry; silence is only seen here.
+        for (client_instance_id, expires_at) in &batch.entered_reconnect_grace {
+            crate::logging::info(
+                "client_reconnect_grace_entered",
+                serde_json::json!({
+                    "client_instance_id": client_instance_id,
+                    "reason": "heartbeat_timeout",
+                    "grace_ms": expires_at.0.saturating_sub(now.0),
+                }),
+            );
+        }
         if !batch.expired.is_empty() {
             crate::logging::info(
                 "client_liveness_expired",
                 serde_json::json!({
                     "client_count": batch.expired.len(),
+                    "client_instance_ids": batch.expired,
                     "last_client_expired": batch.last_client_expired,
                 }),
             );

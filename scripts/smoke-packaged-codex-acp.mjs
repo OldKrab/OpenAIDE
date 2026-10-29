@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { smokeCodexSessionRecovery } from "./smoke-codex-session-recovery.mjs";
@@ -185,6 +185,9 @@ try {
     console.log("Skipped recovery wire fixture on Windows: POSIX fixture launcher required.");
   }
 } catch (error) {
+  // The diagnostic log is metadata-only, and it records lifecycle events that
+  // stderr does not, such as a client entering reconnect grace.
+  console.error(`App Server log tail:\n${await appServerLogTail()}`);
   throw new Error(`${error.message}; App Server stderr: ${stderr.slice(0, 2_000)}`);
 } finally {
   clearInterval(heartbeat);
@@ -194,4 +197,13 @@ try {
   // Windows releases handles of the terminated process tree asynchronously, so
   // the first removal can still find the temporary state locked.
   await rm(stateParent, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
+
+async function appServerLogTail() {
+  const logPath = path.join(stateRoot, "diagnostics", "logs", "openaide-app-server.jsonl");
+  try {
+    return (await readFile(logPath, "utf8")).trimEnd().split("\n").slice(-80).join("\n");
+  } catch (error) {
+    return `unavailable (${error.code ?? "read failed"})`;
+  }
 }
