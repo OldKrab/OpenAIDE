@@ -125,12 +125,27 @@ test("follows released-form Subagents and stops a running one", async ({ page })
   await page.keyboard.press("Escape");
 });
 
-/** On a phone the Agent switcher waits in the Task bar's More row. */
+/** Below this width the Task bar is compact (`mobile-chat.css`). */
+const COMPACT_TASK_BAR_WIDTH = 760;
+
+/**
+ * On a phone the Agent switcher waits in the Task bar's More row, which stays open
+ * across resizes. The row is opened only when it is closed: role names match as
+ * substrings, so "More Task actions" also finds the open row's "Hide more Task
+ * actions", and clicking it closed the row. The layout follows the viewport rather
+ * than a visibility check made while a resize may still be settling.
+ */
 async function openMoreOnPhone(page) {
   const switcher = page.getByRole("button", { name: /^Switch agent\. Currently viewing/ });
-  const more = page.getByRole("button", { name: "More Task actions" });
-  await expect(switcher.or(more).first()).toBeVisible();
-  if (!(await switcher.isVisible())) await more.click();
+  if (page.viewportSize().width > COMPACT_TASK_BAR_WIDTH) {
+    await expect(switcher).toBeVisible();
+    return;
+  }
+  const more = page.getByRole("button", { name: "More Task actions", exact: true });
+  const hide = page.getByRole("button", { name: "Hide more Task actions", exact: true });
+  await expect(more.or(hide).first()).toBeVisible();
+  if (await more.isVisible()) await more.click();
+  await expect(switcher).toBeVisible();
 }
 
 async function selectHistory(page, name) {
