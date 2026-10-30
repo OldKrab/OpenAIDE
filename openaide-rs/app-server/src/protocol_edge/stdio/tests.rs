@@ -3230,3 +3230,17 @@ fn wait_for_protocol_task_status(
     }
     panic!("task {task_id} did not reach {status}");
 }
+
+#[test]
+fn stdio_time_follows_the_wall_clock_and_never_repeats() {
+    // A long request: the wall clock moved 33 s while one message was handled.
+    let (first, next) = next_stdio_time(1_000, 1_000);
+    let (after_long_request, next) = next_stdio_time(next, 34_000);
+    assert_eq!(first, AppServerTime(1_000));
+    assert_eq!(after_long_request, AppServerTime(34_000));
+    // Two messages within one millisecond, or a clock stepped back, stay ordered.
+    let (same_ms, next) = next_stdio_time(next, 34_000);
+    let (stepped_back, _) = next_stdio_time(next, 20_000);
+    assert_eq!(same_ms, AppServerTime(34_001));
+    assert_eq!(stepped_back, AppServerTime(34_002));
+}
