@@ -158,6 +158,39 @@ fn stale_legacy_metadata_does_not_hide_identity_mismatch_or_journal_corruption()
 }
 
 #[test]
+fn refused_task_is_named_and_classified_without_exposing_its_content() {
+    let logs = crate::logging::capture_test_logs();
+    let root = tempfile::tempdir().unwrap();
+    let source = install_legacy_fixture(root.path());
+    let path = source.join("task.json");
+    let mut task: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    task.as_object_mut().unwrap().remove("lifecycle");
+    let unreadable = serde_json::to_vec(&task).unwrap();
+    std::fs::write(&path, &unreadable).unwrap();
+
+    let error = Store::open(root.path().to_path_buf())
+        .err()
+        .expect("a record without a lifecycle cannot be imported");
+
+    assert!(error
+        .to_string()
+        .contains("failed for task-legacy: invalid Task metadata"));
+    assert_eq!(std::fs::read(&path).unwrap(), unreadable);
+    let finished = logs
+        .snapshot()
+        .into_iter()
+        .find(|entry| entry["fields"]["failure"] == "invalid Task metadata")
+        .expect("the terminal event classifies the refusal");
+    assert_eq!(finished["event"], "legacy_task_migration_finished");
+    assert_eq!(finished["level"], "error");
+    assert_eq!(finished["fields"]["task_id"], "task-legacy");
+    assert_eq!(finished["fields"]["outcome"], "original_preserved");
+    assert_eq!(finished["fields"]["decode"]["category"], "Data");
+    assert!(!finished.to_string().contains("Keep this history"));
+}
+
+#[test]
 fn interrupted_legacy_import_finishes_once_and_reset_cannot_resurrect_its_source() {
     let root = tempfile::tempdir().unwrap();
     let source = install_legacy_fixture(root.path());
