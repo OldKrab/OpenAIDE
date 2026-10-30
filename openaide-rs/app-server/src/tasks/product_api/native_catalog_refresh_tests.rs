@@ -5,8 +5,75 @@ use crate::agent::AgentProbeRequest;
 use crate::protocol::model::{
     AgentAuthMethodSummary, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus,
 };
-use crate::tasks::product_api::list_sessions::MAX_CONCURRENT_AGENT_LISTINGS;
+use crate::tasks::product_api::list_sessions::{
+    NativeCatalogRefreshCoordinator, MAX_CONCURRENT_AGENT_LISTINGS,
+};
 use openaide_app_server_protocol::snapshot::TaskNavigationRefreshState;
+use std::time::Duration;
+
+// timing: data — intervals compared against the measured age, never waited on.
+const ALWAYS_STALE: Duration = Duration::ZERO;
+const NEVER_STALE: Duration = Duration::MAX; // timing: data
+
+#[test]
+fn periodic_refresh_counts_any_run_started_since_the_last_one() {
+    let coordinator = NativeCatalogRefreshCoordinator::default();
+    assert!(coordinator.periodic_refresh_due(NEVER_STALE));
+
+    coordinator.record_run_started();
+
+    assert!(!coordinator.periodic_refresh_due(NEVER_STALE));
+    assert!(coordinator.periodic_refresh_due(ALWAYS_STALE));
+}
+
+#[test]
+fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    store
+        .write_task(&task_record(
+            "task-1",
+            temp.path().join("workspace").to_str().unwrap(),
+        ))
+        .unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let agent = Arc::new(MixedCatalogRuntime {
+        authenticated: AtomicBool::new(true),
+        listing_gate: Some(gate.clone()),
+        listing_entered: Some(entered_tx),
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        notifier,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+    entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
+    api.request_due_native_session_catalog_refresh(ALWAYS_STALE);
+
+    assert!(!api.native_catalog_refresh.trailing_run_requested());
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+    loop {
+        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
+        if matches!(
+            update.kind,
+            TaskUpdateKind::NavigationRefreshStateChanged {
+                refresh: TaskNavigationRefreshState::Idle
+                    | TaskNavigationRefreshState::Failed { .. }
+            }
+        ) {
+            break;
+        }
+    }
+}
 
 #[test]
 fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {

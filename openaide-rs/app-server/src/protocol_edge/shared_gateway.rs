@@ -144,6 +144,13 @@ impl SharedRpcGateway {
         workflow.request_native_session_catalog_refresh();
     }
 
+    /// The coordinator owns the clock, so every kind of run resets the periodic refresh.
+    /// Asked every second, and nothing here can be pending for a link, so it stays silent.
+    pub fn request_due_native_session_catalog_refresh(&self, interval: Duration) {
+        let workflow = self.lock_quiet().agent_list_sessions.clone();
+        workflow.request_due_native_session_catalog_refresh(interval);
+    }
+
     /// Delegates periodic storage work without retaining the protocol lock.
     pub fn request_task_storage_maintenance(&self) {
         let workflow = self.lock().task_storage_maintenance.clone();

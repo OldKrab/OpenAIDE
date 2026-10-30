@@ -15,17 +15,10 @@ use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
 use super::{
-    expire_local_http_clients, native_session_catalog_refresh_due,
-    publish_local_http_probe_endpoint, publish_local_http_probe_listener,
-    request_shutdown_after_last_client, task_storage_maintenance_due,
+    expire_local_http_clients, publish_local_http_probe_endpoint,
+    publish_local_http_probe_listener, request_shutdown_after_last_client,
+    task_storage_maintenance_due,
 };
-
-#[test]
-fn native_session_catalog_periodic_refresh_is_due_after_five_minutes() {
-    let due = |seconds| native_session_catalog_refresh_due(Duration::from_secs(seconds)); // timing: data
-    assert!(!due(299));
-    assert!(due(300));
-}
 
 #[test]
 fn task_storage_maintenance_is_due_every_six_hours() {
