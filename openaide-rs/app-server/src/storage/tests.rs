@@ -474,6 +474,51 @@ fn pages_hydrate_missing_tool_file_summaries_from_artifacts() {
 }
 
 #[test]
+fn a_tail_page_hydrates_many_tool_summaries_from_one_projection_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_many_tool_summaries";
+    ensure_task(&store, task_id);
+    let messages = (1..=20)
+        .map(|sequence| {
+            let mut message = activity_message_with_edit_details(&format!("activity_{sequence}"));
+            store
+                .persist_tool_artifacts(task_id, &mut message.message)
+                .unwrap();
+            let NormalizedMessage::Activity { steps, .. } = &mut message.message else {
+                panic!("expected activity");
+            };
+            let ActivityStep::Tool { input_summary, .. } = &mut steps[0] else {
+                panic!("expected tool step");
+            };
+            *input_summary = None;
+            StoredMessage {
+                sequence,
+                chat: message,
+            }
+        })
+        .collect::<Vec<_>>();
+    write_stored_messages(&store, task_id, &messages);
+
+    let clones_before = store.task_journal().projection_clone_count_for_test();
+    let page = store.tail_page(task_id, 20).unwrap();
+
+    assert_eq!(page.items.len(), 20);
+    let NormalizedMessage::Activity { steps, .. } = &page.items[19].message else {
+        panic!("expected activity");
+    };
+    let ActivityStep::Tool { input_summary, .. } = &steps[0] else {
+        panic!("expected tool step");
+    };
+    assert_eq!(input_summary.as_deref(), Some("chat.ts"));
+    assert_eq!(
+        store.task_journal().projection_clone_count_for_test() - clones_before,
+        1,
+        "each Tool row must not clone the whole Task projection"
+    );
+}
+
+#[test]
 fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();

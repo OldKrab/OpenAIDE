@@ -61,6 +61,8 @@ struct StoreInner {
     failure_subscribers: Arc<Mutex<Vec<mpsc::Sender<TaskStorageFailure>>>>,
     fatal_events: Mutex<Option<Receiver<TaskStorageFatalFailure>>>,
     faults: Arc<frame::FaultInjector>,
+    #[cfg(test)]
+    projection_clones: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Clone)]
@@ -202,6 +204,8 @@ impl TaskJournalStore {
                     failure_subscribers,
                     fatal_events: Mutex::new(Some(fatal_events)),
                     faults,
+                    #[cfg(test)]
+                    projection_clones: std::sync::atomic::AtomicUsize::new(0),
                 }),
             },
             commits,
@@ -252,6 +256,13 @@ impl TaskJournalStore {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn projection_clone_count_for_test(&self) -> usize {
+        self.inner
+            .projection_clones
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Returns the number of durability sync system calls exercised by this
     /// store instance. Benchmarks use observed I/O instead of inferred counts.
     pub fn durability_sync_calls(&self) -> u64 {
@@ -259,6 +270,10 @@ impl TaskJournalStore {
     }
 
     pub fn load(&self, task_id: &str) -> Result<TaskProjection, RuntimeError> {
+        #[cfg(test)]
+        self.inner
+            .projection_clones
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         validate_task_id(task_id)?;
         recovery::ensure_task_loaded(
             &self.inner.tasks_root,
@@ -288,6 +303,17 @@ impl TaskJournalStore {
         task_id: &str,
         inspect: impl FnOnce(&TaskRecord) -> T,
     ) -> Result<T, RuntimeError> {
+        self.inspect_projection(task_id, |projection| inspect(&projection.task))
+    }
+
+    /// Reads a committed projection in place. Chat history makes a clone expensive on a long
+    /// Task, and these reads can run once per Tool row of a Chat page. The callback runs under a
+    /// read lock and must not call back into storage.
+    fn inspect_projection<T>(
+        &self,
+        task_id: &str,
+        inspect: impl FnOnce(&TaskProjection) -> T,
+    ) -> Result<T, RuntimeError> {
         validate_task_id(task_id)?;
         recovery::ensure_task_loaded(
             &self.inner.tasks_root,
@@ -303,7 +329,7 @@ impl TaskJournalStore {
             .expect("Task journal projections poisoned")
             .get(task_id)
             .map(|task| match task {
-                RecoveredTask::Available { projection, .. } => Ok(inspect(&projection.task)),
+                RecoveredTask::Available { projection, .. } => Ok(inspect(projection)),
                 RecoveredTask::Unavailable { error } => Err(RuntimeError::Storage(error.clone())),
             })
             .transpose()?
@@ -349,16 +375,13 @@ impl TaskJournalStore {
     ) -> Result<ToolArtifactProjection, RuntimeError> {
         validate_task_id(task_id)?;
         artifact::validate_artifact_id(artifact_id)?;
-        let projection = self.load(task_id)?;
-        let committed_head = {
-            projection
-                .artifact_heads
-                .get(artifact_id)
-                .copied()
-                .ok_or_else(|| {
-                    RuntimeError::Storage(format!("Tool artifact is not committed: {artifact_id}"))
-                })?
-        };
+        let committed_head = self
+            .inspect_projection(task_id, |projection| {
+                projection.artifact_heads.get(artifact_id).copied()
+            })?
+            .ok_or_else(|| {
+                RuntimeError::Storage(format!("Tool artifact is not committed: {artifact_id}"))
+            })?;
         let artifact_key = (task_id.to_string(), artifact_id.to_string());
         let mut heads = self
             .inner
