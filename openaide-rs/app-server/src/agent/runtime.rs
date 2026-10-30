@@ -532,6 +532,14 @@ pub trait AgentSessionEventSink: Send + Sync {
         Ok(())
     }
 
+    /// The identity the Task stores for a child, when it has one.
+    fn stored_subagent_identity(
+        &self,
+        _native_session_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentNativeSubagentStoredIdentity>, RuntimeError> {
+        Ok(None)
+    }
+
     fn subagent_session_update(
         &self,
         _native_session_id: &str,

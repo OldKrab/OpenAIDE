@@ -39,6 +39,9 @@ pub(super) struct ChildDelegation {
     launch_id: Option<String>,
     /// The launch row that is still in progress.
     open_launch: Option<String>,
+    /// The child was launched on an earlier connection, whose launch id this
+    /// one never saw, so every message to it is a later message.
+    reconnected: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +92,15 @@ impl ChildDelegation {
         }
     }
 
+    /// A child the Task stores from an earlier connection.
+    pub(super) fn reconnected(description: Option<String>) -> Self {
+        Self {
+            description,
+            reconnected: true,
+            ..Self::default()
+        }
+    }
+
     /// The row for one session message between this child and its parent,
     /// seen on the parent's session. `outgoing` means the parent sent it.
     /// `Err` carries the reason to ignore it, for logs.
@@ -103,7 +115,7 @@ impl ChildDelegation {
             if self.launch_id.as_deref() == Some(message_id) {
                 return Err("repeated_launch");
             }
-            if self.launch_id.is_none() {
+            if self.launch_id.is_none() && !self.reconnected {
                 self.launch_id = Some(message_id.to_string());
                 self.open_launch = Some(message_id.to_string());
                 let title = self.description.as_deref().unwrap_or(name);
@@ -123,6 +135,10 @@ impl ChildDelegation {
             });
         }
         if let Some(launch_id) = message_id.strip_suffix(REPLY_SUFFIX) {
+            // A Tool update for a row this connection never saw would rebuild
+            // the saved row from the update alone. A foreground launch holds
+            // its parent's turn open and a load needs an idle Task, so a live
+            // reply to an earlier connection's launch is not expected.
             if self.launch_id.as_deref() != Some(launch_id) {
                 return Err("reply_without_launch");
             }
@@ -323,8 +339,8 @@ pub(super) fn released_state(
 
 /// Rebuilds the loaded root session's delegation rows during `session/load`.
 /// The replay sees only root updates: the children the root announced and its
-/// own session messages. A grandchild's rows belong to a child history, which
-/// load replay does not project.
+/// own session messages. A grandchild's rows belong to a child's stored
+/// history, which a load keeps.
 #[derive(Default)]
 pub(super) struct ReplayDelegations {
     children: std::collections::HashMap<String, (String, ChildDelegation)>,

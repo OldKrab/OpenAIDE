@@ -3,6 +3,7 @@
 use crate::agent::events::{
     AgentEvent, AgentNativeSubagentCapabilities, AgentNativeSubagentIdentityUpdate,
     AgentNativeSubagentSpawned, AgentNativeSubagentState, AgentNativeSubagentStateUpdate,
+    AgentNativeSubagentStoredIdentity,
 };
 use crate::agent::AgentSessionEventSink;
 use crate::protocol::model::NormalizedMessage;
@@ -183,6 +184,30 @@ fn released_identity_patches_and_reannouncement_update_the_stored_child() {
     assert_eq!(record.delegated_task, "");
     assert!(record.capabilities.cancel);
     assert_eq!(store.subagent_catalog("task_1").unwrap().entries.len(), 1);
+}
+
+#[test]
+fn a_new_connection_reads_the_identity_the_task_stores_for_a_child() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+
+    assert_eq!(sink.stored_subagent_identity("child_1").unwrap(), None);
+
+    sink.subagent_spawned(released_spawn("Explore", Some("Look around"), true))
+        .unwrap();
+    assert_eq!(
+        sink.stored_subagent_identity("child_1").unwrap(),
+        Some(AgentNativeSubagentStoredIdentity {
+            name: "Explore".to_string(),
+            delegated_task: Some("Look around".to_string()),
+        })
+    );
 }
 
 /// A sink whose committed Subagent changes are published through the store.

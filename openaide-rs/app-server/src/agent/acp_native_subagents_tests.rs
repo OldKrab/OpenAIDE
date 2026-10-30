@@ -9,6 +9,8 @@ pub(super) struct CaptureSink {
     pub(super) identities: Mutex<Vec<crate::agent::events::AgentNativeSubagentIdentityUpdate>>,
     /// What a root session projection emitted.
     pub(super) root_updates: Mutex<Vec<AgentEvent>>,
+    /// The child the Task stores from an earlier connection.
+    pub(super) stored: Mutex<Option<crate::agent::events::AgentNativeSubagentStoredIdentity>>,
 }
 
 impl AgentSessionEventSink for CaptureSink {
@@ -38,6 +40,13 @@ impl AgentSessionEventSink for CaptureSink {
         _catalog: crate::protocol::model::AgentCommandsCatalog,
     ) -> Result<(), RuntimeError> {
         Ok(())
+    }
+
+    fn stored_subagent_identity(
+        &self,
+        _native_session_id: &str,
+    ) -> Result<Option<crate::agent::events::AgentNativeSubagentStoredIdentity>, RuntimeError> {
+        Ok(self.stored.lock().unwrap().clone())
     }
 
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {

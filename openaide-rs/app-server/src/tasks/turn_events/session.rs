@@ -1,6 +1,6 @@
 use crate::agent::events::{
     AgentEvent, AgentNativeSubagentSpawned, AgentNativeSubagentState,
-    AgentNativeSubagentStateUpdate,
+    AgentNativeSubagentStateUpdate, AgentNativeSubagentStoredIdentity,
 };
 use crate::agent::{
     AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate, TurnCancellation,
@@ -146,6 +146,24 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             }
         }
         Ok(())
+    }
+
+    fn stored_subagent_identity(
+        &self,
+        native_session_id: &str,
+    ) -> Result<Option<AgentNativeSubagentStoredIdentity>, RuntimeError> {
+        match self
+            .mutations
+            .store()
+            .subagent_record_by_native(&self.task_id, native_session_id)
+        {
+            Ok(record) => Ok(Some(AgentNativeSubagentStoredIdentity {
+                name: record.name,
+                delegated_task: Some(record.delegated_task).filter(|task| !task.is_empty()),
+            })),
+            Err(RuntimeError::TaskNotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {
