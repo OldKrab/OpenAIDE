@@ -136,6 +136,14 @@ pub struct AgentNativeSubagentIdentityUpdate {
     pub cancel: Option<bool>,
 }
 
+/// What the Task already stores about a child. A new connection has no route
+/// for it, and an Agent reconnecting a child may omit its labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNativeSubagentStoredIdentity {
+    pub name: String,
+    pub delegated_task: Option<String>,
+}
+
 /// Recognized Agent metadata learned after the announcement, such as the model
 /// a child resolved to. Each detail replaces the stored one with the same label.
 #[derive(Debug, Clone, PartialEq, Eq)]

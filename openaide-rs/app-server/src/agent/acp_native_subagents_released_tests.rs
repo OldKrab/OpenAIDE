@@ -5,7 +5,8 @@ use super::super::{AcpNativeSubagentRouter, RoutedSessionNotification};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
 use crate::agent::acp_schema::SessionNotification;
 use crate::agent::events::{
-    AgentEvent, AgentNativeSubagentState, AgentToolCall, AgentToolCallStatus,
+    AgentEvent, AgentNativeSubagentState, AgentNativeSubagentStoredIdentity, AgentToolCall,
+    AgentToolCallStatus,
 };
 
 fn route(
@@ -655,4 +656,88 @@ fn the_agent_tool_call_shown_for_a_permission_keeps_its_row() {
     assert_eq!(capture.root_updates.lock().unwrap().len(), 1);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].title, "Agent call");
+}
+
+/// A connection that has not seen the child, whose Task stores it from an
+/// earlier connection: the state after `session/load` or `session/resume`.
+fn reconnected_capture() -> Arc<CaptureSink> {
+    let capture = Arc::new(CaptureSink::default());
+    *capture.stored.lock().unwrap() = Some(AgentNativeSubagentStoredIdentity {
+        name: "general-purpose".to_string(),
+        delegated_task: Some("Fix the build".to_string()),
+    });
+    capture
+}
+
+#[test]
+fn a_state_report_after_load_keeps_the_stored_childs_identity() {
+    let capture = reconnected_capture();
+    let router = claude_router(&capture);
+
+    // The adapter's `currentStates`: the child's state and nothing else.
+    route(&router, "root", idle(Some("end_turn"))).unwrap();
+
+    let spawns = capture.spawns.lock().unwrap();
+    assert_eq!(spawns.len(), 1);
+    assert_eq!(spawns[0].name, "general-purpose");
+    assert_eq!(spawns[0].delegated_task.as_deref(), Some("Fix the build"));
+}
+
+#[test]
+fn a_new_connection_still_applies_what_the_agent_reports_about_a_stored_child() {
+    let capture = reconnected_capture();
+    let router = claude_router(&capture);
+
+    route(
+        &router,
+        "root",
+        subagent_update(serde_json::json!({ "title": "reviewer", "description": null })),
+    )
+    .unwrap();
+
+    let spawns = capture.spawns.lock().unwrap();
+    assert_eq!(spawns[0].name, "reviewer");
+    assert_eq!(spawns[0].delegated_task, None);
+}
+
+#[test]
+fn a_message_to_a_stored_child_is_a_later_message_and_not_its_launch() {
+    let capture = reconnected_capture();
+    let router = claude_router(&capture);
+    let root = root_projection(&capture);
+    route(&router, "root", idle(Some("end_turn"))).unwrap();
+
+    let send = message("toolu_2", Some("root"), Some("child"), "Try again");
+    assert!(route_through(&router, &root, "root", send));
+    route_through(
+        &router,
+        &root,
+        "root",
+        message("toolu_h1", Some("child"), Some("root"), "Report"),
+    );
+
+    let rows = root_rows(&capture);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].title, "Message to general-purpose");
+    assert_eq!(rows[0].status, AgentToolCallStatus::Completed);
+    assert_eq!(rows[1].title, "Message from general-purpose");
+}
+
+#[test]
+fn a_reply_to_a_launch_this_connection_never_saw_leaves_its_saved_row_alone() {
+    let capture = reconnected_capture();
+    let router = claude_router(&capture);
+    let root = root_projection(&capture);
+    route(&router, "root", idle(Some("end_turn"))).unwrap();
+
+    // A Tool update for an id the projection has not seen would rebuild the
+    // saved row from the update alone and lose its title.
+    assert!(!route_through(
+        &router,
+        &root,
+        "root",
+        message("toolu_1:reply", Some("child"), Some("root"), "Done."),
+    ));
+
+    assert!(capture.root_updates.lock().unwrap().is_empty());
 }

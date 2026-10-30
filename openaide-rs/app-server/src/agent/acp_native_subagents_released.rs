@@ -251,8 +251,8 @@ impl AcpNativeSubagentRouter {
     }
 
     /// The first update for a child this connection has not routed yet. A
-    /// child the Task already stores, for example after a resume, reconciles
-    /// to its stored Subagent on the Task side.
+    /// child the Task already stores, for example after a load or resume,
+    /// reconciles to its stored Subagent on the Task side.
     fn announce_released(
         &self,
         parent_session_id: &str,
@@ -260,8 +260,16 @@ impl AcpNativeSubagentRouter {
         update: &SubagentUpdate,
     ) -> Result<(), RuntimeError> {
         let (root_session_id, root_sink) = self.root_for_parent(parent_session_id)?;
-        let name = subagent_name(update.title.value().map(String::as_str));
-        let delegated_task = description_patch(&update.description).flatten();
+        // A stored child keeps what this update omits: after `session/load` the
+        // Agent reports each child's state alone.
+        let stored = root_sink.stored_subagent_identity(child_session_id)?;
+        let reconnected = stored.is_some();
+        let name = match (&update.title, &stored) {
+            (MaybeUndefined::Undefined, Some(stored)) => stored.name.clone(),
+            (title, _) => subagent_name(title.value().map(String::as_str)),
+        };
+        let delegated_task = description_patch(&update.description)
+            .unwrap_or_else(|| stored.and_then(|stored| stored.delegated_task));
         let cancel = update
             .capabilities
             .value()
@@ -289,7 +297,11 @@ impl AcpNativeSubagentRouter {
         });
         let projection =
             LivePromptProjection::for_native_subagent(&self.agent_id, event_sink, false);
-        let delegation = ChildDelegation::new(delegated_task.clone());
+        let delegation = if reconnected {
+            ChildDelegation::reconnected(delegated_task.clone())
+        } else {
+            ChildDelegation::new(delegated_task.clone())
+        };
         let mut state = self.inner.lock().expect("ACP Subagent router poisoned");
         if !state.negotiated {
             return Err(RuntimeError::InvalidParams(
@@ -304,6 +316,7 @@ impl AcpNativeSubagentRouter {
                 "parent_session_id": parent_session_id,
                 "subagent_session_id": child_session_id,
                 "cancel_capability": cancel,
+                "reconnected": reconnected,
             }),
         );
         state
