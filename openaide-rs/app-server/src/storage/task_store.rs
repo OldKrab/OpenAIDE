@@ -34,7 +34,9 @@ impl Store {
     }
 
     pub fn read_task(&self, task_id: &str) -> Result<TaskRecord, RuntimeError> {
-        let task = self.task_journal().load(task_id)?.task;
+        let task = self
+            .task_journal()
+            .inspect_task_record(task_id, TaskRecord::clone)?;
         #[cfg(test)]
         self.run_after_task_read_hook_for_test();
         Ok(task)

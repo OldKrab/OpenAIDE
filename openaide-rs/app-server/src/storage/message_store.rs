@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use crate::agent::infer_saved_execute_presentation;
 use crate::chat_history::ChatHistoryPolicy;
 use crate::protocol::errors::RuntimeError;
@@ -13,12 +15,17 @@ use super::tool_artifacts::{
 };
 use super::Store;
 
+/// A Chat page is built under the protocol lock, so a slow one stalls every client's delivery.
+const SLOW_CHAT_PAGE: Duration = Duration::from_millis(100);
+
 #[cfg(test)]
 mod agent_append;
 #[cfg(test)]
 mod mutations;
 #[cfg(test)]
 mod replace;
+#[cfg(test)]
+mod slow_page_tests;
 
 #[cfg(test)]
 pub(crate) use agent_append::AgentMessageAppend;
@@ -178,12 +185,24 @@ impl Store {
         start: usize,
         end: usize,
     ) -> Result<MessagePage, RuntimeError> {
+        let started = Instant::now();
+        let mut artifact_reads = 0;
         let items = projection.messages[start..end]
             .iter()
             .map(|message| {
-                self.with_lightweight_tool_summaries(&projection.task.task_id, &message.chat)
+                self.with_lightweight_tool_summaries(
+                    &projection.task.task_id,
+                    &message.chat,
+                    &mut artifact_reads,
+                )
             })
             .collect::<Vec<_>>();
+        log_slow_chat_page(
+            &projection.task.task_id,
+            items.len(),
+            artifact_reads,
+            started.elapsed(),
+        );
         Ok(MessagePage {
             task_id: projection.task.task_id.clone(),
             start_cursor: items.first().map(|message| message.cursor.clone()),
@@ -195,7 +214,12 @@ impl Store {
         })
     }
 
-    fn with_lightweight_tool_summaries(&self, task_id: &str, message: &ChatMessage) -> ChatMessage {
+    fn with_lightweight_tool_summaries(
+        &self,
+        task_id: &str,
+        message: &ChatMessage,
+        artifact_reads: &mut usize,
+    ) -> ChatMessage {
         let mut message = message.clone();
         let NormalizedMessage::Activity { steps, .. } = &mut message.message else {
             return message;
@@ -251,6 +275,7 @@ impl Store {
             let Some(artifact_id) = detail_artifact_id.as_deref() else {
                 continue;
             };
+            *artifact_reads += 1;
             if let Ok(details) = self.read_tool_artifact(task_id, artifact_id) {
                 if needs_summary {
                     if let Some(summary) = lightweight_detail_summary(&details) {
@@ -270,6 +295,22 @@ impl Store {
         }
         message
     }
+}
+
+fn log_slow_chat_page(task_id: &str, item_count: usize, artifact_reads: usize, elapsed: Duration) {
+    if elapsed < SLOW_CHAT_PAGE {
+        return;
+    }
+    crate::logging::info(
+        "chat_page_build_slow",
+        serde_json::json!({
+            "operation": "chat_page_build",
+            "task_id": task_id,
+            "item_count": item_count,
+            "artifact_read_count": artifact_reads,
+            "duration_ms": elapsed.as_millis() as u64,
+        }),
+    );
 }
 
 pub(crate) fn advance_message_meta(projection: &mut TaskProjection, minimum_updated_at: u128) {
