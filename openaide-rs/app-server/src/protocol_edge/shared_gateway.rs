@@ -588,8 +588,12 @@ impl SharedRpcGateway {
         connection_id: &ConnectionId,
         now: AppServerTime,
     ) -> bool {
-        self.lock_quiet()
-            .observe_connection_activity(connection_id, now)
+        let wait_started_at = Instant::now();
+        let mut gateway = self.lock_quiet();
+        // Every link takes this before writing a frame, so a slow wait here is latency
+        // on the server-to-client path that no request duration shows.
+        self.log_slow_lock_wait(connection_id, "delivery", None, wait_started_at.elapsed());
+        gateway.observe_connection_activity(connection_id, now)
     }
 
     /// The Task attention cursor this connection would be answered with now.
@@ -639,9 +643,6 @@ impl SharedRpcGateway {
         message: &InboundProtocolMessage,
         wait: Duration,
     ) {
-        if wait < self.slow_lock_wait {
-            return;
-        }
         let (kind, method) = match message {
             InboundProtocolMessage::ClientRequest { method, .. } => ("request", Some(method)),
             InboundProtocolMessage::ClientNotification { method, .. } => {
@@ -649,6 +650,19 @@ impl SharedRpcGateway {
             }
             InboundProtocolMessage::ClientResponse { .. } => ("response", None),
         };
+        self.log_slow_lock_wait(connection_id, kind, method, wait);
+    }
+
+    fn log_slow_lock_wait(
+        &self,
+        connection_id: &ConnectionId,
+        kind: &'static str,
+        method: Option<&String>,
+        wait: Duration,
+    ) {
+        if wait < self.slow_lock_wait {
+            return;
+        }
         crate::logging::info(
             "gateway_lock_wait_slow",
             json!({

@@ -102,6 +102,7 @@ impl NativeSessionCatalog {
         scan_generation: Option<u64>,
     ) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
+        let mut changed = false;
         for observation in observations {
             if scan_generation
                 .is_some_and(|generation| state.newer_than(&observation.reference, generation))
@@ -126,7 +127,10 @@ impl NativeSessionCatalog {
                 }
                 // Project ownership can become more specific when a parent or
                 // child Project is added after this session was first observed.
-                existing.project_id = project_id.to_string();
+                if existing.project_id != project_id {
+                    existing.project_id = project_id.to_string();
+                    changed = true;
+                }
                 let advances_activity = observation
                     .last_activity
                     .as_deref()
@@ -148,11 +152,14 @@ impl NativeSessionCatalog {
                     if observation.title.is_some() {
                         existing.observation.title = observation.title;
                     }
+                    changed = true;
                 } else if existing.observation.title.is_none() && observation.title.is_some() {
                     existing.observation.title = observation.title;
+                    changed = true;
                 }
                 continue;
             }
+            changed = true;
             state.entries.push(NativeSessionCatalogEntry {
                 project_id: project_id.to_string(),
                 workspace_root: workspace_root.to_string(),
@@ -162,7 +169,12 @@ impl NativeSessionCatalog {
                 pinned: false,
             });
         }
-        atomic::write_json(&catalog_path(&self.store), &*state)
+        // A refresh re-lists sessions that rarely change, and this write holds the catalog
+        // lock across a whole-file fsync that Navigation projections would queue behind.
+        if changed {
+            atomic::write_json(&catalog_path(&self.store), &*state)?;
+        }
+        Ok(())
     }
 
     /// Persists the authoritative identity returned by `session/fork` without
@@ -286,6 +298,18 @@ impl NativeSessionCatalog {
             .iter()
             .find(|entry| &entry.observation.reference == reference)
             .cloned()
+    }
+
+    /// Reads one Navigation section's rows under a single catalog lock. A projection runs
+    /// under the protocol lock, so locking per row would let page commits stall every client.
+    pub(crate) fn section_entries(&self, archived: bool) -> Vec<NativeSessionCatalogEntry> {
+        let state = self.state.lock().expect("native session catalog poisoned");
+        state
+            .entries
+            .iter()
+            .filter(|entry| state.archived.contains(&entry.observation.reference) == archived)
+            .cloned()
+            .collect()
     }
 
     /// Returns whether OpenAIDE locally hides this Agent-owned session.
