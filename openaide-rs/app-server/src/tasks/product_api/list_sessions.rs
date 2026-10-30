@@ -4,7 +4,7 @@ use openaide_app_server_protocol::agent::{
 use openaide_app_server_protocol::errors::ProtocolError;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
@@ -78,6 +78,7 @@ struct NativeCatalogRefreshState {
     project_targets: HashMap<String, usize>,
     running: bool,
     trailing_run_requested: bool,
+    last_run_started_at: Option<Instant>,
 }
 
 impl NativeCatalogRefreshCoordinator {
@@ -129,6 +130,35 @@ impl NativeCatalogRefreshCoordinator {
         result
     }
 
+    /// Whether a periodic refresh would add anything. Every run counts, not only periodic
+    /// ones: a run started for a returning client already satisfies a timer that came due
+    /// while nobody was subscribed.
+    pub(super) fn periodic_refresh_due(&self, interval: Duration) -> bool {
+        let state = self
+            .state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned");
+        !state.running
+            && state
+                .last_run_started_at
+                .is_none_or(|started_at| started_at.elapsed() >= interval)
+    }
+
+    pub(super) fn record_run_started(&self) {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .last_run_started_at = Some(Instant::now());
+    }
+
+    #[cfg(test)]
+    pub(super) fn trailing_run_requested(&self) -> bool {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .trailing_run_requested
+    }
+
     fn begin_ordinary_refresh(&self) {
         self.state
             .lock()
@@ -169,6 +199,13 @@ impl TaskProductApi {
         );
     }
 
+    /// Starts the periodic refresh unless a run is active or started within `interval`.
+    pub(crate) fn request_due_native_session_catalog_refresh(&self, interval: Duration) {
+        if self.native_catalog_refresh.periodic_refresh_due(interval) {
+            self.request_native_session_catalog_refresh();
+        }
+    }
+
     /// Coalesces catalog work while preserving one trailing refresh requested during a run.
     pub(crate) fn request_native_session_catalog_refresh(&self) {
         self.native_catalog_refresh.begin_ordinary_refresh();
@@ -194,6 +231,7 @@ impl TaskProductApi {
         std::thread::spawn(move || loop {
             let started_at = Instant::now();
             let operation_id = uuid::Uuid::new_v4().to_string();
+            api.native_catalog_refresh.record_run_started();
             crate::logging::info(
                 "native_session_catalog_refresh_started",
                 serde_json::json!({ "operation": "agent/list_sessions", "operation_id": operation_id, "attempt": 1 }),
@@ -660,6 +698,10 @@ impl AgentListSessionsWorkflow for TaskProductApi {
 
     fn request_native_session_catalog_refresh(&self) {
         TaskProductApi::request_native_session_catalog_refresh(self)
+    }
+
+    fn request_due_native_session_catalog_refresh(&self, interval: Duration) {
+        TaskProductApi::request_due_native_session_catalog_refresh(self, interval)
     }
 
     fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {

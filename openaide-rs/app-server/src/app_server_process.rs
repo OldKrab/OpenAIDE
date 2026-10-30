@@ -232,19 +232,14 @@ fn start_client_liveness_expirer(
 ) {
     gateway.request_task_storage_maintenance();
     thread::spawn(move || {
-        let mut last_native_catalog_refresh = Instant::now();
         let mut last_task_storage_maintenance = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(1));
             gateway.request_scheduled_queue_delivery();
-            // TODO: Share this clock with the refresh a Navigation subscription starts. After
-            // an idle period the timer is already due, so a returning client's refresh can
-            // queue an immediate trailing run of the whole catalog.
-            if gateway.has_task_navigation_subscribers()
-                && native_session_catalog_refresh_due(last_native_catalog_refresh.elapsed())
-            {
-                gateway.request_native_session_catalog_refresh();
-                last_native_catalog_refresh = Instant::now();
+            if gateway.has_task_navigation_subscribers() {
+                gateway.request_due_native_session_catalog_refresh(
+                    NATIVE_SESSION_CATALOG_REFRESH_INTERVAL,
+                );
             }
             if task_storage_maintenance_due(last_task_storage_maintenance.elapsed()) {
                 gateway.request_task_storage_maintenance();
@@ -288,10 +283,6 @@ fn request_shutdown_after_last_client(
         && shutdown_sender
             .send(ShutdownCause::LastClientExpired)
             .is_ok()
-}
-
-fn native_session_catalog_refresh_due(elapsed: Duration) -> bool {
-    elapsed >= NATIVE_SESSION_CATALOG_REFRESH_INTERVAL
 }
 
 fn task_storage_maintenance_due(elapsed: Duration) -> bool {

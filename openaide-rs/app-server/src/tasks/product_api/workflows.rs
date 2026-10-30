@@ -53,6 +53,11 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
     /// Requests coalesced background reconciliation without blocking the caller.
     fn request_native_session_catalog_refresh(&self) {}
 
+    /// Requests the periodic refresh unless the catalog is already fresh enough.
+    fn request_due_native_session_catalog_refresh(&self, _interval: std::time::Duration) {
+        self.request_native_session_catalog_refresh();
+    }
+
     fn request_native_session_catalog_load_more(
         &self,
         _project_id: &str,
