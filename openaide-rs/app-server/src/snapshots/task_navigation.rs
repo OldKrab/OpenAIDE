@@ -152,7 +152,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
         }
         if let Some(catalog) = &self.native_sessions {
             for entry in catalog
-                .entries()
+                .section_entries(matches!(section, TaskNavigationSection::Archive))
                 .into_iter()
                 .filter(|entry| {
                     enabled_agents
@@ -170,10 +170,6 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                         entry.observation.reference.agent_id.clone(),
                         entry.observation.reference.session_id.clone(),
                     ))
-                })
-                .filter(|entry| {
-                    catalog.is_archived(&entry.observation.reference)
-                        == matches!(section, TaskNavigationSection::Archive)
                 })
             {
                 let project_id = ProjectId::from(entry.project_id.clone());

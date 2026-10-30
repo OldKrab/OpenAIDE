@@ -47,6 +47,22 @@ fn uncontended_client_request_stays_quiet() {
     assert!(lock_waits_for(&logs.snapshot(), &connection_id).is_empty());
 }
 
+#[test]
+fn delivery_pump_reports_slow_protocol_lock_wait() {
+    let logs = crate::logging::capture_test_logs();
+    let connection_id = ConnectionId::new("conn-lock-wait-delivery");
+    let gateway = SharedRpcGateway::new(gateway()).with_slow_lock_wait(ALWAYS_SLOW);
+
+    gateway.observe_connection_activity(&connection_id, AppServerTime(1));
+
+    let waits = lock_waits_for(&logs.snapshot(), &connection_id);
+    let [fields] = waits.as_slice() else {
+        panic!("expected one slow lock wait, got {waits:?}");
+    };
+    assert_eq!(fields["transport_operation_kind"], json!("delivery"));
+    assert_eq!(fields["method"], Value::Null);
+}
+
 fn lock_waits_for(
     logs: &[serde_json::Value],
     connection_id: &ConnectionId,

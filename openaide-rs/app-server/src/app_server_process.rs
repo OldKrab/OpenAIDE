@@ -237,6 +237,9 @@ fn start_client_liveness_expirer(
         loop {
             thread::sleep(Duration::from_secs(1));
             gateway.request_scheduled_queue_delivery();
+            // TODO: Share this clock with the refresh a Navigation subscription starts. After
+            // an idle period the timer is already due, so a returning client's refresh can
+            // queue an immediate trailing run of the whole catalog.
             if gateway.has_task_navigation_subscribers()
                 && native_session_catalog_refresh_due(last_native_catalog_refresh.elapsed())
             {

@@ -301,3 +301,34 @@ fn a_late_listing_page_cannot_resurrect_removed_history_but_a_fresh_observation_
         "a later restored Agent session may be discovered normally"
     );
 }
+
+#[test]
+fn an_unchanged_page_leaves_the_catalog_file_alone() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let catalog = NativeSessionCatalog::open(store).unwrap();
+    let observation = |last_activity: &str| NativeSessionObservation {
+        reference: NativeSessionRef::new("codex", "session-1"),
+        title: Some("Listed".to_string()),
+        last_activity: Some(last_activity.to_string()),
+    };
+    let path = temp.path().join("native-sessions").join("catalog.json");
+    let record = |last_activity: &str| {
+        catalog
+            .record_page(
+                "project-1",
+                "/workspace/project",
+                vec![observation(last_activity)],
+            )
+            .unwrap();
+    };
+
+    record("2026-07-21T12:00:00Z");
+    // A marker the catalog would overwrite proves that no write happened.
+    std::fs::write(&path, "marker").unwrap();
+    record("2026-07-21T12:00:00Z");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "marker");
+
+    record("2026-07-21T13:00:00Z");
+    assert_ne!(std::fs::read_to_string(&path).unwrap(), "marker");
+}
