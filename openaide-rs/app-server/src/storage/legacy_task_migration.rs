@@ -20,34 +20,99 @@ pub(super) fn import(root: &Path, store: &TaskJournalStore) -> Result<(), Runtim
     if !source.try_exists()? {
         return Ok(());
     }
-    require_directory(&source)?;
+    require_directory(&source).map_err(|error| error.into_runtime(None))?;
     for entry in fs::read_dir(&source)? {
         let entry = entry?;
         let task_id = entry
             .file_name()
             .to_str()
             .map(str::to_owned)
-            .ok_or_else(|| migration_error("invalid Task directory identity"))?;
+            .ok_or_else(|| migration_error("invalid Task directory identity").into_runtime(None))?;
         super::id::validate_task_id(&task_id)
-            .map_err(|_| migration_error("invalid Task directory identity"))?;
-        require_directory(&entry.path())?;
+            .map_err(|_| migration_error("invalid Task directory identity").into_runtime(None))?;
+        require_directory(&entry.path()).map_err(|error| error.into_runtime(Some(&task_id)))?;
         let started = std::time::Instant::now();
         crate::logging::info(
             "legacy_task_migration_started",
             serde_json::json!({ "task_id": task_id }),
         );
         let result = import_task(root, &entry.path(), &task_id, store);
-        crate::logging::info(
-            "legacy_task_migration_finished",
-            serde_json::json!({
-                "task_id": task_id,
-                "outcome": if result.is_ok() { "imported" } else { "original_preserved" },
-                "duration_ms": started.elapsed().as_millis(),
-            }),
-        );
-        result?;
+        let duration_ms = started.elapsed().as_millis();
+        match result {
+            Ok(()) => crate::logging::info(
+                "legacy_task_migration_finished",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "outcome": "imported",
+                    "duration_ms": duration_ms,
+                }),
+            ),
+            Err(error) => {
+                crate::logging::error(
+                    "legacy_task_migration_finished",
+                    serde_json::json!({
+                        "task_id": task_id,
+                        "outcome": "original_preserved",
+                        "duration_ms": duration_ms,
+                        "failure": error.failure(),
+                        "decode": error.decode_position(),
+                    }),
+                );
+                return Err(error.into_runtime(Some(&task_id)));
+            }
+        }
     }
     Ok(())
+}
+
+/// Why one Task stayed unimported. A refusal's reason is a fixed phrase and its
+/// decode position is metadata, so both are safe for logs; decoder text is not.
+enum ImportError {
+    Refused {
+        reason: &'static str,
+        decode: Option<DecodePosition>,
+    },
+    Runtime(RuntimeError),
+}
+
+#[derive(serde::Serialize)]
+struct DecodePosition {
+    category: String,
+    line: usize,
+    column: usize,
+}
+
+impl<E: Into<RuntimeError>> From<E> for ImportError {
+    fn from(error: E) -> Self {
+        Self::Runtime(error.into())
+    }
+}
+
+impl ImportError {
+    fn failure(&self) -> &'static str {
+        match self {
+            Self::Refused { reason, .. } => reason,
+            Self::Runtime(error) => error.reason(),
+        }
+    }
+
+    fn decode_position(&self) -> Option<&DecodePosition> {
+        match self {
+            Self::Refused { decode, .. } => decode.as_ref(),
+            Self::Runtime(_) => None,
+        }
+    }
+
+    fn into_runtime(self, task_id: Option<&str>) -> RuntimeError {
+        let reason = match self {
+            Self::Refused { reason, .. } => reason,
+            Self::Runtime(error) => return error,
+        };
+        let subject = task_id.map_or(String::new(), |task_id| format!(" for {task_id}"));
+        RuntimeError::Storage(format!(
+            "Legacy Task migration failed{subject}: {reason}; original files were preserved"
+        ))
+    }
 }
 
 fn import_task(
@@ -55,7 +120,7 @@ fn import_task(
     source: &Path,
     task_id: &str,
     store: &TaskJournalStore,
-) -> Result<(), RuntimeError> {
+) -> Result<(), ImportError> {
     let projection = read_projection(source, task_id)?;
     let artifacts = read_artifacts(source, task_id)?;
     match store.load(task_id) {
@@ -104,7 +169,7 @@ fn import_task(
     Ok(())
 }
 
-fn read_projection(source: &Path, task_id: &str) -> Result<TaskProjection, RuntimeError> {
+fn read_projection(source: &Path, task_id: &str) -> Result<TaskProjection, ImportError> {
     let task: TaskRecord = decode(
         &required_file(&source.join("task.json"))?,
         "invalid Task metadata",
@@ -191,7 +256,7 @@ fn replay_journal(
     source: &Path,
     checkpoint: u64,
     messages: &mut Vec<StoredMessage>,
-) -> Result<(), RuntimeError> {
+) -> Result<(), ImportError> {
     let Some(bytes) = optional_file(&source.join("message_journal.jsonl"))? else {
         return Ok(());
     };
@@ -249,7 +314,7 @@ struct LegacyArtifact {
 fn read_artifacts(
     source: &Path,
     task_id: &str,
-) -> Result<Vec<ToolArtifactReplacement>, RuntimeError> {
+) -> Result<Vec<ToolArtifactReplacement>, ImportError> {
     let directory = source.join("tool-artifacts");
     if !directory.try_exists()? {
         return Ok(Vec::new());
@@ -282,11 +347,11 @@ fn read_artifacts(
     Ok(artifacts)
 }
 
-fn required_file(path: &Path) -> Result<Vec<u8>, RuntimeError> {
+fn required_file(path: &Path) -> Result<Vec<u8>, ImportError> {
     optional_file(path)?.ok_or_else(|| migration_error("required legacy file is missing"))
 }
 
-fn optional_file(path: &Path) -> Result<Option<Vec<u8>>, RuntimeError> {
+fn optional_file(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => fs::read(path)
             .map(Some)
@@ -297,7 +362,7 @@ fn optional_file(path: &Path) -> Result<Option<Vec<u8>>, RuntimeError> {
     }
 }
 
-fn require_directory(path: &Path) -> Result<(), RuntimeError> {
+fn require_directory(path: &Path) -> Result<(), ImportError> {
     if fs::symlink_metadata(path)?.file_type().is_dir() {
         Ok(())
     } else {
@@ -310,12 +375,20 @@ fn require_directory(path: &Path) -> Result<(), RuntimeError> {
 fn decode<T: serde::de::DeserializeOwned>(
     bytes: &[u8],
     reason: &'static str,
-) -> Result<T, RuntimeError> {
-    serde_json::from_slice(bytes).map_err(|_| migration_error(reason))
+) -> Result<T, ImportError> {
+    serde_json::from_slice(bytes).map_err(|error| ImportError::Refused {
+        reason,
+        decode: Some(DecodePosition {
+            category: format!("{:?}", error.classify()),
+            line: error.line(),
+            column: error.column(),
+        }),
+    })
 }
 
-fn migration_error(reason: &'static str) -> RuntimeError {
-    RuntimeError::Storage(format!(
-        "Legacy Task migration failed: {reason}; original files were preserved"
-    ))
+fn migration_error(reason: &'static str) -> ImportError {
+    ImportError::Refused {
+        reason,
+        decode: None,
+    }
 }
