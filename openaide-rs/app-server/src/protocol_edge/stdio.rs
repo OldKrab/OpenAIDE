@@ -358,10 +358,19 @@ impl ProtocolEdgeStdioDispatcher {
     }
 
     fn next_time(&mut self) -> AppServerTime {
-        let now = self.next_tick;
-        self.next_tick += 1;
-        AppServerTime(now)
+        let (now, next_tick) = next_stdio_time(self.next_tick, AppServerTime::now().0);
+        self.next_tick = next_tick;
+        now
     }
+}
+
+/// Stdio time is wall-clock milliseconds, the domain the client-expiry worker
+/// reads, kept strictly increasing so two messages in one millisecond stay
+/// ordered. A per-message counter fell behind the wall clock, so a request
+/// longer than the heartbeat timeout expired the client that awaited it.
+fn next_stdio_time(next_tick: u64, wall_ms: u64) -> (AppServerTime, u64) {
+    let now = wall_ms.max(next_tick);
+    (AppServerTime(now), now.saturating_add(1))
 }
 
 fn configured_project_roots_from_env() -> ConfiguredProjectRoots {
