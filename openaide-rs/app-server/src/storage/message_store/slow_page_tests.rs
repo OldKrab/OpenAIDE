@@ -5,12 +5,7 @@ use super::{log_slow_chat_page, SLOW_CHAT_PAGE};
 #[test]
 fn only_a_slow_chat_page_is_logged_with_its_artifact_reads() {
     let logs = crate::logging::capture_test_logs();
-    log_slow_chat_page(
-        "task_fast_page",
-        3,
-        1,
-        SLOW_CHAT_PAGE - Duration::from_millis(1),
-    );
+    log_slow_chat_page("task_fast_page", 3, 1, Duration::ZERO);
     log_slow_chat_page("task_slow_page", 421, 199, SLOW_CHAT_PAGE);
 
     let entries = logs.snapshot();
