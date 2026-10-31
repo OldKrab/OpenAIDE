@@ -41,7 +41,7 @@ function NewTaskView({ dispatch, onRemoveAttachment, state, ...props }: TestNewT
         selectProject: (project) => dispatch({ type: "newTask:project", project }),
         selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
         selectWorktree: vi.fn(),
-        refreshWorktrees: vi.fn(),
+        refreshWorktrees: vi.fn(async () => {}),
         createWorktree: vi.fn(),
         recreateWorktree: vi.fn(),
         removeWorktree: vi.fn(),

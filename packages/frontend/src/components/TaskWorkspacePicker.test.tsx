@@ -31,6 +31,38 @@ describe("TaskWorkspacePicker", () => {
     expect(onManageWorktrees).toHaveBeenCalledWith("project_1");
   });
 
+  it("refreshes discovery once when the chooser opens", () => {
+    const intents = testIntents();
+    const project = chooserProject();
+
+    const tree = renderChooser(intents, project);
+    act(() => tree.update(chooser(intents, project)));
+
+    expect(intents.refreshWorktrees).toHaveBeenCalledOnce();
+    expect(intents.refreshWorktrees).toHaveBeenCalledWith(project);
+  });
+
+  it("does not refresh a Project outside any Worktree Repository", () => {
+    const intents = testIntents();
+
+    renderChooser(intents, { ...chooserProject(), worktreeRepositoryId: undefined });
+
+    expect(intents.refreshWorktrees).not.toHaveBeenCalled();
+  });
+
+  it("keeps the known worktrees when the refresh fails", async () => {
+    const intents = testIntents();
+    vi.mocked(intents.refreshWorktrees).mockRejectedValue(new Error("unavailable"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const tree = renderChooser(intents, chooserProject());
+    await act(async () => {});
+
+    expect(warn).toHaveBeenCalledWith("task_workspace_chooser_refresh_failed project_id=project_1");
+    expect(tree.root.findAllByType("button").some((button) => hasText(button, "Manage worktrees"))).toBe(true);
+    warn.mockRestore();
+  });
+
   it("selects Project root and reusable worktrees by opaque identity", () => {
     const intents = testIntents();
     const tree = render(intents);
@@ -256,6 +288,36 @@ function render(intents: NewTaskViewIntents) {
   return tree;
 }
 
+function chooserProject() {
+  return {
+    projectId: "project_1",
+    label: "OpenAIDE",
+    workspaceRoot: "/workspace/OpenAIDE",
+    worktreeRepositoryId: "repository_1",
+  } as Parameters<typeof TaskWorkspacePicker>[0]["project"];
+}
+
+function chooser(intents: NewTaskViewIntents, project: ReturnType<typeof chooserProject>) {
+  return (
+    <TaskWorkspacePicker
+      intents={intents}
+      onClose={vi.fn()}
+      onManageWorktrees={vi.fn()}
+      project={project}
+      repository={repository()}
+      tasks={[]}
+    />
+  );
+}
+
+function renderChooser(intents: NewTaskViewIntents, project: ReturnType<typeof chooserProject>) {
+  let tree!: ReturnType<typeof create>;
+  act(() => {
+    tree = create(chooser(intents, project));
+  });
+  return tree;
+}
+
 function testIntents(): NewTaskViewIntents {
   return {
     changePrompt: vi.fn(),
@@ -265,7 +327,7 @@ function testIntents(): NewTaskViewIntents {
     selectProject: vi.fn(),
     selectWorkspace: vi.fn(),
     selectWorktree: vi.fn(),
-    refreshWorktrees: vi.fn(),
+    refreshWorktrees: vi.fn(async () => {}),
     createWorktree: vi.fn(),
     recreateWorktree: vi.fn(),
     removeWorktree: vi.fn(),

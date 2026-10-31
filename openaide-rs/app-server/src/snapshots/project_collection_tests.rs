@@ -56,6 +56,116 @@ fn configured_git_root_projects_worktree_repository_identity() {
     assert!(snapshot.projects[0].project_worktree_id.is_some());
 }
 
+fn committed_repository(root: &std::path::Path) {
+    std::fs::create_dir_all(root).unwrap();
+    git(root, &["init", "-b", "main"]);
+    git(root, &["config", "user.name", "OpenAIDE Test"]);
+    git(root, &["config", "user.email", "test@openaide.invalid"]);
+    std::fs::write(root.join("README.md"), "fixture\n").unwrap();
+    git(root, &["add", "README.md"]);
+    git(root, &["commit", "-m", "fixture"]);
+}
+
+fn collection_for(store: &Store, root: &std::path::Path) -> ProjectCollectionStore {
+    ProjectCollectionStore::new_with_configured_roots(
+        store.clone(),
+        ConfiguredProjectRoots::from_workspace_roots(vec![root.to_string_lossy().to_string()]),
+    )
+}
+
+/// Log capture spans parallel tests, so only this repository's refreshes count.
+fn discovery_runs(logs: &crate::logging::TestLogCapture, summary: &ProjectSummary) -> usize {
+    let repository_id = summary.worktree_repository_id.as_ref().unwrap().as_str();
+    logs.snapshot()
+        .iter()
+        .filter(|entry| entry["event"] == "worktree_repository_refreshed")
+        .filter(|entry| entry["fields"]["repository_id"] == repository_id)
+        .count()
+}
+
+#[test]
+fn a_cataloged_project_answers_without_running_discovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    committed_repository(&project);
+    let state = tempfile::tempdir().unwrap();
+    let store = Store::open(state.path().to_path_buf()).unwrap();
+    let collection = collection_for(&store, &project);
+    let first = collection.snapshot().unwrap();
+    let logs = crate::logging::capture_test_logs();
+
+    let second = collection.snapshot().unwrap();
+
+    assert_eq!(discovery_runs(&logs, &first.projects[0]), 0);
+    assert!(second.projects[0].available);
+    assert_eq!(
+        second.projects[0].worktree_repository_id,
+        first.projects[0].worktree_repository_id
+    );
+    assert_eq!(
+        second.projects[0].project_worktree_id,
+        first.projects[0].project_worktree_id
+    );
+}
+
+#[test]
+fn a_project_that_stopped_being_a_checkout_loses_its_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    committed_repository(&project);
+    let state = tempfile::tempdir().unwrap();
+    let store = Store::open(state.path().to_path_buf()).unwrap();
+    let collection = collection_for(&store, &project);
+    collection.snapshot().unwrap();
+
+    std::fs::remove_dir_all(project.join(".git")).unwrap();
+    let snapshot = collection.snapshot().unwrap();
+
+    assert!(snapshot.projects[0].available);
+    assert!(snapshot.projects[0].worktree_repository_id.is_none());
+}
+
+#[test]
+fn a_recreated_worktree_runs_discovery_again() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let linked = temp.path().join("linked");
+    committed_repository(&project);
+    git(
+        &project,
+        &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+    );
+    let state = tempfile::tempdir().unwrap();
+    let store = Store::open(state.path().to_path_buf()).unwrap();
+    // A linked Task keeps the record through the refresh, which would discard it otherwise.
+    store
+        .write_task(&task_record(
+            "task-linked",
+            linked.to_str().unwrap(),
+            "2026-01-01T00:00:00.000Z",
+        ))
+        .unwrap();
+    let collection = collection_for(&store, &linked);
+    let first = collection.snapshot().unwrap();
+
+    std::fs::remove_dir_all(&linked).unwrap();
+    WorktreeManager::new(store.clone())
+        .refresh_project(&project)
+        .unwrap();
+    git(&project, &["worktree", "prune"]);
+    git(
+        &project,
+        &["worktree", "add", linked.to_str().unwrap(), "linked"],
+    );
+    let logs = crate::logging::capture_test_logs();
+
+    let snapshot = collection.snapshot().unwrap();
+
+    assert_eq!(discovery_runs(&logs, &first.projects[0]), 1);
+    assert!(snapshot.projects[0].available);
+    assert!(snapshot.projects[0].worktree_repository_id.is_some());
+}
+
 #[test]
 fn projects_visible_task_records_into_collection_snapshot() {
     let temp = tempfile::tempdir().unwrap();
