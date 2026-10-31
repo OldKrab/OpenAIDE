@@ -52,6 +52,14 @@ export function TaskWorkspacePicker({
   const worktrees = (repository?.worktrees ?? []).filter((worktree) => !worktree.forgotten);
   const projectRoot = worktrees.find((worktree) => isProjectRoot(worktree, project));
 
+  // Worktrees also change outside OpenAIDE. The list stays usable with what is known if this fails.
+  useEffect(() => {
+    if (!project.worktreeRepositoryId) return;
+    intents.refreshWorktrees(project).catch(() => {
+      console.warn(`task_workspace_chooser_refresh_failed project_id=${project.projectId}`);
+    });
+  }, [project.projectId, project.worktreeRepositoryId]);
+
   if (mode === "create") {
     return (
       <CreateWorktreePanel

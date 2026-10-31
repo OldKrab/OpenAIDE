@@ -259,11 +259,17 @@ impl WorktreeManager {
     }
 
     /// Projects remain usable when Git discovery fails; the failure disables only worktree choices.
+    /// The Project collection asks this for every Project on each reconnect, under the protocol
+    /// lock, so a Project the catalog already places answers from it without running Git. Worktree
+    /// changes reach the catalog through the refreshes listed in `docs/task-chat-flow.md`.
     pub fn project_status(
         &self,
         project_root: &Path,
     ) -> Result<ProjectWorktreeStatus, RuntimeError> {
         if project_root.is_dir() {
+            if let Some(status) = self.cataloged_project_status(project_root)? {
+                return Ok(status);
+            }
             return match self.refresh_project(project_root) {
                 Ok(Some(context)) => Ok(ProjectWorktreeStatus {
                     available: true,
@@ -732,6 +738,27 @@ impl WorktreeManager {
             .refresh_project(&target.git_cwd)?
             .ok_or_else(|| RuntimeError::Internal("Repository became unavailable".to_string()))?;
         Ok(refreshed.repository)
+    }
+
+    /// `None` sends the Project to discovery. A root without `.git` has stopped being a checkout,
+    /// which only discovery can record.
+    fn cataloged_project_status(
+        &self,
+        project_root: &Path,
+    ) -> Result<Option<ProjectWorktreeStatus>, RuntimeError> {
+        if !project_root.join(".git").exists() {
+            return Ok(None);
+        }
+        let _read = self.store.lock_worktree_write();
+        let catalog = WorktreeCatalog::read(&self.store)?;
+        Ok(catalog.find_available_worktree(project_root).map(
+            |(repository_id, project_worktree_id)| ProjectWorktreeStatus {
+                available: true,
+                repository_id: Some(repository_id),
+                project_worktree_id: Some(project_worktree_id),
+                discovery_error: None,
+            },
+        ))
     }
 
     fn known_project_status(

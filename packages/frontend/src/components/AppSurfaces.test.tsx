@@ -1706,7 +1706,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         selectProject: vi.fn(),
         selectWorkspace: vi.fn(),
         selectWorktree: vi.fn(),
-        refreshWorktrees: vi.fn(),
+        refreshWorktrees: vi.fn(async () => {}),
         createWorktree: vi.fn(),
         recreateWorktree: vi.fn(),
         removeWorktree: vi.fn(),

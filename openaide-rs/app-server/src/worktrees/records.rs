@@ -104,6 +104,31 @@ impl WorktreeCatalog {
 
     /// Root of a usable worktree in the repository that owns `anchor`. Read-only file access
     /// uses this to move between a Project's worktrees without running Git or trusting a path.
+    /// The live record at `path`, which excludes forgotten identities and worktrees last found
+    /// missing: those need discovery before anything can rely on them again.
+    pub fn find_available_worktree(
+        &self,
+        path: &Path,
+    ) -> Option<(WorktreeRepositoryId, WorktreeId)> {
+        let path = normalized_path(path);
+        self.repositories.iter().find_map(|repository| {
+            repository
+                .worktrees
+                .iter()
+                .find(|worktree| {
+                    !worktree.forgotten
+                        && worktree.path == path
+                        && worktree.availability == WorktreeAvailability::Available
+                })
+                .map(|worktree| {
+                    (
+                        repository.repository_id.clone(),
+                        worktree.worktree_id.clone(),
+                    )
+                })
+        })
+    }
+
     pub fn sibling_worktree_path(
         &self,
         anchor: &Path,
