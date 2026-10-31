@@ -36,8 +36,8 @@ mod worktree_handlers;
 pub use delivery_signal::DeliverySignal;
 pub(crate) use messages::event_deliveries;
 pub use messages::{GatewayEventDelivery, GatewayOutcome, GatewayResponse, InboundProtocolMessage};
-pub use shared_gateway::{SharedRpcGateway, TaskUpdatePublication};
-pub use task_update_publisher::run_task_update_publisher;
+pub use shared_gateway::SharedRpcGateway;
+pub use task_update_publisher::{run_task_update_publisher, TaskUpdatePublication};
 
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::methods::{
@@ -86,6 +86,9 @@ pub struct RpcGateway {
     pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
+    /// Advances when a request publishes navigation entries under the protocol lock, so a
+    /// projection read ahead of that lock can tell it was overtaken.
+    project_entries_generation: Arc<std::sync::atomic::AtomicU64>,
     project_roots: ConfiguredProjectRoots,
     probe_facts: AppServerProbeFacts,
     diagnostics: Arc<dyn RuntimeDiagnosticsWorkflow>,
@@ -214,6 +217,7 @@ impl RpcGateway {
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),
             snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
+            project_entries_generation: Arc::default(),
             project_roots,
             probe_facts,
             diagnostics,

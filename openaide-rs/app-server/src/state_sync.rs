@@ -144,6 +144,9 @@ impl StateStream {
         _now: AppServerTime,
     ) -> Result<(StateSubscribeResult, bool), openaide_app_server_protocol::errors::ProtocolError>
     {
+        // TODO: Build the baseline outside the protocol lock if `chat_page_build_slow` shows it
+        // stalling delivery on an optimized build. This needs the subscription registered first
+        // and events held until the reply, because ADR-0023 pairs each baseline with its cursor.
         let token = self.read_token_for_scope(&scope);
         let snapshot = match &scope {
             SubscriptionScope::Task { task_id } => {
