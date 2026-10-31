@@ -72,6 +72,11 @@ pub(super) fn tombstoned_task(context: &CommitContext, task_id: &str) -> Result<
         .lock()
         .expect("Task artifact reconciliation poisoned")
         .retain(|(candidate_task_id, _), _| candidate_task_id != task_id);
+    context
+        .artifacts_written
+        .lock()
+        .expect("Task artifact write tracking poisoned")
+        .remove(task_id);
     context.subagents.forget_task(task_id);
 
     if tombstone.exists() {

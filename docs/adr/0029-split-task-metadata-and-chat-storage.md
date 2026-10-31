@@ -95,6 +95,9 @@ Compaction is lossless and threshold-based. App Server checks it after completed
 turns, after authoritative Native Session history replacement, and during startup
 and six-hour idle maintenance. A journal is rewritten after 128 superseded frames
 or when the physical rewrite can reclaim at least 1 MiB at a material ratio.
+A Task's first check in a process reads every Tool artifact; later checks read
+only the artifacts written since the last one, because a check runs in the
+storage worker and delays every Task's writes.
 Repeated byte-identical Tool-detail replacements do not create another artifact
 revision. Artifact compaction keeps the committed frame sequence and every
 terminal append while retaining only the latest structured replacement, so

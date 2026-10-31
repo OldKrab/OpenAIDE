@@ -15,7 +15,7 @@ use super::model::{
 
 mod compaction;
 
-pub(super) use compaction::compact_all;
+pub(super) use compaction::{compact_artifacts, ArtifactsWrittenSinceCheck};
 
 const ARTIFACTS_DIR: &str = "artifacts";
 pub(super) type ReconciledArtifactHeads = HashMap<(String, String), u64>;
