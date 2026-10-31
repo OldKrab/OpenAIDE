@@ -441,3 +441,16 @@ fn a_stopped_gateway_refuses_its_port_and_leaves_the_app_server() {
         fixture.devices.snapshot().devices[0].connection.is_none()
     });
 }
+
+#[test]
+fn connection_failures_keep_a_stable_kind() {
+    assert_eq!(
+        connection_error_kind(&ConnectionError::TimedOut),
+        "timed_out"
+    );
+    assert_eq!(connection_error_kind(&ConnectionError::Reset), "reset");
+    assert_eq!(
+        connection_error_kind(&ConnectionError::VersionMismatch),
+        "version_mismatch"
+    );
+}

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::{presets, Connection, Incoming};
+use iroh::endpoint::{presets, ConnectingError, Connection, ConnectionError, Incoming};
 use iroh::{Endpoint, PublicKey, SecretKey};
 use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
 use openaide_app_server_protocol::devices::{
@@ -397,12 +397,16 @@ async fn handle_incoming(
     target: BridgeTarget,
     connections: Connections,
 ) {
+    let started = Instant::now();
     let connection = match incoming.await {
         Ok(connection) => connection,
-        Err(_error) => {
+        Err(error) => {
             logging::info(
                 "remote_device_handshake_failed",
-                serde_json::json!({ "error_kind": "handshake" }),
+                serde_json::json!({
+                    "error_kind": connecting_error_kind(&error),
+                    "duration_ms": started.elapsed().as_millis() as u64,
+                }),
             );
             return;
         }
@@ -415,6 +419,30 @@ async fn handle_incoming(
         relay_check::answer(connection);
     } else {
         connection.close(CLOSE_UNKNOWN_PROTOCOL.into(), b"unknown protocol");
+    }
+}
+
+/// A stable name for why an incoming connection failed. The errors' own text can carry reasons
+/// sent by the peer, so it stays out of the logs.
+fn connecting_error_kind(error: &ConnectingError) -> &'static str {
+    match error {
+        ConnectingError::ConnectionError { source, .. } => connection_error_kind(source),
+        ConnectingError::HandshakeFailure { .. } => "handshake_failure",
+        ConnectingError::LocallyRejected { .. } => "locally_rejected",
+        _ => "internal",
+    }
+}
+
+fn connection_error_kind(error: &ConnectionError) -> &'static str {
+    match error {
+        ConnectionError::VersionMismatch => "version_mismatch",
+        ConnectionError::TransportError(_) => "transport_error",
+        ConnectionError::ConnectionClosed(_) => "connection_closed",
+        ConnectionError::ApplicationClosed(_) => "application_closed",
+        ConnectionError::Reset => "reset",
+        ConnectionError::TimedOut => "timed_out",
+        ConnectionError::LocallyClosed => "locally_closed",
+        ConnectionError::CidsExhausted => "cids_exhausted",
     }
 }
 
