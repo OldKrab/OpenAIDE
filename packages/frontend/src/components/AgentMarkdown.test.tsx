@@ -151,7 +151,7 @@ describe("AgentMarkdown", () => {
 
   it("links inline code of any file type once the Task workspace confirms the file", async () => {
     const check = vi.fn(async (paths: string[]) => paths.filter((path) => path === "cv/resume.pdf"));
-    const references = new ExistingFileReferences(check);
+    const references = new ExistingFileReferences(check, Date.now, (drain) => queueMicrotask(drain));
     const openFile = vi.fn();
     let tree: ReturnType<typeof create>;
     await act(async () => {

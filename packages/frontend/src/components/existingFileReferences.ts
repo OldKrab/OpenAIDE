@@ -8,24 +8,32 @@ const BATCH_SIZE = 100;
 const MISSING_RECHECK_MS = 15_000;
 /** After a failed check, paths stay unlinked this long instead of asking again. */
 const FAILURE_BACKOFF_MS = 60_000;
+/** Chat is virtualized, so its rows mount over several commits; their paths wait this long to share a request. */
+const COALESCE_MS = 150;
 
 export type FileReferenceState = "file" | "missing" | "pending" | "unchecked";
 type CheckPaths = (paths: string[]) => Promise<string[]>;
+type ScheduleDrain = (drain: () => void) => void;
 
 /**
  * Remembers, for one Task view, which workspace-relative paths named by the Agent are files.
- * Paths requested in the same tick go to the App Server together; a file stays a file, and a
- * missing path is checked again later, since the Agent may create it after mentioning it.
+ * Paths requested close together go to the App Server in one request, and only one request runs
+ * at a time; a file stays a file, and a missing path is checked again later, since the Agent may
+ * create it after mentioning it.
  */
 export class ExistingFileReferences {
   private readonly known = new Map<string, { file: boolean; checkedAt: number }>();
   private readonly queued = new Set<string>();
   private readonly inFlight = new Set<string>();
   private readonly listeners = new Set<() => void>();
-  private flushScheduled = false;
+  private draining = false;
   private failedUntil = 0;
 
-  constructor(private readonly check: CheckPaths, private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly check: CheckPaths,
+    private readonly now: () => number = Date.now,
+    private readonly schedule: ScheduleDrain = (drain) => { setTimeout(drain, COALESCE_MS); },
+  ) {}
 
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -47,24 +55,26 @@ export class ExistingFileReferences {
     if (known && this.now() - known.checkedAt < MISSING_RECHECK_MS) return;
     if (this.now() < this.failedUntil) return;
     this.queued.add(path);
-    if (this.flushScheduled) return;
-    this.flushScheduled = true;
-    queueMicrotask(() => void this.flush());
+    if (this.draining) return;
+    this.draining = true;
+    this.schedule(() => void this.drain());
   }
 
-  private async flush() {
-    this.flushScheduled = false;
-    const paths = [...this.queued];
-    this.queued.clear();
-    for (let start = 0; start < paths.length; start += BATCH_SIZE) {
-      const batch = paths.slice(start, start + BATCH_SIZE);
-      batch.forEach((path) => this.inFlight.add(path));
+  /** Runs until nothing is queued, so paths that arrive during a request share the next one. */
+  private async drain() {
+    while (this.queued.size > 0) {
+      const batch = [...this.queued].slice(0, BATCH_SIZE);
+      batch.forEach((path) => {
+        this.queued.delete(path);
+        this.inFlight.add(path);
+      });
       let files: Set<string> | undefined;
       try {
         files = new Set(await this.check(batch));
       } catch {
         // The intent has logged the failure; an older App Server lacks the method entirely.
         this.failedUntil = this.now() + FAILURE_BACKOFF_MS;
+        this.queued.clear();
       }
       const checkedAt = this.now();
       for (const path of batch) {
@@ -73,6 +83,7 @@ export class ExistingFileReferences {
       }
       this.listeners.forEach((listener) => listener());
     }
+    this.draining = false;
   }
 }
 
