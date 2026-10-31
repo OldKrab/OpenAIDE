@@ -3521,7 +3521,7 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     wait_until(|| !api.native_session_catalog().refreshing());
 
     for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
@@ -3662,11 +3662,11 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     // Entry is synchronized by the counter; independent contexts may all enter
     // before this thread wakes, while block_list holds their responses.
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 1);
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     agent.block_list.store(false, Ordering::SeqCst);
 
     wait_until(|| !api.native_session_catalog().refreshing());
@@ -3691,7 +3691,7 @@ fn background_native_session_refresh_logs_completion() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     wait_until(|| !api.native_session_catalog().refreshing());
 
     assert!(diagnostic_logs
@@ -4842,7 +4842,7 @@ fn background_native_session_failure_is_published_as_failed_refresh_state() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
 
     assert!(matches!(
         updates

@@ -462,7 +462,9 @@ impl RpcGateway {
         {
             // The baseline is durable and immediate; discovery then refreshes it asynchronously.
             self.agent_list_sessions
-                .request_native_session_catalog_refresh();
+                .request_native_session_catalog_refresh(
+                    crate::tasks::product_api::NativeCatalogRefreshRequester::NavigationSubscribed,
+                );
         }
         let server_requests = match &result.scope {
             openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {

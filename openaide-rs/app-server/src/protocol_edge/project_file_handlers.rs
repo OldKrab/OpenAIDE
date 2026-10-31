@@ -28,7 +28,7 @@ impl PreparedProjectFiles {
         let result = crate::project_files::run(&self.root, &self.method, &self.params);
         logging::info(
             "project_files_completed",
-            serde_json::json!({"request_id":id,"client_request_id":meta.client_request_id,"client_id":self.owner,"operation":self.method,"attempt":1,"workspace_kind":self.workspace_kind,"base":self.base(),"default_branch_found":result.default_branch.is_some(),"outcome":if result.error.is_some(){"failure"}else{"success"},"error_kind":result.error,"truncated":result.truncated,"count":result.entries.len(),"duration_ms":started.elapsed().as_millis()}),
+            serde_json::json!({"request_id":id,"client_request_id":meta.client_request_id,"client_id":self.owner,"operation":self.method,"attempt":1,"workspace_kind":self.workspace_kind,"base":self.base(),"default_branch_found":result.default_branch.is_some(),"outcome":if result.error.is_some(){"failure"}else{"success"},"error_kind":result.error,"truncated":result.truncated,"requested_count":self.params.paths.as_ref().map(Vec::len),"count":result.entries.len(),"duration_ms":started.elapsed().as_millis()}),
         );
         result
     }

@@ -183,14 +183,18 @@ pub(super) fn dispatch_accepted_session_frame(
     accepted: AcceptedReliableUpload,
     sessions: &ReliableSessionRegistry,
     dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
-) -> LocalHttpResponse {
+) -> (LocalHttpResponse, usize) {
     let response = dispatch_protocol_message(
         connection_id,
         &accepted.message.to_string(),
         dispatch,
         |_| Vec::new(),
     );
-    queue_dispatch_replies(response, &accepted.session_id, sessions)
+    let reply_bytes = response.body.len();
+    (
+        queue_dispatch_replies(response, &accepted.session_id, sessions),
+        reply_bytes,
+    )
 }
 
 /// RPC replies travel on the session's ordered server sequence, never inline.

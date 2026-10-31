@@ -54,7 +54,7 @@ fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
     api.request_due_native_session_catalog_refresh(ALWAYS_STALE);
 
@@ -73,6 +73,68 @@ fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
             break;
         }
     }
+}
+
+#[test]
+fn a_refresh_run_names_who_asked_for_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    store
+        .write_task(&task_record(
+            "task-1",
+            temp.path().join("workspace").to_str().unwrap(),
+        ))
+        .unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let agent = Arc::new(MixedCatalogRuntime {
+        authenticated: AtomicBool::new(true),
+        listing_gate: Some(gate.clone()),
+        listing_entered: Some(entered_tx),
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        notifier,
+    )
+    .unwrap();
+    let logs = crate::logging::capture_test_logs();
+
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::LoadMore);
+    entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::AgentsReady);
+    *gate.0.lock().unwrap() = true;
+    gate.1.notify_all();
+    loop {
+        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
+        if matches!(
+            update.kind,
+            TaskUpdateKind::NavigationRefreshStateChanged {
+                refresh: TaskNavigationRefreshState::Idle
+                    | TaskNavigationRefreshState::Failed { .. }
+            }
+        ) {
+            break;
+        }
+    }
+
+    // Log capture spans parallel tests, so only the order of these two requesters counts.
+    let requesters = logs
+        .snapshot()
+        .iter()
+        .filter(|entry| entry["event"] == "native_session_catalog_refresh_started")
+        .map(|entry| entry["fields"]["requester"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let first = requesters.iter().position(|name| name == "load_more");
+    let trailing = requesters.iter().rposition(|name| name == "agents_ready");
+    assert!(
+        first.is_some() && first < trailing,
+        "requesters: {requesters:?}"
+    );
 }
 
 #[test]
@@ -107,7 +169,7 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
         notifier,
     )
     .unwrap();
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     let expected = 3 * BUILT_IN_AGENT_METADATA.len();
     let mut entered = 0;
     for _ in 0..expected {
@@ -168,7 +230,7 @@ fn sidebar_refresh_caps_each_agents_concurrent_listings() {
         notifier,
     )
     .unwrap();
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     let capped = MAX_CONCURRENT_AGENT_LISTINGS * BUILT_IN_AGENT_METADATA.len();
     let mut entered_by_agent = HashMap::<String, usize>::new();
     for _ in 0..capped {
@@ -240,7 +302,7 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
     )
     .unwrap();
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     assert!(
         publish_status_updates_until_settled(&api, &updates),
         "unchanged auth failures must not feed another catalog refresh forever"
@@ -262,7 +324,7 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
         "every Agent covers every context"
     );
 
-    api.request_native_session_catalog_refresh();
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     assert!(publish_status_updates_until_settled(&api, &updates));
     let after_retry = agent.calls.lock().unwrap().clone();
     for (context, count) in &before_retry {
@@ -301,7 +363,9 @@ fn publish_status_updates_until_settled(
         match updates.recv_timeout(crate::test_sync::ABSENCE_WINDOW) {
             Ok(()) => {
                 fed_refreshes += 1;
-                api.request_native_session_catalog_refresh();
+                api.request_native_session_catalog_refresh(
+                    NativeCatalogRefreshRequester::ClientRefresh,
+                );
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 // A refresh that never ends is caught by the watchdog here.
@@ -310,7 +374,9 @@ fn publish_status_updates_until_settled(
                     return true;
                 }
                 fed_refreshes += 1;
-                api.request_native_session_catalog_refresh();
+                api.request_native_session_catalog_refresh(
+                    NativeCatalogRefreshRequester::ClientRefresh,
+                );
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }

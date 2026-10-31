@@ -25,6 +25,8 @@ use crate::server_requests::ServerRequestDelivery;
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::shell_file_handles::ShellFileRevealTarget;
 use crate::task_events::TaskUpdate;
+#[cfg(test)]
+use crate::tasks::product_api::NativeCatalogRefreshRequester;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::{
@@ -139,9 +141,13 @@ impl SharedRpcGateway {
     }
 
     /// Delegates scheduling so timer and Send requests share one coalescing owner.
-    pub fn request_native_session_catalog_refresh(&self) {
+    #[cfg(test)]
+    pub(crate) fn request_native_session_catalog_refresh(
+        &self,
+        requester: NativeCatalogRefreshRequester,
+    ) {
         let workflow = self.lock().agent_list_sessions.clone();
-        workflow.request_native_session_catalog_refresh();
+        workflow.request_native_session_catalog_refresh(requester);
     }
 
     /// The coordinator owns the clock, so every kind of run resets the periodic refresh.
@@ -157,13 +163,15 @@ impl SharedRpcGateway {
         workflow.request_task_storage_maintenance();
     }
 
+    /// Asked every second, and nothing here can be pending for a link, so it stays silent.
     pub fn request_scheduled_queue_delivery(&self) {
-        let workflow = self.lock().task_send.clone();
+        let workflow = self.lock_quiet().task_send.clone();
         workflow.request_scheduled_queue_delivery();
     }
 
+    /// Asked every second and only reads, so it stays silent.
     pub fn has_task_navigation_subscribers(&self) -> bool {
-        self.lock()
+        self.lock_quiet()
             .state_stream
             .subscription_count_for_kind(|scope| {
                 matches!(
