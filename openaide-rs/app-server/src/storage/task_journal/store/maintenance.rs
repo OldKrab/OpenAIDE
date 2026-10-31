@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
+use std::time::Instant;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage::records::TaskRecord;
@@ -13,16 +14,20 @@ use super::{
 use crate::storage::task_journal::{artifact, split};
 
 /// Runs idle/forced storage maintenance without mixing physical rewrites into
-/// the semantic commit path.
+/// the semantic commit path. It runs in the single storage worker on every completed turn, so
+/// its cost delays every Task's writes.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compact_loaded_task(
     tasks_root: &Path,
     catalog_records: &RwLock<HashMap<String, TaskRecord>>,
     projections: &RwLock<HashMap<String, RecoveredTask>>,
+    artifacts_written: &Mutex<artifact::ArtifactsWrittenSinceCheck>,
     task_id: &str,
     mut next_task: RecoveredTask,
     mode: CompactionMode,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
+    let started = Instant::now();
     if split::exists(&tasks_root.join(task_id)) {
         let should_compact = mode == CompactionMode::Force
             || (mode == CompactionMode::IfWorthwhile
@@ -61,13 +66,25 @@ pub(super) fn compact_loaded_task(
     let RecoveredTask::Available { projection, .. } = &next_task else {
         return Err(RuntimeError::Storage("Task is unavailable".to_string()));
     };
-    let artifact_outcome = artifact::compact_all(
+    let written = artifacts_written
+        .lock()
+        .expect("Task artifact write tracking poisoned")
+        .get(task_id)
+        .cloned()
+        .filter(|_| mode != CompactionMode::Force);
+    let artifact_outcome = artifact::compact_artifacts(
         tasks_root,
         task_id,
         &projection.artifact_heads,
+        written.as_ref(),
         mode,
         faults,
     )?;
+    // A failed check keeps its candidates, so the next one retries them.
+    artifacts_written
+        .lock()
+        .expect("Task artifact write tracking poisoned")
+        .insert(task_id.to_string(), BTreeSet::new());
     if artifact_outcome.compacted_files > 0 {
         crate::logging::info(
             "tool_artifact_compacted",
@@ -79,6 +96,17 @@ pub(super) fn compact_loaded_task(
             }),
         );
     }
+    crate::logging::info(
+        "task_compaction_checked",
+        serde_json::json!({
+            "operation": "task_compaction_check",
+            "task_id": task_id,
+            "artifact_scope": if written.is_some() { "written" } else { "all" },
+            "checked_artifact_count": artifact_outcome.checked_files,
+            "compacted_artifact_count": artifact_outcome.compacted_files,
+            "duration_ms": started.elapsed().as_millis() as u64,
+        }),
+    );
     projections
         .write()
         .expect("Task journal projections poisoned")

@@ -1100,6 +1100,141 @@ fn terminal_write() -> TaskWrite {
     TaskWrite::stream_append_terminal("task_1", "artifact_1", "terminal_1", "accepted bytes")
 }
 
+fn compaction_checks(logs: &crate::logging::TestLogCapture, task_id: &str) -> Vec<(String, u64)> {
+    logs.snapshot()
+        .iter()
+        .filter(|entry| entry["event"] == "task_compaction_checked")
+        .filter(|entry| entry["fields"]["task_id"] == task_id)
+        .map(|entry| {
+            (
+                entry["fields"]["artifact_scope"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                entry["fields"]["checked_artifact_count"].as_u64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn check_compaction(store: &TaskJournalStore, task_id: &str) {
+    store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(task_id))
+        .unwrap()
+        .wait()
+        .unwrap();
+}
+
+fn append_terminal(store: &TaskJournalStore, task_id: &str, artifact_id: &str) {
+    store
+        .submit(TaskWrite::stream_append_terminal(
+            task_id,
+            artifact_id,
+            "terminal_1",
+            "bytes",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+}
+
+#[test]
+fn later_compaction_checks_read_only_artifacts_written_since_the_last_one() {
+    let task_id = "task_compaction_scope";
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open journal");
+    store
+        .submit(TaskWrite::barrier_create(task_projection(task_id)))
+        .unwrap()
+        .wait()
+        .unwrap();
+    append_terminal(&store, task_id, "artifact_1");
+    append_terminal(&store, task_id, "artifact_2");
+    let logs = crate::logging::capture_test_logs();
+
+    check_compaction(&store, task_id);
+    append_terminal(&store, task_id, "artifact_2");
+    check_compaction(&store, task_id);
+    check_compaction(&store, task_id);
+
+    assert_eq!(
+        compaction_checks(&logs, task_id),
+        [
+            ("all".to_string(), 2),
+            ("written".to_string(), 1),
+            ("written".to_string(), 0),
+        ]
+    );
+
+    // A new process cannot know what the last one wrote, so it reads everything once.
+    store.shutdown().unwrap();
+    drop(store);
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("reopen journal");
+    check_compaction(&store, task_id);
+    check_compaction(&store, task_id);
+    assert_eq!(
+        compaction_checks(&logs, task_id),
+        [("all".to_string(), 2), ("written".to_string(), 0)]
+    );
+}
+
+#[test]
+fn an_artifact_written_after_the_first_check_still_compacts() {
+    let task_id = "task_compaction_written";
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open journal");
+    store
+        .submit(TaskWrite::barrier_create(task_projection(task_id)))
+        .unwrap()
+        .wait()
+        .unwrap();
+    check_compaction(&store, task_id);
+
+    for revision in 0..=128 {
+        let projection = store.load(task_id).unwrap();
+        store
+            .submit(TaskWrite::barrier_replace_projection(
+                projection,
+                vec![
+                    crate::storage::task_journal::model::ToolArtifactReplacement {
+                        artifact_id: "artifact_1".to_string(),
+                        details: crate::protocol::model::ActivityToolDetails {
+                            locations: Vec::new(),
+                            content: vec![crate::protocol::model::ActivityToolContent::Diff {
+                                path: "/workspace/file.rs".to_string(),
+                                old_text: None,
+                                new_text: format!("revision {revision}"),
+                            }],
+                            input: None,
+                            output: None,
+                        },
+                    },
+                ],
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    let logs = crate::logging::capture_test_logs();
+
+    check_compaction(&store, task_id);
+
+    assert!(logs.snapshot().iter().any(|entry| {
+        entry["event"] == "tool_artifact_compacted"
+            && entry["fields"]["task_id"] == task_id
+            && entry["fields"]["removed_replacements"] == 128
+    }));
+    let loaded = store.load_tool_artifact(task_id, "artifact_1").unwrap();
+    assert!(matches!(
+        &loaded.details.unwrap().content[0],
+        crate::protocol::model::ActivityToolContent::Diff { new_text, .. }
+            if new_text == "revision 128"
+    ));
+}
+
 #[test]
 fn durability_sync_metric_counts_exercised_file_syncs() {
     let root = TempDir::new().expect("create state root");

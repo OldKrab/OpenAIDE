@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
@@ -12,26 +12,40 @@ const SUPERSEDED_FRAME_THRESHOLD: usize = 128;
 const BYTE_RATIO: u64 = 2;
 const MIN_RECLAIM_BYTES: u64 = 1024 * 1024;
 
+/// Artifacts each Task wrote since its last compaction check. An artifact's verdict can only
+/// change when it is written, so a later check reads just these instead of every file the Task
+/// ever produced. A Task is absent until its first check in this process, which reads them all:
+/// nothing in memory says what an earlier process wrote.
+pub(in crate::storage::task_journal) type ArtifactsWrittenSinceCheck =
+    HashMap<String, BTreeSet<String>>;
+
 #[derive(Default)]
 pub(in crate::storage::task_journal) struct ArtifactCompactionOutcome {
+    pub checked_files: usize,
     pub compacted_files: usize,
     pub removed_replacements: usize,
     pub reclaimed_bytes: u64,
 }
 
-/// Rewrites each committed artifact with the same frame sequence while dropping
+/// Rewrites each candidate artifact with the same frame sequence while dropping
 /// only structured replacements fully superseded by its final replacement.
-pub(in crate::storage::task_journal) fn compact_all(
+/// `written` narrows the candidates; `None` checks every committed artifact.
+pub(in crate::storage::task_journal) fn compact_artifacts(
     tasks_root: &Path,
     task_id: &str,
     artifact_heads: &HashMap<String, u64>,
+    written: Option<&BTreeSet<String>>,
     mode: CompactionMode,
     faults: &FaultInjector,
 ) -> Result<ArtifactCompactionOutcome, RuntimeError> {
-    let mut artifacts = artifact_heads.iter().collect::<Vec<_>>();
+    let mut artifacts = artifact_heads
+        .iter()
+        .filter(|(artifact_id, _)| written.is_none_or(|written| written.contains(*artifact_id)))
+        .collect::<Vec<_>>();
     artifacts.sort_by(|left, right| left.0.cmp(right.0));
     let mut outcome = ArtifactCompactionOutcome::default();
     for (artifact_id, committed_head) in artifacts {
+        outcome.checked_files += 1;
         let compacted = compact_one(
             tasks_root,
             task_id,

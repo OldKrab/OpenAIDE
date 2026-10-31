@@ -74,6 +74,7 @@ struct CommitContext {
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
     projection_load_lock: Arc<Mutex<()>>,
     artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
+    artifacts_written: Arc<Mutex<artifact::ArtifactsWrittenSinceCheck>>,
     subagents: Arc<SubagentState>,
     faults: Arc<frame::FaultInjector>,
 }
@@ -156,6 +157,7 @@ impl TaskJournalStore {
             projections: projections.clone(),
             projection_load_lock: projection_load_lock.clone(),
             artifact_heads: artifact_heads.clone(),
+            artifacts_written: Arc::new(Mutex::new(HashMap::new())),
             subagents: subagents.clone(),
             faults: faults.clone(),
         };
@@ -302,6 +304,7 @@ fn commit_batch(
     let projections = context.projections.as_ref();
     let projection_load_lock = context.projection_load_lock.as_ref();
     let artifact_heads = context.artifact_heads.as_ref();
+    let artifacts_written = context.artifacts_written.as_ref();
     let faults = context.faults.as_ref();
     let replaced_artifact_ids = batch
         .iter()
@@ -417,6 +420,7 @@ fn commit_batch(
             tasks_root,
             catalog_records,
             projections,
+            artifacts_written,
             task_id,
             next_task,
             compaction,
@@ -477,6 +481,7 @@ fn commit_batch(
                 tasks_root,
                 catalog_records,
                 projections,
+                artifacts_written,
                 task_id,
                 next_task,
                 compaction,
@@ -569,6 +574,13 @@ fn commit_batch(
             }
         };
         artifact_heads.insert(artifact_key, change.artifact_sequence);
+        if let Some(written) = artifacts_written
+            .lock()
+            .expect("Task artifact write tracking poisoned")
+            .get_mut(task_id)
+        {
+            written.insert(artifact_id.clone());
+        }
         artifact_changes.push(change);
     }
     let persisted = maintenance::persist_split_commit(
