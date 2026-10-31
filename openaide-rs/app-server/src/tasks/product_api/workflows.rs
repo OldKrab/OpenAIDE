@@ -44,6 +44,28 @@ pub(crate) trait TaskAdoptNativeSessionWorkflow: Send + Sync {
     ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
+/// Why a Native Session catalog refresh was asked for; logged with the run it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeCatalogRefreshRequester {
+    Periodic,
+    NavigationSubscribed,
+    ClientRefresh,
+    AgentsReady,
+    LoadMore,
+}
+
+impl NativeCatalogRefreshRequester {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Periodic => "periodic",
+            Self::NavigationSubscribed => "navigation_subscribed",
+            Self::ClientRefresh => "client_refresh",
+            Self::AgentsReady => "agents_ready",
+            Self::LoadMore => "load_more",
+        }
+    }
+}
+
 pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
     fn list_agent_sessions(
         &self,
@@ -51,11 +73,11 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
     ) -> Result<AgentListSessionsResult, ProtocolError>;
 
     /// Requests coalesced background reconciliation without blocking the caller.
-    fn request_native_session_catalog_refresh(&self) {}
+    fn request_native_session_catalog_refresh(&self, _requester: NativeCatalogRefreshRequester) {}
 
     /// Requests the periodic refresh unless the catalog is already fresh enough.
     fn request_due_native_session_catalog_refresh(&self, _interval: std::time::Duration) {
-        self.request_native_session_catalog_refresh();
+        self.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::Periodic);
     }
 
     fn request_native_session_catalog_load_more(
@@ -63,7 +85,7 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         _project_id: &str,
         _target_row_count: usize,
     ) {
-        self.request_native_session_catalog_refresh();
+        self.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::LoadMore);
     }
 }
 

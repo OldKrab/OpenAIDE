@@ -202,7 +202,9 @@ impl RpcGateway {
             return self.error(connection_id, id, meta, responses::invalid_params(error));
         }
         self.agent_list_sessions
-            .request_native_session_catalog_refresh();
+            .request_native_session_catalog_refresh(
+                crate::tasks::product_api::NativeCatalogRefreshRequester::ClientRefresh,
+            );
         self.result(
             connection_id,
             id,
@@ -681,7 +683,9 @@ impl RpcGateway {
                     .is_some()
                 {
                     self.agent_list_sessions
-                        .request_native_session_catalog_refresh();
+                        .request_native_session_catalog_refresh(
+                            crate::tasks::product_api::NativeCatalogRefreshRequester::AgentsReady,
+                        );
                 }
                 self.ready_catalog_agents = ready_agents;
                 let installing_agent_count = agents

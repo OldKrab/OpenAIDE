@@ -13,7 +13,10 @@ use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
 use super::session_cursor::OpaqueSessionCursor;
-use super::{protocol_error_from_runtime, AgentListSessionsWorkflow, TaskProductApi};
+use super::{
+    protocol_error_from_runtime, AgentListSessionsWorkflow, NativeCatalogRefreshRequester,
+    TaskProductApi,
+};
 
 #[derive(Clone, Default)]
 pub(super) struct NativeCatalogRefreshCoordinator {
@@ -77,7 +80,8 @@ struct NativeCatalogRefreshState {
     // separate coordinators can still repeat a context during overlapping refreshes.
     project_targets: HashMap<String, usize>,
     running: bool,
-    trailing_run_requested: bool,
+    /// Who asked during the current run, so the run that answers them can name its cause.
+    trailing_requester: Option<NativeCatalogRefreshRequester>,
     last_run_started_at: Option<Instant>,
 }
 
@@ -156,7 +160,8 @@ impl NativeCatalogRefreshCoordinator {
         self.state
             .lock()
             .expect("Native Session catalog refresh state poisoned")
-            .trailing_run_requested
+            .trailing_requester
+            .is_some()
     }
 
     fn begin_ordinary_refresh(&self) {
@@ -202,12 +207,15 @@ impl TaskProductApi {
     /// Starts the periodic refresh unless a run is active or started within `interval`.
     pub(crate) fn request_due_native_session_catalog_refresh(&self, interval: Duration) {
         if self.native_catalog_refresh.periodic_refresh_due(interval) {
-            self.request_native_session_catalog_refresh();
+            self.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::Periodic);
         }
     }
 
     /// Coalesces catalog work while preserving one trailing refresh requested during a run.
-    pub(crate) fn request_native_session_catalog_refresh(&self) {
+    pub(crate) fn request_native_session_catalog_refresh(
+        &self,
+        requester: NativeCatalogRefreshRequester,
+    ) {
         self.native_catalog_refresh.begin_ordinary_refresh();
         {
             let mut state = self
@@ -216,7 +224,7 @@ impl TaskProductApi {
                 .lock()
                 .expect("Native Session catalog refresh state poisoned");
             if state.running {
-                state.trailing_run_requested = true;
+                state.trailing_requester = Some(requester);
                 return;
             }
             state.running = true;
@@ -228,13 +236,14 @@ impl TaskProductApi {
         );
 
         let api = self.clone();
+        let mut requester = requester;
         std::thread::spawn(move || loop {
             let started_at = Instant::now();
             let operation_id = uuid::Uuid::new_v4().to_string();
             api.native_catalog_refresh.record_run_started();
             crate::logging::info(
                 "native_session_catalog_refresh_started",
-                serde_json::json!({ "operation": "agent/list_sessions", "operation_id": operation_id, "attempt": 1 }),
+                serde_json::json!({ "operation": "agent/list_sessions", "operation_id": operation_id, "requester": requester.as_str(), "attempt": 1 }),
             );
             let refresh = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 api.refresh_native_session_project_trees_with_id(
@@ -262,7 +271,7 @@ impl TaskProductApi {
                             "operation_id": operation_id,
                             "attempt": 1,
                             "outcome": "completed",
-                            "trailing_run_requested": state.trailing_run_requested,
+                            "trailing_run_requested": state.trailing_requester.is_some(),
                             "duration_ms": started_at.elapsed().as_millis(),
                         }),
                     );
@@ -276,7 +285,7 @@ impl TaskProductApi {
                             "operation_id": operation_id,
                             "attempt": 1,
                             "outcome": "failed",
-                            "trailing_run_requested": state.trailing_run_requested,
+                            "trailing_run_requested": state.trailing_requester.is_some(),
                             "duration_ms": started_at.elapsed().as_millis(),
                             "error_kind": error.code,
                         }),
@@ -286,8 +295,8 @@ impl TaskProductApi {
                     }
                 }
             };
-            if state.trailing_run_requested {
-                state.trailing_run_requested = false;
+            if let Some(next) = state.trailing_requester.take() {
+                requester = next;
                 continue;
             }
             state.running = false;
@@ -696,8 +705,8 @@ impl AgentListSessionsWorkflow for TaskProductApi {
         self.list_sessions_for_project(params)
     }
 
-    fn request_native_session_catalog_refresh(&self) {
-        TaskProductApi::request_native_session_catalog_refresh(self)
+    fn request_native_session_catalog_refresh(&self, requester: NativeCatalogRefreshRequester) {
+        TaskProductApi::request_native_session_catalog_refresh(self, requester)
     }
 
     fn request_due_native_session_catalog_refresh(&self, interval: Duration) {

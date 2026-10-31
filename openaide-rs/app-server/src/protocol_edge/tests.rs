@@ -1151,7 +1151,9 @@ fn background_native_catalog_refresh_request_is_delegated() {
     let workflow = Arc::new(RecordingCatalogRefresh::default());
     let gateway = SharedRpcGateway::new(gateway_with_agent_session_listing(workflow.clone()));
 
-    gateway.request_native_session_catalog_refresh();
+    gateway.request_native_session_catalog_refresh(
+        crate::tasks::product_api::NativeCatalogRefreshRequester::ClientRefresh,
+    );
 
     assert_eq!(workflow.requests.load(Ordering::SeqCst), 1);
 }
@@ -3747,7 +3749,10 @@ impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
         Err(test_unavailable("interactive listing is not used"))
     }
 
-    fn request_native_session_catalog_refresh(&self) {
+    fn request_native_session_catalog_refresh(
+        &self,
+        _requester: crate::tasks::product_api::NativeCatalogRefreshRequester,
+    ) {
         self.requests.fetch_add(1, Ordering::SeqCst);
     }
 

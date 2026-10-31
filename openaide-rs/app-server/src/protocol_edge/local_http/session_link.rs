@@ -203,7 +203,7 @@ impl SessionLink {
         }
         let now = AppServerTime::now();
         let gateway = self.protocol.gateway.clone();
-        let response = dispatch_accepted_session_frame(
+        let (response, reply_bytes) = dispatch_accepted_session_frame(
             self.attached.connection_id.clone(),
             accepted,
             &self.protocol.sessions,
@@ -222,6 +222,7 @@ impl SessionLink {
                     "session_id": self.attached.session_id,
                     "method": method,
                     "outcome": if outcome.is_ok() { "completed" } else { "rejected" },
+                    "reply_bytes": reply_bytes,
                     "duration_ms": started_at.elapsed().as_millis(),
                 }),
             );
