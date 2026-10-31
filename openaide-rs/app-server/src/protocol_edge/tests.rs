@@ -73,6 +73,7 @@ use super::*;
 mod client_probe;
 mod devices;
 mod gateway_lock_wait;
+mod navigation_publication;
 mod replacement_impact;
 mod task_resume;
 mod terminals;

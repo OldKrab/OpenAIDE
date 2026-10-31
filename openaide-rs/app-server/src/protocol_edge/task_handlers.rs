@@ -22,7 +22,7 @@ use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, Rp
 
 mod archive_older;
 mod chat_image;
-mod publication;
+pub(super) mod publication;
 
 impl RpcGateway {
     pub(super) fn handle_task_acquire_in_worktree(

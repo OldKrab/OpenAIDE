@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{atomic::AtomicU64, Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -24,11 +24,14 @@ use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::shell_file_handles::ShellFileRevealTarget;
+use crate::snapshots::TaskNavigationSnapshotSource;
 use crate::task_events::TaskUpdate;
 #[cfg(test)]
 use crate::tasks::product_api::NativeCatalogRefreshRequester;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
+use super::task_handlers::publication::PreparedProjectEntries;
+use super::task_update_publisher::TaskUpdatePublication;
 use super::{
     AppServerProbeFacts, DeliverySignal, GatewayEventDelivery, GatewayOutcome,
     InboundProtocolMessage, RpcGateway,
@@ -43,15 +46,9 @@ pub struct SharedRpcGateway {
     gateway: Arc<Mutex<RpcGateway>>,
     deliveries: DeliverySignal,
     slow_lock_wait: Duration,
-}
-
-/// Protocol lock timing of one committed Task update publication.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TaskUpdatePublication {
-    /// Time spent queued behind other holders of the protocol lock.
-    pub lock_wait: Duration,
-    /// Time the publication held the lock while projecting and queueing events.
-    pub lock_held: Duration,
+    /// Held here so publications can read navigation without the protocol lock.
+    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
+    project_entries_generation: Arc<AtomicU64>,
 }
 
 /// Gateway access that may have queued client deliveries. Releasing it wakes
@@ -110,6 +107,8 @@ impl SharedRpcGateway {
     }
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
+            task_navigation: gateway.snapshots.task_navigation_source(),
+            project_entries_generation: gateway.project_entries_generation.clone(),
             gateway: Arc::new(Mutex::new(gateway)),
             deliveries: DeliverySignal::default(),
             slow_lock_wait: SLOW_LOCK_WAIT,
@@ -120,6 +119,12 @@ impl SharedRpcGateway {
     pub(crate) fn with_slow_lock_wait(mut self, threshold: Duration) -> Self {
         self.slow_lock_wait = threshold;
         self
+    }
+
+    /// Lets a test observe from inside a read whether the protocol lock is held.
+    #[cfg(test)]
+    pub(crate) fn try_lock_for_test(&self) -> Option<MutexGuard<'_, RpcGateway>> {
+        self.gateway.try_lock().ok()
     }
 
     /// Wake source for transport links waiting on this gateway's deliveries.
@@ -642,13 +647,20 @@ impl SharedRpcGateway {
         update: &TaskUpdate,
         now: AppServerTime,
     ) -> TaskUpdatePublication {
+        let projection_started_at = Instant::now();
+        let prepared = PreparedProjectEntries::for_update(
+            update,
+            self.task_navigation.as_ref(),
+            &self.project_entries_generation,
+        );
         let wait_started_at = Instant::now();
         let mut gateway = self.lock();
         let held_since = Instant::now();
-        gateway.publish_task_update(update, now);
+        gateway.publish_prepared_task_update(update, prepared, now);
         TaskUpdatePublication {
             lock_wait: held_since.duration_since(wait_started_at),
             lock_held: held_since.elapsed(),
+            projection: wait_started_at.duration_since(projection_started_at),
         }
     }
 

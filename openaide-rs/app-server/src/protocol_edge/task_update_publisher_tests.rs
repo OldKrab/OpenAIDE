@@ -167,6 +167,7 @@ fn fake_lock_timing(kind: &TaskUpdateKind) -> TaskUpdatePublication {
     TaskUpdatePublication {
         lock_wait: Duration::from_millis(5),       // timing: data
         lock_held: Duration::from_millis(held_ms), // timing: data
+        projection: Duration::ZERO,
     }
 }
 

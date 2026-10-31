@@ -2,9 +2,11 @@ use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::TaskStatus;
 use openaide_app_server_protocol::task::{TaskNavigationSection, TaskNavigationSection::*};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::server_requests::ServerRequestDelivery;
+use crate::snapshots::TaskNavigationSnapshotSource;
 use crate::task_events::{
     CommittedNavigationChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind,
 };
@@ -12,16 +14,103 @@ use crate::task_events::{
 use super::RpcGateway;
 use crate::protocol_edge::{event_deliveries, GatewayEventDelivery};
 
+/// A Project's navigation entries read ahead of the protocol lock. The projection reads the
+/// whole Project's Tasks and Native Sessions, which must not stall client requests.
+pub(crate) struct PreparedProjectEntries {
+    /// Generation when the read began. A request can publish a fresher projection before this
+    /// one reaches the lock, and publishing this one after it would move clients backwards.
+    generation: u64,
+    payloads: Vec<AppServerEventPayload>,
+}
+
+impl PreparedProjectEntries {
+    /// Reads before the lock is safe because only the publisher thread calls this: its updates
+    /// stay in order, and a commit after this read has its own invalidation queued behind it.
+    pub(crate) fn for_update(
+        update: &TaskUpdate,
+        navigation: &dyn TaskNavigationSnapshotSource,
+        generation: &AtomicU64,
+    ) -> Option<Self> {
+        let project_id = match &update.kind {
+            TaskUpdateKind::NavigationProjectEntriesChanged { project_id } => project_id,
+            TaskUpdateKind::Changed(change) => match &change.navigation {
+                Some(CommittedNavigationChange::ProjectEntriesChanged { project_id }) => project_id,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let generation = generation.load(Ordering::SeqCst);
+        Some(Self {
+            generation,
+            payloads: project_entries_payloads(navigation, project_id),
+        })
+    }
+}
+
+fn project_entries_payloads(
+    navigation: &dyn TaskNavigationSnapshotSource,
+    project_id: &ProjectId,
+) -> Vec<AppServerEventPayload> {
+    let mut payloads = Vec::new();
+    for section in [Tasks, Archive] {
+        let selected = [project_id.clone()];
+        let snapshot = match navigation.snapshot(section, Some(&selected)) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                crate::logging::warn(
+                    "project_entries_projection_failed",
+                    serde_json::json!({
+                        "operation": "task_update_publication",
+                        "project_id": project_id,
+                        "section": format!("{section:?}"),
+                        "error_code": format!("{:?}", error.code),
+                    }),
+                );
+                continue;
+            }
+        };
+        let group = snapshot.groups.into_iter().next();
+        let (task_count, entries, has_more, loading) = group
+            .map(|group| {
+                (
+                    group.task_count,
+                    group.entries,
+                    group.has_more,
+                    group.loading,
+                )
+            })
+            .unwrap_or((0, Vec::new(), false, false));
+        payloads.push(AppServerEventPayload::ProjectEntriesReplaced {
+            section,
+            project_id: project_id.clone(),
+            task_count,
+            entries,
+            has_more,
+            loading,
+        });
+    }
+    payloads
+}
+
 impl RpcGateway {
     pub(crate) fn publish_task_update(
         &mut self,
         update: &TaskUpdate,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
+        self.publish_prepared_task_update(update, None, now)
+    }
+
+    pub(crate) fn publish_prepared_task_update(
+        &mut self,
+        update: &TaskUpdate,
+        prepared: Option<PreparedProjectEntries>,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
         let task_id = TaskId::from(update.task_id.clone());
         let mut events = match &update.kind {
             TaskUpdateKind::NavigationProjectEntriesChanged { project_id } => {
-                self.publish_project_entries_replaced(project_id, now)
+                self.publish_entries_for_update(project_id, prepared, now)
             }
             TaskUpdateKind::NavigationRefreshStateChanged { refresh } => {
                 self.publish_refresh_state_changed(refresh.clone(), now)
@@ -30,7 +119,7 @@ impl RpcGateway {
                 self.publish_history_sync(&task_id, history_sync.clone(), now)
             }
             TaskUpdateKind::Changed(change) => {
-                self.publish_committed_task_change(&task_id, update.revision, change, now)
+                self.publish_committed_task_change(&task_id, update.revision, change, prepared, now)
             }
             TaskUpdateKind::ToolDetailChanged {
                 artifact_id,
@@ -100,6 +189,9 @@ impl RpcGateway {
         &mut self,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
+        // Replaces every Project's entries, so it overtakes a projection in flight too.
+        self.project_entries_generation
+            .fetch_add(1, Ordering::SeqCst);
         let mut events = Vec::new();
         for section in [TaskNavigationSection::Tasks, TaskNavigationSection::Archive] {
             let Ok(navigation) = self.snapshots.task_navigation_snapshot(section, None) else {
@@ -151,6 +243,7 @@ impl RpcGateway {
         task_id: &TaskId,
         revision: u64,
         change: &CommittedTaskChange,
+        prepared: Option<PreparedProjectEntries>,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let mut events = self.publish_task_payload(
@@ -198,7 +291,7 @@ impl RpcGateway {
                     self.publish_task_updated(task.clone(), now)
                 }
                 CommittedNavigationChange::ProjectEntriesChanged { project_id } => {
-                    self.publish_project_entries_replaced(project_id, now)
+                    self.publish_entries_for_update(project_id, prepared, now)
                 }
             });
         }
@@ -268,47 +361,59 @@ impl RpcGateway {
         ))
     }
 
+    /// Reads and publishes under the protocol lock, for request handlers that must answer with
+    /// the result. Any projection read before this one is now stale.
     pub(crate) fn publish_project_entries_replaced(
         &mut self,
         project_id: &ProjectId,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        // TODO: Build both section snapshots before taking the protocol lock. Each projection
-        // reads the whole Project's Tasks and Native Sessions while client requests wait;
-        // the Task update publisher only bounds how many projections run, not their cost.
+        self.project_entries_generation
+            .fetch_add(1, Ordering::SeqCst);
+        let navigation = self.snapshots.task_navigation_source();
+        let payloads = project_entries_payloads(navigation.as_ref(), project_id);
+        self.publish_project_entries(payloads, now)
+    }
+
+    fn publish_entries_for_update(
+        &mut self,
+        project_id: &ProjectId,
+        prepared: Option<PreparedProjectEntries>,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let generation = self.project_entries_generation.load(Ordering::SeqCst);
+        match prepared {
+            Some(prepared) if prepared.generation == generation => {
+                self.publish_project_entries(prepared.payloads, now)
+            }
+            stale => {
+                if stale.is_some() {
+                    crate::logging::info(
+                        "project_entries_projection_superseded",
+                        serde_json::json!({
+                            "operation": "task_update_publication",
+                            "project_id": project_id,
+                        }),
+                    );
+                }
+                self.publish_project_entries_replaced(project_id, now)
+            }
+        }
+    }
+
+    fn publish_project_entries(
+        &mut self,
+        payloads: Vec<AppServerEventPayload>,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
         let mut events = Vec::new();
-        for section in [Tasks, Archive] {
-            let selected = [project_id.clone()];
-            let Ok(snapshot) = self
-                .snapshots
-                .task_navigation_snapshot(section, Some(&selected))
-            else {
-                continue;
-            };
-            let group = snapshot.groups.into_iter().next();
-            let (task_count, entries, has_more, loading) = group
-                .map(|group| {
-                    (
-                        group.task_count,
-                        group.entries,
-                        group.has_more,
-                        group.loading,
-                    )
-                })
-                .unwrap_or((0, Vec::new(), false, false));
+        for payload in payloads {
             let client_hub = self.client_hub.clone();
             events.extend(event_deliveries(self.state_stream.publish_committed(
                 EventScope::StateRoot {
                     state_root_id: self.state_stream.state_root_id().clone(),
                 },
-                AppServerEventPayload::ProjectEntriesReplaced {
-                    section,
-                    project_id: project_id.clone(),
-                    task_count,
-                    entries,
-                    has_more,
-                    loading,
-                },
+                payload,
                 |client_id| client_hub.delivery_for(client_id),
                 now,
             )));

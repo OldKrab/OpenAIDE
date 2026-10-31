@@ -270,6 +270,10 @@ impl SnapshotBuilder {
         self.agents.snapshot()
     }
 
+    pub(crate) fn task_navigation_source(&self) -> Arc<dyn TaskNavigationSnapshotSource> {
+        self.task_navigation.clone()
+    }
+
     pub(crate) fn task_navigation_snapshot(
         &self,
         section: openaide_app_server_protocol::task::TaskNavigationSection,
