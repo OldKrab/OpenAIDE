@@ -16,10 +16,10 @@ type CheckPaths = (paths: string[]) => Promise<string[]>;
 type ScheduleDrain = (drain: () => void) => void;
 
 /**
- * Remembers, for one Task view, which workspace-relative paths named by the Agent are files.
- * Paths requested close together go to the App Server in one request, and only one request runs
- * at a time; a file stays a file, and a missing path is checked again later, since the Agent may
- * create it after mentioning it.
+ * Remembers, for one Task on one connection, which workspace-relative paths named by the Agent are
+ * files. Paths requested close together go to the App Server in one request, only one request runs
+ * at a time, and a backlog waits between requests; a file stays a file, and a missing path is checked
+ * again later, since the Agent may create it after mentioning it.
  */
 export class ExistingFileReferences {
   private readonly known = new Map<string, { file: boolean; checkedAt: number }>();
@@ -60,35 +60,48 @@ export class ExistingFileReferences {
     this.schedule(() => void this.drain());
   }
 
-  /** Runs until nothing is queued, so paths that arrive during a request share the next one. */
+  /** Sends one request; what is queued after it waits a window, so it shares the next one. */
   private async drain() {
-    while (this.queued.size > 0) {
-      const batch = [...this.queued].slice(0, BATCH_SIZE);
-      batch.forEach((path) => {
-        this.queued.delete(path);
-        this.inFlight.add(path);
-      });
-      let files: Set<string> | undefined;
-      try {
-        files = new Set(await this.check(batch));
-      } catch {
-        // The intent has logged the failure; an older App Server lacks the method entirely.
-        this.failedUntil = this.now() + FAILURE_BACKOFF_MS;
-        this.queued.clear();
-      }
-      const checkedAt = this.now();
-      for (const path of batch) {
-        this.inFlight.delete(path);
-        if (files) this.known.set(path, { file: files.has(path), checkedAt });
-      }
-      this.listeners.forEach((listener) => listener());
+    const batch = [...this.queued].slice(0, BATCH_SIZE);
+    batch.forEach((path) => {
+      this.queued.delete(path);
+      this.inFlight.add(path);
+    });
+    let files: Set<string> | undefined;
+    try {
+      files = new Set(await this.check(batch));
+    } catch {
+      // The intent has logged the failure; an older App Server lacks the method entirely.
+      this.failedUntil = this.now() + FAILURE_BACKOFF_MS;
+      this.queued.clear();
     }
-    this.draining = false;
+    const checkedAt = this.now();
+    for (const path of batch) {
+      this.inFlight.delete(path);
+      if (files) this.known.set(path, { file: files.has(path), checkedAt });
+    }
+    this.listeners.forEach((listener) => listener());
+    if (this.queued.size > 0) this.schedule(() => void this.drain());
+    else this.draining = false;
   }
 }
 
-/** Checks paths against one Task's workspace through the read-only Project Files intent. */
-export function existingFileReferencesFor(connection: Pick<BackendConnection, "request">, taskId: string) {
+type FileCheckConnection = Pick<BackendConnection, "request">;
+
+/** Outlives the views of a Task, which mount again on every return to it, and goes with the connection. */
+const referencesByConnection = new WeakMap<FileCheckConnection, Map<string, ExistingFileReferences>>();
+
+/** The answers for one Task's workspace, shared by every view of it on this connection. */
+export function existingFileReferencesFor(connection: FileCheckConnection, taskId: string) {
+  let references = referencesByConnection.get(connection);
+  if (!references) referencesByConnection.set(connection, references = new Map());
+  let taskReferences = references.get(taskId);
+  if (!taskReferences) references.set(taskId, taskReferences = checkingProjectFiles(connection, taskId));
+  return taskReferences;
+}
+
+/** Checks paths through the read-only Project Files intent. */
+function checkingProjectFiles(connection: FileCheckConnection, taskId: string) {
   return new ExistingFileReferences(async (paths) => {
     const result = await readProjectFiles(connection, "existing", {
       taskId: taskId as TaskId,

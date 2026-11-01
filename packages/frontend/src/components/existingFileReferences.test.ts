@@ -1,8 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { ExistingFileReferences } from "./existingFileReferences";
+import { ExistingFileReferences, existingFileReferencesFor } from "./existingFileReferences";
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const drainNow = (drain: () => void) => queueMicrotask(drain);
+
+describe("existingFileReferencesFor", () => {
+  it("keeps answers when a Task view mounts again on the same connection", () => {
+    const connection = { request: vi.fn() };
+    const first = existingFileReferencesFor(connection, "task-1");
+
+    expect(existingFileReferencesFor(connection, "task-1")).toBe(first);
+    expect(existingFileReferencesFor(connection, "task-2")).not.toBe(first);
+    expect(existingFileReferencesFor({ request: vi.fn() }, "task-1")).not.toBe(first);
+  });
+});
 
 describe("ExistingFileReferences", () => {
   it("asks about the paths of one tick together and remembers the answer", async () => {
@@ -89,6 +100,31 @@ describe("ExistingFileReferences", () => {
     references.request("d.md");
     await settle();
     expect(check).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits between the requests of a long backlog", async () => {
+    const check = vi.fn(async (_paths: string[]) => [] as string[]);
+    const windows: Array<() => void> = [];
+    const references = new ExistingFileReferences(check, Date.now, (drain) => windows.push(drain));
+
+    for (let index = 0; index < 150; index += 1) references.request(`file-${index}.md`);
+    windows.shift()?.();
+    await settle();
+    expect(check).toHaveBeenCalledOnce();
+    expect(check.mock.calls[0]?.[0]).toHaveLength(100);
+    expect(windows).toHaveLength(1);
+
+    // Paths from the wait join the request it ends in.
+    references.request("late.md");
+    windows.shift()?.();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(check.mock.calls[1]?.[0]).toHaveLength(51);
+    expect(windows).toHaveLength(0);
+
+    // The queue is empty, so the next path opens a new window.
+    references.request("later.md");
+    expect(windows).toHaveLength(1);
   });
 
   it("drops queued paths instead of retrying through a failure", async () => {
