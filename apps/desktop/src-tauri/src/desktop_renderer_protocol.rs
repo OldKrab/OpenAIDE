@@ -45,7 +45,7 @@ fn script_source(windows: bool) -> String {
 
 pub(crate) fn pdf_document_csp(windows: bool) -> String {
     format!(
-        "default-src 'none'; connect-src 'none'; font-src data:; img-src data: blob:; style-src 'unsafe-inline'; worker-src blob:; script-src {}; base-uri 'none'; form-action 'none'",
+        "default-src 'none'; connect-src 'none'; font-src data:; img-src data: blob:; style-src 'unsafe-inline'; worker-src blob:; script-src {} 'wasm-unsafe-eval'; base-uri 'none'; form-action 'none'",
         script_source(windows)
     )
 }

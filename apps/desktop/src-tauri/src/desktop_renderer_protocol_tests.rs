@@ -23,7 +23,7 @@ fn pdf_document_carries_its_own_policy_and_no_inline_script() {
     let csp = header_value(&response, header::CONTENT_SECURITY_POLICY);
     assert!(csp.contains("connect-src 'none'"), "{csp}");
     assert!(csp.contains("worker-src blob:"), "{csp}");
-    assert!(csp.contains("script-src openaide-renderer:;"), "{csp}");
+    assert!(csp.contains("script-src openaide-renderer: 'wasm-unsafe-eval';"), "{csp}");
     let body = String::from_utf8(response.body().to_vec()).unwrap();
     assert!(
         body.contains(r#"<script src="./pdf-renderer.js"></script>"#),
@@ -37,7 +37,7 @@ fn windows_admits_the_script_by_its_webview_host() {
     let csp = pdf_document_csp(true);
 
     assert!(
-        csp.contains("script-src http://openaide-renderer.localhost;"),
+        csp.contains("script-src http://openaide-renderer.localhost 'wasm-unsafe-eval';"),
         "{csp}"
     );
 }

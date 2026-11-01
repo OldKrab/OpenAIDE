@@ -5,6 +5,7 @@ import { EventBus, PDFLinkService, PDFViewer } from "pdfjs-dist/legacy/web/pdf_v
 import viewerStyles from "pdfjs-dist/legacy/web/pdf_viewer.css?inline";
 // A classic inline worker: the opaque-origin sandbox refuses module workers from blob URLs.
 import PdfWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs?worker&inline";
+import { BUNDLED_URL, BundledBinaryDataFactory } from "./bundledBinaryData";
 import {
   PDF_RENDERER_VERSION,
   isPdfViewerRequest,
@@ -93,11 +94,11 @@ async function load(bytes: ArrayBuffer) {
     GlobalWorkerOptions.workerPort = worker;
     const task = getDocument({
       data: new Uint8Array(bytes),
-      // No scripted forms or fetched decoder assets inside the sandbox.
-      // TODO: package the pdf.js wasm decoders and CMaps into this bundle; without them
-      // JPEG 2000 images and some CJK fonts degrade instead of rendering exactly.
+      // No scripted forms inside the sandbox; binary data comes from this bundle.
       enableXfa: false,
-      useWasm: false,
+      BinaryDataFactory: BundledBinaryDataFactory,
+      cMapUrl: BUNDLED_URL,
+      wasmUrl: BUNDLED_URL,
       useWorkerFetch: false,
       useSystemFonts: true,
     });
