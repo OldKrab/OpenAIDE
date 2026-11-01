@@ -3,7 +3,7 @@ import { computerName, currentComputer, type ComputersSnapshot } from "../servic
 import { useComputerSwitch, type ComputerSwitch, type ComputerSwitchState } from "../services/computerSwitch";
 import type { ConnectionProblem } from "../services/connectionProblem";
 import { ConnectionPage, thisDevice } from "./ConnectionPage";
-import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
+import { ConnectionProblemView, connectionComputerFor } from "./ConnectionProblemView";
 
 /**
  * A switch in progress or refused (ADR-0070) takes the main surface, so the wait and its
@@ -86,8 +86,8 @@ export function WorkbenchConnectionSurface({ appServerError, appServerProblem, c
       message={appServerError}
       onRetry={onRetry}
       onUse={others.length && switcher ? (id) => void switcher.request(id || undefined).catch(() => undefined) : undefined}
-      place={connectionPlaceFor(snapshot, serverName)}
-      places={others}
+      computer={connectionComputerFor(snapshot, serverName)}
+      computers={others}
       problem={appServerProblem}
     />
   );

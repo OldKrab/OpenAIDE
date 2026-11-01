@@ -21,7 +21,7 @@ import { currentFrontendShell, type DesktopUpdateCapability } from "../services/
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
 import { TerminalSurfaceContext, useTerminalPage } from "./terminals/terminalSurface";
 import { computerLink } from "./ComputerSwitcher";
-import { ConnectionProblemView, connectionPlaceFor } from "./ConnectionProblemView";
+import { ConnectionProblemView, connectionComputerFor } from "./ConnectionProblemView";
 import { WorkbenchConnectionSurface, connectionSurfaceTaskListError, connectionSurfaceTitle } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
 import { useComputerPlace } from "./useComputerPlace";
@@ -47,7 +47,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const desktopUpdate = useDesktopUpdateSnapshot(frontendShell?.desktopUpdates);
   const computers = useComputers(frontendShell?.computers);
   const computerLinkState = computerLink(controller.backendConnectionState);
-  const connectionPlace = connectionPlaceFor(computers, settings.devices?.serverName);
+  const connectionComputer = connectionComputerFor(computers, settings.devices?.serverName);
   const [computerSwitcherRequest, setComputerSwitcherRequest] = useState(0);
   const updateAvailable = desktopUpdate?.kind === "available"
     || desktopUpdate?.kind === "downloading"
@@ -499,7 +499,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           device={computers?.device}
           message={appServerError}
           onRetry={controller.retryTaskOpen}
-          place={connectionPlace}
+          computer={connectionComputer}
           problem={appServerProblem}
         />
       </main>

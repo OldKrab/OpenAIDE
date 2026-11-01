@@ -174,13 +174,13 @@
   background: var(--oa-raised);
 }
 
-.connection-places {
+.connection-computers {
   max-width: 280px;
   margin-top: 28px;
   text-align: start;
 }
 
-.connection-places-title {
+.connection-computers-title {
   display: block;
   padding: 0 4px 6px;
   color: var(--oa-muted);
@@ -188,13 +188,13 @@
   font-weight: 550;
 }
 
-.connection-places-list {
+.connection-computers-list {
   border-radius: var(--oa-radius-lg);
   background: var(--oa-panel);
   overflow: hidden;
 }
 
-.connection-places-list button {
+.connection-computers-list button {
   width: 100%;
   height: 44px;
   border: 0;
@@ -209,11 +209,11 @@
   font-size: 14px;
 }
 
-.connection-places-list button + button {
+.connection-computers-list button + button {
   box-shadow: inset 0 1px 0 var(--oa-border-subtle, var(--oa-border));
 }
 
-.connection-places-list button span {
+.connection-computers-list button span {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -222,12 +222,12 @@
   white-space: nowrap;
 }
 
-.connection-places-list button svg:last-child {
+.connection-computers-list button svg:last-child {
   color: var(--oa-muted);
 }
 
-.connection-places-list button:hover,
-.connection-places-list button:active {
+.connection-computers-list button:hover,
+.connection-computers-list button:active {
   background: var(--oa-raised);
 }
 

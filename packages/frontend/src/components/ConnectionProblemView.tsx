@@ -4,16 +4,13 @@ import type { ConnectionProblem } from "../services/connectionProblem";
 import { ConnectionPage, thisDevice, type ConnectionEnd } from "./ConnectionPage";
 
 /**
- * The place the Frontend tried to use. A named computer comes from the shell's computers
+ * The computer the Frontend tried to use. A named computer comes from the shell's computers
  * capability; without one the App Server is unnamed, and `self` means it runs on this device.
- *
- * TODO: rename to ConnectionComputer (and `place`/`places` props to `computer`/`computers`):
- * CONTEXT.md names this a Computer, and Place means the Task or Project last open on one.
  */
-export type ConnectionPlace = { name: string; self?: "phone" | "computer" };
+export type ConnectionComputer = { name: string; self?: "phone" | "computer" };
 
-/** Names the place in use: the shell's current computer, this device, or the App Server's own name. */
-export function connectionPlaceFor(computers: ComputersSnapshot | undefined, serverName: string | undefined): ConnectionPlace | undefined {
+/** Names the computer in use: the shell's current computer, this device, or the App Server's own name. */
+export function connectionComputerFor(computers: ComputersSnapshot | undefined, serverName: string | undefined): ConnectionComputer | undefined {
   const inUse = computers ? currentComputer(computers) : undefined;
   if (inUse) return { name: computerName(inUse) };
   if (computers) return { name: computers.device === "phone" ? "This phone" : "This computer", self: computers.device };
@@ -24,25 +21,25 @@ type Copy = { title: string; line: string };
 type Incompatible = Extract<ConnectionProblem, { kind: "incompatible" }>;
 
 /**
- * Says which place cannot be used, why in a few words, and what to do next. The raw error
+ * Says which computer cannot be used, why in a few words, and what to do next. The raw error
  * and protocol versions sit behind Details (DESIGN.md: troubleshooting behind an explicit
- * affordance). Shared by every shell; switching is offered only where the shell has other places.
+ * affordance). Shared by every shell; switching is offered only where the shell has other computers.
  */
-export function ConnectionProblemView({ device, message, onRetry, onUse, place, places = [], problem }: {
+export function ConnectionProblemView({ device, message, onRetry, onUse, computer, computers = [], problem }: {
   /** The device this Frontend runs on; a computer when the shell does not say. */
   device?: "phone" | "computer";
   message: string;
   onRetry?: () => void;
-  /** Switches to one of `places`; "" is this device. */
+  /** Switches to one of `computers`; "" is this device. */
   onUse?: (id: string) => void;
-  place?: ConnectionPlace;
-  /** The other places agents can work, offered right here instead of in the navigation. */
-  places?: { id: string; label: string }[];
+  computer?: ConnectionComputer;
+  /** The other computers agents can work on, offered right here instead of in the navigation. */
+  computers?: { id: string; label: string }[];
   problem?: ConnectionProblem;
 }) {
-  const copy = problemCopy(problem, place);
+  const copy = problemCopy(problem, computer);
   const versions = problem?.kind === "incompatible" ? problem : undefined;
-  const [here, there] = linkEnds(device, place, versions);
+  const [here, there] = linkEnds(device, computer, versions);
   return (
     <ConnectionPage
       actions={onRetry ? <button className="connection-primary" onClick={onRetry} type="button">Try again</button> : undefined}
@@ -53,11 +50,11 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, place, 
       there={there}
       title={copy.title}
     >
-      {onUse && places.length ? (
-        <div className="connection-places">
-          <span className="connection-places-title">Switch to</span>
-          <div aria-label="Switch to" className="connection-places-list" role="group">
-            {places.map((other) => {
+      {onUse && computers.length ? (
+        <div className="connection-computers">
+          <span className="connection-computers-title">Switch to</span>
+          <div aria-label="Switch to" className="connection-computers-list" role="group">
+            {computers.map((other) => {
               const Icon = other.id ? MonitorSmartphone : device === "phone" ? Smartphone : Monitor;
               return (
                 <button key={other.id || "this-device"} onClick={() => onUse(other.id)} type="button">
@@ -77,7 +74,7 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, place, 
             <>
               <div><dt>This app</dt><dd>Protocol {versions.clientProtocol}</dd></div>
               <div>
-                <dt>{placeLabel(place)}</dt>
+                <dt>{computerLabel(computer)}</dt>
                 <dd>{versions.server ? `OpenAIDE ${versions.server.appVersion} · protocol ${versions.server.protocol}` : "Version unknown"}</dd>
               </div>
             </>
@@ -95,28 +92,28 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, place, 
  * TODO: show this app's version on the near end too. No shell passes the Frontend its own
  * app version yet, and setting this app's protocol beside the computer's app version would mislead.
  */
-function linkEnds(device: "phone" | "computer" | undefined, place: ConnectionPlace | undefined, versions: Incompatible | undefined): [ConnectionEnd, ConnectionEnd] {
-  const here: ConnectionEnd = place?.self ? { label: "This app", kind: "app" } : thisDevice(device);
-  const there: ConnectionEnd = { label: placeLabel(place), kind: place?.self ?? "computer" };
+function linkEnds(device: "phone" | "computer" | undefined, computer: ConnectionComputer | undefined, versions: Incompatible | undefined): [ConnectionEnd, ConnectionEnd] {
+  const here: ConnectionEnd = computer?.self ? { label: "This app", kind: "app" } : thisDevice(device);
+  const there: ConnectionEnd = { label: computerLabel(computer), kind: computer?.self ?? "computer" };
   if (versions?.update === "app") Object.assign(here, { note: "Update needed", stale: true });
   if (versions?.server) there.note = versions.server.appVersion;
   if (versions?.update === "computer") Object.assign(there, { note: there.note ?? "Update needed", stale: true });
   return [here, there];
 }
 
-function placeLabel(place: ConnectionPlace | undefined) {
-  if (place?.self) return place.self === "phone" ? "This phone" : "This computer";
-  return place?.name ?? "App Server";
+function computerLabel(computer: ConnectionComputer | undefined) {
+  if (computer?.self) return computer.self === "phone" ? "This phone" : "This computer";
+  return computer?.name ?? "App Server";
 }
 
 /** Exported for tests: the copy is the contract with the user. */
-export function problemCopy(problem: ConnectionProblem | undefined, place: ConnectionPlace | undefined): Copy {
+export function problemCopy(problem: ConnectionProblem | undefined, computer: ConnectionComputer | undefined): Copy {
   // "OLD-PC" when known; otherwise the App Server on this device or an unnamed one.
-  const name = place?.self ? `OpenAIDE on this ${place.self}` : place?.name ?? "the App Server";
-  const subject = place?.self ? `this ${place.self}` : place?.name ?? "the computer";
+  const name = computer?.self ? `OpenAIDE on this ${computer.self}` : computer?.name ?? "the App Server";
+  const subject = computer?.self ? `this ${computer.self}` : computer?.name ?? "the computer";
   switch (problem?.kind) {
     case "unreachable":
-      return place?.self
+      return computer?.self
         ? { title: `Can’t reach ${name}`, line: "Restart OpenAIDE, then try again." }
         : { title: `Can’t reach ${name}`, line: "Check that it’s on and OpenAIDE is running there." };
     case "incompatible":
