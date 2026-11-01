@@ -1,3 +1,4 @@
+import type { DraftTexts } from "../services/keptDrafts";
 import type { AppState } from "../state/store";
 
 export function hasComposerContent(value: string, attachmentCount: number) {
@@ -5,13 +6,22 @@ export function hasComposerContent(value: string, attachmentCount: number) {
 }
 
 /**
- * Whether any composer holds text, attachments, or a send not yet accepted.
- * These live only in this page, so replacing the page loses them.
+ * Whether any composer holds attachments or a send not yet accepted. These live
+ * only in this page, so replacing the page loses them; a switch keeps draft text.
  */
 export function hasUnsentComposerInput(state: Pick<AppState, "newTask" | "taskInputs">) {
-  const unsent = (input: { prompt: string; context: unknown[]; pending?: unknown }) =>
-    hasComposerContent(input.prompt, input.context.length) || Boolean(input.pending);
+  const unsent = (input: { context: unknown[]; pending?: unknown }) =>
+    input.context.length > 0 || Boolean(input.pending);
   return unsent(state.newTask) || Object.values(state.taskInputs).some(unsent);
+}
+
+/** The draft text of every composer. A pending send is left out: it may yet be accepted. */
+export function composerDraftTexts(state: Pick<AppState, "newTask" | "taskInputs">): DraftTexts {
+  const tasks = Object.entries(state.taskInputs)
+    .filter(([, input]) => !input.pending && hasComposerText(input.prompt))
+    .map(([taskId, input]) => [taskId, input.prompt]);
+  const newTask = !state.newTask.pending && hasComposerText(state.newTask.prompt) ? state.newTask.prompt : undefined;
+  return { ...(newTask === undefined ? {} : { newTask }), tasks: Object.fromEntries(tasks) };
 }
 
 export function hasComposerText(value: string) {

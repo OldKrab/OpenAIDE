@@ -9,8 +9,9 @@ import {
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
-import { reportUnsentInput } from "../services/unsentInput";
-import { hasUnsentComposerInput } from "./composerDraftPolicy";
+import { currentFrontendShell } from "../services/frontendShell";
+import { reportDraftTexts, reportUnsentInput } from "../services/unsentInput";
+import { composerDraftTexts, hasUnsentComposerInput } from "./composerDraftPolicy";
 import {
   appReducer,
   bindAppServerReplicaEpoch,
@@ -59,6 +60,7 @@ import type { TaskViewIntents } from "./TaskView";
 import { createTerminalIntents, type TerminalIntents } from "../intents/terminalIntents";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
+import { useRestoredDrafts } from "./useRestoredDrafts";
 import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
 import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 
@@ -163,6 +165,7 @@ function useAppControllerCore({
   const latestState = useRef(state);
   latestState.current = state;
   useEffect(() => reportUnsentInput(() => hasUnsentComposerInput(latestState.current)), []);
+  useEffect(() => reportDraftTexts(() => composerDraftTexts(latestState.current)), []);
   const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const [navigationFocusedTaskId, setNavigationFocusedTaskId] = useState<string | null | undefined>(
@@ -228,6 +231,7 @@ function useAppControllerCore({
     () => bindAppServerReplicaEpoch(dispatch, replicaEpoch),
     [dispatch, replicaEpoch],
   );
+  useRestoredDrafts({ backendReady, capability: currentFrontendShell()?.computers, dispatch: replicaDispatch, latestState });
   const newTaskWorkspace = useNewTaskWorkspace({
     agents,
     asyncOperations,

@@ -199,6 +199,7 @@ describe("ComputerSwitcher", () => {
       act(() => menuItems()[1].click());
       const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]');
       expect(dialog()!.textContent).toContain("Switch to Studio?");
+      expect(dialog()!.textContent).toContain("Message drafts will be here when you come back.");
       expect(onUse).not.toHaveBeenCalled();
       const button = (name: string) => Array.from(dialog()!.querySelectorAll("button")).find((item) => item.textContent === name)!;
       await act(async () => button("Cancel").click());
