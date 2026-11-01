@@ -160,6 +160,8 @@ export type SettingsState = {
   skillsLoading?: boolean;
   skillsError?: string;
   error?: string;
+  /** The section whose action failed, read only with `error`. Failures that concern all of Settings have none. */
+  errorTab?: SettingsTabId;
   savedAgentId?: string;
   deletedAgentId?: string;
 };
