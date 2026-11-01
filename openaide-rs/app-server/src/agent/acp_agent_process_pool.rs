@@ -9,6 +9,7 @@ use crate::agent::acp_agent_process::{
     run_acp_agent_process, AcpAgentProcessControl, AcpAgentProcessInput, AcpAgentProcessList,
     AcpAgentProcessOpen,
 };
+use crate::agent::acp_early_exit_backoff::EarlyExitBackoff;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwner};
 use crate::agent::acp_npx_cache_repair::repair_after_early_exit;
 use crate::agent::acp_process_diagnostics::process_exit_code;
@@ -81,6 +82,7 @@ pub(super) struct AcpAgentProcessPool {
     auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
     list_timeout: Duration,
     startup_install_grace: Duration,
+    early_exits: Arc<EarlyExitBackoff>,
     managed_provisioner: Option<ManagedAcpProvisioner>,
     /// Where a process's pushed Account Limits are recorded; absent in runtimes built without
     /// product state.
@@ -146,6 +148,7 @@ impl AcpAgentProcessPool {
             auth_environments: Mutex::new(HashMap::new()),
             list_timeout: DEFAULT_LIST_TIMEOUT,
             startup_install_grace: STARTUP_INSTALL_GRACE,
+            early_exits: Arc::default(),
             managed_provisioner: None,
             account_limits: None,
         }
@@ -619,6 +622,7 @@ impl AcpAgentProcessPool {
     /// Stops the pooled process for one Agent so a later launch is a new process.
     /// A missing process already satisfies the request.
     pub(super) fn shutdown_agent(&self, agent_id: &str) {
+        self.early_exits.clear(agent_id);
         if let Some(process) = self.existing_process(agent_id) {
             self.stop_process(agent_id, &process, ProcessStopReason::AgentShutdown);
         }
@@ -641,6 +645,7 @@ impl AcpAgentProcessPool {
         agent_id: &str,
         first_open: Option<AcpAgentProcessOpen>,
     ) -> Result<(AcpAgentProcessClient, ProcessOperation), RuntimeError> {
+        self.early_exits.admit(agent_id, Instant::now())?;
         let config = self.registry.require_acp_config(agent_id)?;
         // Resolve the managed installation from the declared launch before the auth
         // environment replaces the Agent identity with its secret storage identity.
@@ -706,6 +711,7 @@ impl AcpAgentProcessPool {
         let worker_runtime_lease = prepared.lease;
         let processes = Arc::downgrade(&self.processes);
         let launch_config = config.clone();
+        let early_exits = self.early_exits.clone();
         thread::spawn(move || {
             let _runtime_lease = worker_runtime_lease;
             let result = block_on_new_runtime(run_acp_agent_process(AcpAgentProcessInput {
@@ -733,6 +739,9 @@ impl AcpAgentProcessPool {
                     processes.remove(&worker_agent_id);
                 }
             }
+            if lifetime.is_initialized() {
+                early_exits.clear(&worker_agent_id);
+            }
             if let Err(error) = result {
                 record_terminal_error(&worker_terminal_error, &error);
                 let exit_code = process_exit_code(&error);
@@ -749,9 +758,8 @@ impl AcpAgentProcessPool {
                         "process_age_ms": lifetime.age().as_millis(),
                     }),
                 );
-                // TODO: Back off relaunching an Agent whose process keeps exiting before
-                // `initialize`; every demand currently relaunches it immediately.
                 if exit_code.is_some() && !initialized {
+                    early_exits.record_exit(&worker_agent_id, Instant::now());
                     repair_after_early_exit(
                         &worker_agent_id,
                         &launch_config,
