@@ -17,7 +17,7 @@ path = "uniffi-bindgen.rs"
 
 [dependencies]
 openaide-remote-client = { workspace = true, default-features = false, features = ["release-archive"] }
-russh = { version = "0.64", default-features = false, features = ["ring", "rsa"] }
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
