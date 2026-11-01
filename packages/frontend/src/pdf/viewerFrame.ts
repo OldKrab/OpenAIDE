@@ -1,4 +1,4 @@
-import { buildSelfContainedRendererDocument } from "../mermaid/renderService";
+import { buildSelfContainedRendererDocument } from "../services/selfContainedRendererDocument";
 import {
   isPdfViewerEvent,
   type PdfLoadFailure,
@@ -39,8 +39,6 @@ function loadRendererScript() {
 }
 
 export function buildPdfViewerDocument(script: string, nonce: string) {
-  // TODO: move the self-contained sandbox document builder out of the Mermaid module;
-  // it is shared by both renderers and only its payload element id is Mermaid-named.
   return buildSelfContainedRendererDocument(`<!doctype html>
 <html lang="en">
   <head>

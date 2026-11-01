@@ -1604,7 +1604,7 @@ describe("app controller mounted lifecycle", () => {
       throw new Error(method);
     });
     const retryRecovery = vi.fn(() => {
-      invalidate?.({ reason: "httpSessionExpired" });
+      invalidate?.({ reason: "sessionExpired" });
       return true;
     });
     backendConnection = {
@@ -1621,8 +1621,8 @@ describe("app controller mounted lifecycle", () => {
     await act(async () => { create(<ControllerProbe />); });
     act(() => {
       latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
-      invalidate?.({ reason: "httpSessionExpired" });
-      fail?.({ reason: "httpSessionExpired", error: new Error("Replacement failed") });
+      invalidate?.({ reason: "sessionExpired" });
+      fail?.({ reason: "sessionExpired", error: new Error("Replacement failed") });
     });
     expect(latestController?.backendConnectionState.status).toBe("unavailable");
     const openCount = request.mock.calls.filter(([method]) => method === TASK_OPEN).length;
@@ -1631,7 +1631,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.backendConnectionState.status).toBe("reconnecting");
     expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(openCount);
     await act(async () => {
-      recover?.({ reason: "httpSessionExpired", result: { snapshot: clientSnapshot() } });
+      recover?.({ reason: "sessionExpired", result: { snapshot: clientSnapshot() } });
     });
     expect(latestController?.backendConnectionState.status).toBe("ready");
     expect(latestController?.taskMutationReady).toBe(true);
@@ -1647,7 +1647,7 @@ describe("app controller mounted lifecycle", () => {
     let linkDown = false;
     const retryRecovery = vi.fn(() => {
       linkDown = false;
-      invalidate?.({ reason: "httpSessionExpired" });
+      invalidate?.({ reason: "sessionExpired" });
       return true;
     });
     const initialize = vi.fn(async () => ({ snapshot: clientSnapshot() }));
@@ -1672,8 +1672,8 @@ describe("app controller mounted lifecycle", () => {
 
     await act(async () => {
       linkDown = true;
-      invalidate?.({ reason: "httpSessionExpired" });
-      fail?.({ reason: "httpSessionExpired", error: new TransportLinkError("interrupted", "socket closed (1006)") });
+      invalidate?.({ reason: "sessionExpired" });
+      fail?.({ reason: "sessionExpired", error: new TransportLinkError("interrupted", "socket closed (1006)") });
     });
     expect(latestController?.backendConnectionState.status).toBe("unavailable");
     expect(latestController?.state.appServerError).toBe("socket closed (1006)");
@@ -1693,7 +1693,7 @@ describe("app controller mounted lifecycle", () => {
     expect(initialize).toHaveBeenCalledOnce();
     expect(latestController?.backendConnectionState.status).toBe("reconnecting");
     await act(async () => {
-      recover?.({ reason: "httpSessionExpired", result: { snapshot: clientSnapshot() } });
+      recover?.({ reason: "sessionExpired", result: { snapshot: clientSnapshot() } });
     });
     expect(latestController?.backendConnectionState.status).toBe("ready");
     expect(latestController?.state.appServerError).toBeUndefined();
@@ -3992,7 +3992,7 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("does not replace the routed task with a recovery baseline for another task", async () => {
-    let publishInvalidation: ((event: { reason: "httpSessionExpired" }) => void) | undefined;
+    let publishInvalidation: ((event: { reason: "sessionExpired" }) => void) | undefined;
     let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
     const request = vi.fn((
       method: string,
@@ -4043,9 +4043,9 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.task_id).toBe("task_2");
 
     await act(async () => {
-      publishInvalidation?.({ reason: "httpSessionExpired" });
+      publishInvalidation?.({ reason: "sessionExpired" });
       publishRecoveryBaseline?.({
-        reason: "httpSessionExpired",
+        reason: "sessionExpired",
         result: { snapshot: clientSnapshot({ activeTaskTitle: "Stale first task" }) },
       });
       await Promise.resolve();

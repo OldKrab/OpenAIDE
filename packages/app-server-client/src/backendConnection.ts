@@ -20,7 +20,7 @@ export type BackendEventListener = (event: AppServerEvent) => void;
 export type BackendUnsubscribe = () => void;
 export type BackendGenerationInvalidation = {
   reason:
-    | "httpSessionExpired"
+    | "sessionExpired"
     | "clientLivenessExpired"
     | "serverReplayExpired"
     | "receiveStalled"

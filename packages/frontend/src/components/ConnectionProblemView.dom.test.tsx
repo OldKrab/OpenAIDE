@@ -33,7 +33,7 @@ describe("ConnectionProblemView", () => {
 
   it("names the computer and the cause, and keeps the raw error behind Details", () => {
     const message = "App Server WebSocket link ended: open_timeout";
-    act(() => root.render(<ConnectionProblemView message={message} place={oldPc} problem={{ kind: "unreachable", detail: message }} />));
+    act(() => root.render(<ConnectionProblemView message={message} computer={oldPc} problem={{ kind: "unreachable", detail: message }} />));
     expect(container.querySelector("h2")?.textContent).toBe("Can’t reach OLD-PC");
     expect(container.querySelector("p")?.textContent).toBe("Check that it’s on and OpenAIDE is running there.");
     expect(container.querySelector(".connection-link-broken")?.textContent).toBe("This computerOLD-PC");
@@ -42,7 +42,7 @@ describe("ConnectionProblemView", () => {
   });
 
   it("marks the side to update with its app version and keeps protocols behind Details", () => {
-    act(() => root.render(<ConnectionProblemView device="phone" message="Update OpenAIDE on your computer" place={oldPc} problem={outdated} />));
+    act(() => root.render(<ConnectionProblemView device="phone" message="Update OpenAIDE on your computer" computer={oldPc} problem={outdated} />));
     expect(container.querySelector("h2")?.textContent).toBe("OLD-PC needs an update");
     expect(container.querySelector("p")?.textContent).toBe("Update OpenAIDE on OLD-PC, then try again.");
     expect(container.querySelector(".connection-link-mismatch")?.textContent).toBe("This phone≠OLD-PC0.40.0");
@@ -51,18 +51,18 @@ describe("ConnectionProblemView", () => {
     expect(container.querySelector("dl")?.textContent).toContain("OpenAIDE 0.40.0 · protocol 2.2");
   });
 
-  it("offers trying again and the other places right on the page", () => {
+  it("offers trying again and the other computers right on the page", () => {
     const retry = vi.fn();
     const use = vi.fn();
-    const places = [{ id: "", label: "This phone" }, { id: "linux-key", label: "old-linux" }];
-    act(() => root.render(<ConnectionProblemView message="x" onRetry={retry} onUse={use} place={oldPc} places={places} problem={{ kind: "unreachable", detail: "x" }} />));
+    const computers = [{ id: "", label: "This phone" }, { id: "linux-key", label: "old-linux" }];
+    act(() => root.render(<ConnectionProblemView message="x" onRetry={retry} onUse={use} computer={oldPc} computers={computers} problem={{ kind: "unreachable", detail: "x" }} />));
     const buttons = [...container.querySelectorAll("button")];
     expect(buttons.map((button) => button.textContent)).toEqual(["Try again", "This phone", "old-linux"]);
     act(() => buttons[0]!.click());
     act(() => buttons[2]!.click());
     expect(retry).toHaveBeenCalledOnce();
     expect(use).toHaveBeenCalledWith("linux-key");
-    act(() => root.render(<ConnectionProblemView message="x" place={oldPc} />));
+    act(() => root.render(<ConnectionProblemView message="x" computer={oldPc} />));
     expect(container.querySelectorAll("button")).toHaveLength(0);
   });
 });

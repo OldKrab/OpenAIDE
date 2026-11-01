@@ -210,7 +210,7 @@ describe("ReliableBackendConnection", () => {
     {
       expiry: "transport" as const,
       failure: "HTTP 410",
-      invalidationReason: "httpSessionExpired",
+      invalidationReason: "sessionExpired",
     },
     {
       expiry: "client" as const,
@@ -773,7 +773,7 @@ describe("ReliableBackendConnection", () => {
       "session-1",
       "session-3",
     ]));
-    expect(invalidations).toEqual(["httpSessionExpired"]);
+    expect(invalidations).toEqual(["sessionExpired"]);
     await expect(interrupted).rejects.toThrow();
     connection.close();
   });

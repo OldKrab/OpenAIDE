@@ -376,16 +376,16 @@ function fakeConnection(
       for (const listener of eventListeners) listener(event);
     },
     invalidate() {
-      for (const listener of invalidationListeners) listener({ reason: "httpSessionExpired" });
+      for (const listener of invalidationListeners) listener({ reason: "sessionExpired" });
     },
     recover(result = initializeResult()) {
       for (const listener of baselineListeners) listener({
-        reason: "httpSessionExpired",
+        reason: "sessionExpired",
         result,
       });
     },
     fail(error: unknown) {
-      for (const listener of failureListeners) listener({ reason: "httpSessionExpired", error });
+      for (const listener of failureListeners) listener({ reason: "sessionExpired", error });
     },
   };
 }

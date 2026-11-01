@@ -516,11 +516,8 @@ function createReliableHttpBackendConnection(
     let invalidation: (BackendGenerationInvalidation & { message: string }) | undefined;
     const closeKind = transportLinkCloseKind(error);
     if (closeKind === "sessionExpired") {
-      // TODO: rename `httpSessionExpired` in BackendGenerationInvalidation to a
-      // carrier-neutral reason; it now also covers a WebSocket session and the
-      // name leaks one transport into every consumer of the invalidation.
       invalidation = {
-        reason: "httpSessionExpired",
+        reason: "sessionExpired",
         message: "RPC session expired",
       };
     } else if (closeKind === "replayExpired") {

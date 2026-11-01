@@ -553,9 +553,9 @@ describe("ReliableBackendConnection over WebSocket", () => {
     expect(second.sent[0]).not.toHaveProperty("sessionId");
     await vi.waitFor(() => {
       answerSecond();
-      expect(baselines).toEqual(["httpSessionExpired"]);
+      expect(baselines).toEqual(["sessionExpired"]);
     });
-    expect(invalidations).toEqual(["httpSessionExpired"]);
+    expect(invalidations).toEqual(["sessionExpired"]);
     expect((second.sentOfType("frame")[0]?.message as { method: string }).method).toBe(CLIENT_INITIALIZE);
 
     const listing = session.request(TASK_LIST, { lifecycle: "open" });
