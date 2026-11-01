@@ -645,7 +645,12 @@ export function Composer({
             ) : null}
           </span>
         ) : blockedStatus?.placement === "footer" ? (
-          <span aria-live="polite" className="composer-footer-status" role="status">
+          <span
+            aria-live="polite"
+            className="composer-footer-status"
+            data-delayed={blockedStatus.delayed || undefined}
+            role="status"
+          >
             {blockedStatus.label !== "Disconnected" ? <LoaderCircle aria-hidden="true" size={13} /> : null}
             <strong>{blockedStatus.label}</strong>
             {blockedStatus.secondary ? <small>{blockedStatus.secondary}</small> : null}
@@ -714,22 +719,30 @@ const CONFIG_CHANGE_STATUS_STAGES = [
   { afterMs: 15_000 },
 ] as const;
 
-function composerBlockedStatus(message: string) {
+type ComposerBlockedStatus = {
+  delayed?: boolean;
+  label: string;
+  placement: "action" | "footer";
+  secondary?: string;
+};
+
+function composerBlockedStatus(message: string): ComposerBlockedStatus | undefined {
   const normalized = message.trim().replace(/[.]$/, "");
   if (normalized.startsWith("Disconnected")) {
-    return { label: "Disconnected", placement: "footer" as const, secondary: "Draft saved" };
+    return { label: "Disconnected", placement: "footer", secondary: "Draft saved" };
   }
   if (normalized === "Moving queued message to Composer") {
-    return { label: "Moving…", placement: "action" as const };
+    return { label: "Moving…", placement: "action" };
   }
   if (normalized.startsWith("Reconnecting")) {
-    return { label: "Reconnecting", placement: "footer" as const, secondary: "Draft saved" };
+    // Most reconnects end before this could be read, so the stylesheet holds it back.
+    return { delayed: true, label: "Reconnecting", placement: "footer", secondary: "Draft saved" };
   }
   if (normalized === "Connecting to App Server") {
-    return { label: "Connecting…", placement: "footer" as const, secondary: "Draft saved" };
+    return { label: "Connecting…", placement: "footer", secondary: "Draft saved" };
   }
   if (normalized === "Preparing task") {
-    return { label: "Preparing task…", placement: "footer" as const };
+    return { label: "Preparing task…", placement: "footer" };
   }
   // Context and attachment blockers render at their owning boundary.
   return undefined;

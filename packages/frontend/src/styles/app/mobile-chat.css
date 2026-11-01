@@ -149,6 +149,21 @@
     overflow-wrap: anywhere;
   }
 
+  /* A reconnect is brief, so it takes the controls' row instead of adding one and moving the Composer. */
+  .composer-footer > .composer-footer-status[data-delayed] {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 0 4px;
+  }
+
+  .composer-footer:has(> .composer-footer-status[data-delayed]) > .composer-controls {
+    animation: composer-controls-yield 0s linear 1s forwards;
+  }
+
+  @keyframes composer-controls-yield {
+    to { visibility: hidden; }
+  }
+
   .composer-footer-status > svg {
     flex-shrink: 0;
   }
