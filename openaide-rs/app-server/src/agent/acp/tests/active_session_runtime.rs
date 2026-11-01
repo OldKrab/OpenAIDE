@@ -4634,6 +4634,28 @@ fn shutdown_closes_active_sessions() {
 
 #[cfg(unix)]
 #[test]
+fn an_agent_that_keeps_exiting_before_initialize_is_held_back() {
+    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "sh".to_string(),
+        args: vec!["-c".to_string(), "exit 7".to_string()],
+        env: Vec::new(),
+        secret_env: Vec::new(),
+    });
+
+    // The exit is recorded after the failed start answers, so the count is reached by retrying.
+    let held_back = (0..200).any(|_| {
+        runtime
+            .start_session(start_request("task-early-exit", cwd_string()))
+            .err()
+            .is_some_and(|error| error.to_string().contains("keeps exiting during startup"))
+    });
+
+    assert!(held_back);
+}
+
+#[cfg(unix)]
+#[test]
 fn start_failure_reports_agent_error_instead_of_closed_start_channel() {
     let runtime = AcpAgentRuntime::new(AcpAgentConfig {
         agent_id: "codex".to_string(),
