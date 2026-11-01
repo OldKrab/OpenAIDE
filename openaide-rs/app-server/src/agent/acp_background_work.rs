@@ -388,7 +388,8 @@ impl BackgroundWork {
     /// A new prompt took over completion ownership, which ends the hold: its
     /// response decides anew whether background work holds the turn.
     pub(super) fn prompt_continued(&self, session_id: &str, task_id: &str) {
-        self.finish_hold(session_id, task_id, "prompt_continued");
+        // The log sanitizer redacts any value that says "prompt".
+        self.finish_hold(session_id, task_id, "continued");
     }
 
     /// Whether a settled `end_turn` must keep its turn open. The first `true`

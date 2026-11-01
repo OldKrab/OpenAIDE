@@ -405,6 +405,7 @@ async fn handle_incoming(
                 "remote_device_handshake_failed",
                 serde_json::json!({
                     "error_kind": connecting_error_kind(&error),
+                    "transport_code": connecting_transport_code(&error),
                     "duration_ms": started.elapsed().as_millis() as u64,
                 }),
             );
@@ -443,6 +444,22 @@ fn connection_error_kind(error: &ConnectionError) -> &'static str {
         ConnectionError::TimedOut => "timed_out",
         ConnectionError::LocallyClosed => "locally_closed",
         ConnectionError::CidsExhausted => "cids_exhausted",
+    }
+}
+
+fn connecting_transport_code(error: &ConnectingError) -> Option<u64> {
+    match error {
+        ConnectingError::ConnectionError { source, .. } => transport_code(source),
+        _ => None,
+    }
+}
+
+/// The QUIC number behind a transport failure, which tells a TLS alert (0x100 plus the alert) from
+/// a protocol violation. The reason beside it is free-form, so it stays out of the logs.
+fn transport_code(error: &ConnectionError) -> Option<u64> {
+    match error {
+        ConnectionError::TransportError(error) => Some(error.code.into()),
+        _ => None,
     }
 }
 

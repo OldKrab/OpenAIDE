@@ -211,7 +211,8 @@ impl SteeringOperation {
     fn finish(&mut self, action: &SteeringAction) {
         let (outcome, error) = match action {
             SteeringAction::Injected => ("injected", None),
-            SteeringAction::ContinuePrompt => ("prompt_required", None),
+            // The log sanitizer redacts any value that says "prompt".
+            SteeringAction::ContinuePrompt => ("continuation_required", None),
             SteeringAction::LegacyPrompt => ("unsupported", None),
             SteeringAction::Failed(error) => ("failed", Some(error.reason())),
         };
