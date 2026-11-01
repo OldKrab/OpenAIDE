@@ -352,7 +352,7 @@ describe("ReliableBackendConnection", () => {
   });
 
   it("recovers an expired mobile client when wake restarts a frozen receive poll", async () => {
-    let wake: (() => void) | undefined;
+    const wakes = new Set<() => void>();
     const transport = createExpiringSessionTransport("client", "heartbeat");
     const connection = createReliableWebProxyBackendConnection({
       endpointUrl: "http://app-server.test/rpc",
@@ -361,10 +361,8 @@ describe("ReliableBackendConnection", () => {
       retryDelayMs: 1,
       heartbeatIntervalMs: 5,
       subscribeToWake(listener) {
-        wake = listener;
-        return () => {
-          wake = undefined;
-        };
+        wakes.add(listener);
+        return () => wakes.delete(listener);
       },
     });
     await connection.initialize({
@@ -377,7 +375,7 @@ describe("ReliableBackendConnection", () => {
     await vi.waitFor(() => expect(transport.frozenPolls()).toBe(1));
     await vi.waitFor(() => expect(transport.heartbeatSessions()).toContain("session-1"));
 
-    wake?.();
+    for (const wake of wakes) wake();
 
     await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
       "session-1",

@@ -68,6 +68,11 @@ export type ReliableWebProxyBackendConnectionOptions = Omit<
 
 /** A link replaced sooner than this is not worth telling the user about. */
 const LINK_LOST_NOTICE_MS = 1_000;
+/**
+ * Returning to a suspended app replaces its link, and a phone's first dial may
+ * take this long. Until then a missing link is expected, so nothing is said.
+ */
+const WAKE_NOTICE_MS = 4_000;
 
 export function createReliableLocalHttpBackendConnection(
   options: ReliableLocalHttpBackendConnectionOptions,
@@ -104,6 +109,8 @@ function createReliableHttpBackendConnection(
   let heartbeatSilent = false;
   let linkLost = false;
   let linkLostTimer: ReturnType<typeof setTimeout> | undefined;
+  let wokeAt: number | undefined;
+  let unresponsiveSince = 0;
   const requestRegistrations = new Set<{
     bind(connection: BackendConnection): void;
     dispose(): void;
@@ -130,6 +137,7 @@ function createReliableHttpBackendConnection(
     connection_id: options.connectionId,
   });
   bindGeneration(active);
+  const stopWake = options.subscribeToWake?.(appWoke);
   const stopReplacement = "subscribeToReplacement" in options
     ? options.subscribeToReplacement?.(replaceEndpoint)
     : undefined;
@@ -276,6 +284,7 @@ function createReliableHttpBackendConnection(
         generation_count: generations.size,
       });
       stopReplacement?.();
+      stopWake?.();
       for (const generation of generations) closeGeneration(generation);
       generations.clear();
       requestRegistrations.clear();
@@ -368,24 +377,49 @@ function createReliableHttpBackendConnection(
    * takes less than that stays invisible.
    */
   function linkChanged(connected: boolean) {
-    if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
-    linkLostTimer = undefined;
     if (connected) {
+      if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
+      linkLostTimer = undefined;
       linkLost = false;
       publishResponsiveness();
       return;
     }
+    armLinkLostNotice();
+  }
+
+  /** The link layers hear the same wake, so the two orders must end up alike. */
+  function appWoke() {
+    wokeAt = Date.now();
+    if (linkLostTimer === undefined && !linkLost) return;
+    linkLost = false;
+    publishResponsiveness();
+    armLinkLostNotice();
+  }
+
+  function armLinkLostNotice() {
+    if (linkLostTimer !== undefined) clearTimeout(linkLostTimer);
+    const sinceWake = wokeAt === undefined ? Number.POSITIVE_INFINITY : Date.now() - wokeAt;
     linkLostTimer = setTimeout(() => {
       linkLostTimer = undefined;
       linkLost = true;
       publishResponsiveness();
-    }, LINK_LOST_NOTICE_MS);
+    }, Math.max(LINK_LOST_NOTICE_MS, WAKE_NOTICE_MS - sinceWake));
   }
 
   function publishResponsiveness() {
     const next = !heartbeatSilent && !linkLost;
     if (responsive === next) return;
     responsive = next;
+    const now = Date.now();
+    if (!next) unresponsiveSince = now;
+    logger.info("backend_responsiveness_changed", {
+      connection_id: options.connectionId,
+      responsive: next,
+      link_lost: linkLost,
+      heartbeat_silent: heartbeatSilent,
+      ...(next ? { duration_ms: now - unresponsiveSince } : {}),
+      ...(wokeAt === undefined ? {} : { since_wake_ms: now - wokeAt }),
+    });
     for (const listener of responsivenessListeners) listener(next);
   }
 

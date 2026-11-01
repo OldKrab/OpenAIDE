@@ -432,6 +432,88 @@ describe("ReliableBackendConnection over WebSocket", () => {
     session.close?.();
   });
 
+  it("lets an app that just returned dial a new link before saying the App Server is not answering", async () => {
+    const sockets: FakeSocket[] = [];
+    const wakes = new Set<() => void>();
+    const entries: Array<{ event: string; fields: Record<string, unknown> }> = [];
+    const record = (event: string, fields: Record<string, unknown> = {}) => entries.push({ event, fields });
+    const session = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://127.0.0.1:4321",
+      authToken: "token-1",
+      connectionId: "client-1",
+      transport: "webSocket",
+      retryDelayMs: 0,
+      heartbeatIntervalMs: 3_600_000,
+      logger: { info: record, warn: record, error: record },
+      subscribeToWake(wake) {
+        wakes.add(wake);
+        return () => wakes.delete(wake);
+      },
+      createWebSocket(url) {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const responsive: boolean[] = [];
+    session.handleResponsiveness?.((next) => responsive.push(next));
+    const first = sockets[0] as FakeSocket;
+    const answerFirst = serve(first, "session-1");
+    const initializing = session.initialize(initializeParams);
+    await vi.waitFor(() => {
+      answerFirst();
+      expect(first.sentOfType("frame")).toHaveLength(1);
+    });
+    await initializing;
+    vi.useFakeTimers();
+
+    // The link died unnoticed while the app was away, and the return says so
+    // moments before or after the wake signal: neither order shortens the wait.
+    first.end();
+    await vi.advanceTimersByTimeAsync(0);
+    for (const wake of wakes) wake();
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(responsive).toEqual([]);
+
+    // A dial that outlasts its first attempt is said, and taken back on arrival.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(responsive).toEqual([false]);
+    expect(entries.find((entry) => entry.event === "backend_responsiveness_changed")?.fields).toMatchObject({
+      connection_id: "client-1",
+      responsive: false,
+      link_lost: true,
+      heartbeat_silent: false,
+    });
+    (sockets[1] as FakeSocket).accept({ sessionId: "session-1", receivedThrough: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(responsive).toEqual([false, true]);
+    expect(
+      entries.filter((entry) => entry.event === "backend_responsiveness_changed").at(-1)?.fields,
+    ).toMatchObject({ responsive: true, link_lost: false, duration_ms: expect.any(Number) });
+
+    // Long after the return an ordinary loss is said at the ordinary moment.
+    (sockets[1] as FakeSocket).end();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(responsive).toEqual([false, true]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(responsive).toEqual([false, true, false]);
+
+    // A wake takes back what was said, and a link lost right after it waits too.
+    for (const wake of wakes) wake();
+    expect(responsive).toEqual([false, true, false, true]);
+    (sockets[2] as FakeSocket).accept({ sessionId: "session-1", receivedThrough: 1 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    for (const wake of wakes) wake();
+    (sockets[2] as FakeSocket).end();
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(responsive).toEqual([false, true, false, true]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(responsive).toEqual([false, true, false, true, false]);
+
+    session.close?.();
+    expect(wakes.size).toBe(0);
+  });
+
   it("initializes, and replaces an expired session with a fresh initialized one", async () => {
     const sockets: FakeSocket[] = [];
     const session = createReliableLocalHttpBackendConnection({
