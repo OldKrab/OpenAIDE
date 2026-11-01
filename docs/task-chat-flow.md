@@ -169,7 +169,7 @@ App Server serializes acquisition and:
 
 Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
 
-A leased Prepared Task whose immutable Native Session is definitively missing is the one exception to same-id reacquisition. App Server projects that preparation failure as `notFound`. Frontend automatically repeats `task/acquire` for the same key without first releasing the stale lease. Under the acquisition lock, App Server tombstones the failed zero-message Task, persists and leases a fresh Prepared Task, then publishes both changes and returns the replacement snapshot. Frontend adopts the replacement Task id and transfers its Composer draft. This recovery is automatic only because no User message or Agent work was ever accepted; Native Session loss for a visible Task remains an explicit failure and never changes that Task's binding.
+A Prepared Task whose Native Session is definitively missing keeps its Task id: App Server binds a fresh Native Session to the same Task while it has no Agent history. Native Session loss for a Task with Agent history remains an explicit failure and never changes that Task's binding.
 
 ### Worktree repositories and Task Workspaces
 
