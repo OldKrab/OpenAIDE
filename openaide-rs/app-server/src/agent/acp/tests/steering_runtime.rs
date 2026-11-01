@@ -189,6 +189,7 @@ fn continuation_ignores_a_late_response_from_its_original_prompt() {
 }
 
 fn assert_late_steering(mode: &str) {
+    let logs = crate::logging::capture_test_logs();
     let Some(fixture) = Fixture::new(mode) else {
         return;
     };
@@ -204,6 +205,10 @@ fn assert_late_steering(mode: &str) {
         result.try_recv().is_err(),
         "the old end_turn cannot finish the continuation"
     );
+    assert!(logs.snapshot().iter().any(|entry| {
+        entry["event"] == "acp_steering_delivery"
+            && entry["fields"]["outcome"] == "continuation_required"
+    }));
     fixture.control("finish");
     assert_eq!(
         result

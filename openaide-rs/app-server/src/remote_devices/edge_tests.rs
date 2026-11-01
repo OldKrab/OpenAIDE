@@ -443,6 +443,17 @@ fn a_stopped_gateway_refuses_its_port_and_leaves_the_app_server() {
 }
 
 #[test]
+fn a_transport_failure_reports_its_number_without_its_reason() {
+    let failure = ConnectionError::TransportError(iroh::endpoint::TransportError::new(
+        iroh::endpoint::TransportErrorCode::crypto(120),
+        "peer text".to_string(),
+    ));
+
+    assert_eq!(transport_code(&failure), Some(0x100 + 120));
+    assert_eq!(transport_code(&ConnectionError::TimedOut), None);
+}
+
+#[test]
 fn connection_failures_keep_a_stable_kind() {
     assert_eq!(
         connection_error_kind(&ConnectionError::TimedOut),

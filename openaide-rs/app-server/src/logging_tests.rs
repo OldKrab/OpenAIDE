@@ -20,6 +20,13 @@ fn sanitizes_sensitive_runtime_log_fields() {
 }
 
 #[test]
+fn keeps_numeric_failure_codes() {
+    let value = sanitize_value(json!({ "transport_code": 376 }));
+
+    assert_eq!(value["transport_code"], 376);
+}
+
+#[test]
 fn keeps_boolean_values_under_sensitive_keys() {
     let value = sanitize_value(json!({
         "error_recoverable": true,
