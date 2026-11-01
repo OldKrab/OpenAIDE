@@ -38,11 +38,16 @@ type SettingsDependencies = Pick<
 
 export function createSettingsCallbacks({
   backendConnection,
-  dispatch,
+  dispatch: dispatchAction,
   setAgents,
   setPreferences,
   state,
 }: SettingsDependencies): SettingsCallbacks {
+  const dispatch: typeof dispatchAction = (action) => {
+    // The message is free-form, so diagnostics carry only the section.
+    if (action.type === "settings:error") console.warn(`settings_action_failed tab=${action.tab ?? "none"}`);
+    dispatchAction(action);
+  };
   const agentSettingsContext = () => ({
     backendConnection: backendConnection?.request ? { request: backendConnection.request } : undefined,
     currentAgentId: state.newTask.selection.agentId,
@@ -64,11 +69,11 @@ export function createSettingsCallbacks({
         acceptedActiveWorkInterruption,
       );
       if (outcome.kind === "unavailable") {
-        dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
       }
       return outcome;
     } catch (error) {
-      dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+      dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) });
       return { kind: "failed" };
     }
   };
@@ -86,13 +91,13 @@ export function createSettingsCallbacks({
         try {
           await cancelAgentAuthenticationThroughBackend(agentSettingsContext(), agentId);
         } catch {
-          dispatch({ type: "settings:error", message: "Could not cancel sign-in." });
+          dispatch({ type: "settings:error", tab: "agents", message: "Could not cancel sign-in." });
           return false;
         }
       }
       try {
         const outcome = await authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values);
-        if (!outcome) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        if (!outcome) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         return outcome === "authenticated";
       } catch {
         // The failure (or nothing, after a cancel) is already on the Agent's Sign-in Flow. Refresh
@@ -104,18 +109,18 @@ export function createSettingsCallbacks({
     cancelAgentAuthentication: async (agentId) => {
       try {
         const handled = await cancelAgentAuthenticationThroughBackend(agentSettingsContext(), agentId);
-        if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        if (!handled) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
       } catch {
-        dispatch({ type: "settings:error", message: "Could not cancel sign-in." });
+        dispatch({ type: "settings:error", tab: "agents", message: "Could not cancel sign-in." });
       }
     },
     logoutAgent: async (agentId) => {
       try {
         const handled = await logoutAgentThroughBackend(agentSettingsContext(), agentId);
-        if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        if (!handled) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         return handled;
       } catch (error) {
-        dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+        dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) });
         return false;
       }
     },
@@ -123,22 +128,22 @@ export function createSettingsCallbacks({
       dispatch({ type: "settings:start" });
       void createCustomAgentThroughBackend(agentSettingsContext(), payload)
         .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+          if (!handled) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) }));
     },
     deleteCustomAgent: (agentId) => {
       dispatch({ type: "settings:start" });
       void deleteCustomAgentThroughBackend(agentSettingsContext(), agentId)
         .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+          if (!handled) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) }));
     },
     deleteMcpServer: (server) => {
       dispatch({ type: "settings:start" });
       void deleteMcpServerThroughBackend(agentSettingsContext(), server)
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "mcp", message: safeErrorMessage(error) }));
     },
     getMcpServerDetails: (id) => loadMcpServerDetailsThroughBackend(agentSettingsContext(), id),
     getSkillDetails: (id) => loadSkillDetailsThroughBackend(agentSettingsContext(), id),
@@ -158,14 +163,14 @@ export function createSettingsCallbacks({
       dispatch({ type: "settings:start" });
       void replaceCustomAgentThroughBackend(agentSettingsContext(), payload)
         .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+          if (!handled) dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) }));
     },
     saveMcpServer: (input) => {
       dispatch({ type: "settings:start" });
       void saveMcpServerThroughBackend(agentSettingsContext(), input)
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "mcp", message: safeErrorMessage(error) }));
     },
     selectSettingsTab: (tab) => {
       dispatch({ type: "settings:tab", tab });
@@ -174,14 +179,14 @@ export function createSettingsCallbacks({
     setAcpTrace: (enabled) => {
       dispatch({ type: "settings:developerAcpTrace", enabled });
       if (!backendConnection?.request) {
-        dispatch({ type: "settings:error", message: settingsReadRequiredMessage() });
+        dispatch({ type: "settings:error", tab: "troubleshooting", message: settingsReadRequiredMessage() });
         return;
       }
       void backendConnection.request(SETTINGS_UPDATE_RUNTIME, {
         developer: { acpTrace: { enabled } },
       })
         .then((settings) => dispatch({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(settings) }))
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "troubleshooting", message: safeErrorMessage(error) }));
     },
     setAgentEnabled,
     // The recovery banner shows the disable confirmation in the surface that offered the
@@ -190,14 +195,14 @@ export function createSettingsCallbacks({
       setAgentEnabled(agentId, false, acceptedActiveWorkInterruption),
     setMcpServerEnabled: (id, enabled) => {
       void setMcpServerEnabledThroughBackend(agentSettingsContext(), id, enabled)
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "mcp", message: safeErrorMessage(error) }));
     },
     setComposerSubmitShortcut: (shortcut) => {
       const nextPreferences = { composer_submit_shortcut: shortcut };
       setPreferences(nextPreferences);
       dispatch({ type: "settings:preferences", preferences: nextPreferences });
       if (!backendConnection?.request) {
-        dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+        dispatch({ type: "settings:error", tab: "general", message: appServerRequiredMessage() });
         return;
       }
       void backendConnection.request(SETTINGS_UPDATE_PREFERENCES, {
@@ -208,7 +213,7 @@ export function createSettingsCallbacks({
           setPreferences(preferences);
           dispatch({ type: "settings:preferences", preferences });
         })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch((error) => dispatch({ type: "settings:error", tab: "general", message: safeErrorMessage(error) }));
     },
     updateCustomAgentMetadata: async (payload, acceptedActiveWorkInterruption) => {
       dispatch({ type: "settings:start" });
@@ -219,11 +224,11 @@ export function createSettingsCallbacks({
           acceptedActiveWorkInterruption,
         );
         if (outcome.kind === "unavailable") {
-          dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+          dispatch({ type: "settings:error", tab: "agents", message: appServerRequiredMessage() });
         }
         return outcome;
       } catch (error) {
-        dispatch({ type: "settings:error", message: safeErrorMessage(error) });
+        dispatch({ type: "settings:error", tab: "agents", message: safeErrorMessage(error) });
         return { kind: "failed" };
       }
     },

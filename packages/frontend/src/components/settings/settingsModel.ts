@@ -57,6 +57,8 @@ export type SettingsSection = {
   groups: SettingsGroup[];
   /** The drilled-in page of one item; replaces the section page while present. */
   detail?: ReactNode;
+  /** The drilled-in page shows the section's failure itself, next to the action it belongs to. */
+  detailShowsError?: boolean;
   /** Dialogs owned by the section; rendered while the section is on screen. */
   overlay?: ReactNode;
   /** Leaves the drilled-in page. Returns false when the section kept it open to ask first. */

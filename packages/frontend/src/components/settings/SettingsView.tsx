@@ -154,7 +154,7 @@ export function SettingsView({
     onUpdateCustomAgentMetadata,
     preferredAgentId,
     recoveryActions,
-    saveError: state.error,
+    saveError: state.errorTab && state.errorTab !== "agents" ? undefined : state.error,
     savedAgentId: state.savedAgentId,
   });
   const mcp = useMcpSection({
@@ -201,7 +201,12 @@ export function SettingsView({
   const filtered = filterSections(sections, needle);
   const current = filtered.find((section) => section.id === activeId) ?? filtered[0];
   // The page of one item stays put while the search narrows the lists around it.
-  const detail = current ? sections.find((section) => section.id === current.id)?.detail : undefined;
+  const currentSection = current ? sections.find((section) => section.id === current.id) : undefined;
+  const detail = currentSection?.detail;
+  // A failure from another section stays visible, named by the section it came from.
+  const errorIsHere = !state.errorTab || state.errorTab === current?.id;
+  const errorOrigin = errorIsHere ? undefined : sections.find((section) => section.id === state.errorTab);
+  const errorShownInDetail = Boolean(detail && currentSection?.detailShowsError && errorIsHere);
 
   const open = (id: SettingsTabId) => {
     const leaving = sections.find((section) => section.id === activeId);
@@ -311,11 +316,11 @@ export function SettingsView({
       sidebar={sidebar}
     >
       <section aria-label={current?.label} className="settings-page" ref={pageRef}>
-        {/* TODO: `state.error` has no origin, so every Settings failure lands here. Attribute
-            errors to their operation in the Settings reducer so each shows at the control that caused it. */}
-        {state.error && !detail ? (
+        {/* TODO: a failure's origin is only its section. Carry the operation too, so each one
+            shows at the control that caused it instead of at the top of the page. */}
+        {state.error && !errorShownInDetail ? (
           <div className="settings-page-error">
-            <SettingsInlineError>{state.error}</SettingsInlineError>
+            <SettingsInlineError>{errorOrigin ? `${errorOrigin.label}: ${state.error}` : state.error}</SettingsInlineError>
             {onDismissError ? (
               <button aria-label="Dismiss error" className="settings-icon-button" onClick={onDismissError} type="button">
                 <X aria-hidden="true" size={14} />

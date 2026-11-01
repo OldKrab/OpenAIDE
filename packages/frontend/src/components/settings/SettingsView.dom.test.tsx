@@ -161,6 +161,27 @@ it("shows a Settings failure and lets it be dismissed", async () => {
   expect(onDismissError).toHaveBeenCalled();
 });
 
+it("names the section a failure came from when another section is open", async () => {
+  const failed = { error: "Could not save server.", errorTab: "mcp", loading: false } as const;
+  await mountSettings({ state: { ...failed, activeTab: "general", availableTabs: ["general", "mcp"] } });
+
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe("MCP servers: Could not save server.");
+
+  unmount();
+  await mountSettings({ state: { ...failed, activeTab: "mcp", availableTabs: ["general", "mcp"] } });
+
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe("Could not save server.");
+});
+
+it("shows a failure from an Agent's page that has no field of its own for it", async () => {
+  await mountSettings({ state: { activeTab: "agents", agentDetails: [builtInAgent()], error: "Could not sign out.", errorTab: "agents", loading: false } });
+
+  await click("Open Codex");
+
+  expect(document.querySelector('[aria-label="Agent details"]')).not.toBeNull();
+  expect(document.querySelector('[role="alert"]')?.textContent).toBe("Could not sign out.");
+});
+
 it("opens on the section index on a phone and on the named section from a link", async () => {
   vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 760px)", addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   const pushed = window.location.href;

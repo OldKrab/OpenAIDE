@@ -83,6 +83,14 @@ describe("app reducer composer state", () => {
     expect(state.newTask).toMatchObject({ prompt: "Corrected draft", error: undefined, errorRetryable: undefined });
   });
 
+  it("keeps a Settings failure's section with that failure only", () => {
+    let state = appReducer(createInitialState(), { type: "settings:error", message: "Could not save server.", tab: "mcp" });
+    expect(state.settings.errorTab).toBe("mcp");
+
+    state = appReducer(state, { type: "settings:error", message: "Unable to load settings" });
+    expect(state.settings.errorTab).toBeUndefined();
+  });
+
   it("dismisses a Settings mutation error without changing loaded settings", () => {
     let state = createInitialState();
     state = appReducer(state, { type: "settings:error", message: "Could not save setting." });

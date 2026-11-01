@@ -197,11 +197,13 @@ export function useAgentsSection({
   });
   const pendingDisableAgent = list.find((agent) => agent.id === pendingDisable?.agentId);
   const showDetail = Boolean(draft || selectedAgent);
+  const editsCustomAgent = Boolean(draft) && (isCreating || selectedAgent?.source_kind === "custom");
 
   return {
     id: "agents",
     label: "Agents",
     icon: Bot,
+    detailShowsError: showDetail && editsCustomAgent,
     info: settingsInfo.agents,
     action: agents ? (
       <SettingsButton icon={<Plus aria-hidden="true" size={14} />} onClick={() => setDraft(newAgentDraft())} variant="primary">Add agent</SettingsButton>
@@ -233,7 +235,7 @@ export function useAgentsSection({
         recoveryActions={recoveryActions}
         saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
         saveChecksConnection={isCreating || replacingLaunch}
-        saveError={draft ? saveError : undefined}
+        saveError={editsCustomAgent ? saveError : undefined}
         savePending={pendingSaveAgentId !== undefined}
         selected={isCreating ? undefined : selectedAgent}
       />

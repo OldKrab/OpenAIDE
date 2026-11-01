@@ -1674,6 +1674,7 @@ describe("app controller callbacks", () => {
     expect(setPreferences).toHaveBeenCalledWith({ composer_submit_shortcut: "enter" });
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
+      tab: "general",
       message: "Agent catalog changes require the App Server.",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
@@ -1721,6 +1722,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "settings:developerAcpTrace", enabled: true });
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
+      tab: "troubleshooting",
       message: "Settings require the App Server.",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
@@ -1838,6 +1840,7 @@ describe("app controller callbacks", () => {
     expect(request).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
+      tab: "agents",
       message: "Secure storage is unavailable in the Web App.",
     });
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
@@ -1915,6 +1918,7 @@ describe("app controller callbacks", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
+      tab: "agents",
       message: "Connection check unavailable",
     });
   });
@@ -2279,6 +2283,7 @@ describe("app controller callbacks", () => {
 
     expect(dispatch).toHaveBeenCalledWith({
       type: "settings:error",
+      tab: "agents",
       message: "Agent catalog changes require the App Server.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith({
@@ -2582,7 +2587,7 @@ describe("app controller callbacks", () => {
     settings.setAgentEnabled("codex", false);
     await settlePromises();
 
-    expect(dispatch).toHaveBeenCalledWith({ type: "settings:error", message: "Agent catalog changes require the App Server." });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings:error", tab: "agents", message: "Agent catalog changes require the App Server." });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent.custom.delete" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "agent.enabled.set" }));
   });
@@ -2756,7 +2761,7 @@ describe("app controller callbacks", () => {
     });
     await settlePromises();
 
-    expect(dispatch).toHaveBeenCalledWith({ type: "settings:error", message: "duplicate Agent" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings:error", tab: "agents", message: "duplicate Agent" });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 

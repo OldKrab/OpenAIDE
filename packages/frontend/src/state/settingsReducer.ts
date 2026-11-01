@@ -35,7 +35,7 @@ type SettingsAction =
   | { type: "settings:skillsStart" }
   | { type: "settings:skillsResult"; generatedAt: string; availability: SettingsProjectionAvailability; skills: SkillSettingsRecord[] }
   | { type: "settings:skillsError"; message: string }
-  | { type: "settings:error"; message: string }
+  | { type: "settings:error"; message: string; tab?: SettingsTabId }
   | { type: "settings:error:clear" }
   | { type: "settings:agentSaved"; agentId: string; agent?: AgentSettingsRecord }
   | { type: "settings:agentReplaced"; oldAgentId: string; newAgentId: string; agent?: AgentSettingsRecord }
@@ -173,7 +173,7 @@ export function reduceSettingsState(state: AppState, action: AppAction): AppStat
     case "settings:error":
       return {
         ...state,
-        settings: { ...state.settings, loading: false, error: action.message },
+        settings: { ...state.settings, loading: false, error: action.message, errorTab: action.tab },
       };
     case "settings:error:clear":
       return {
