@@ -454,8 +454,12 @@ describe("host bridge", () => {
   });
 
   it.each(["visibility", "native"])("replays queued events after %s resume", async (resume) => {
-    const documentListeners = new Map<string, () => void>();
-    const windowListeners = new Map<string, () => void>();
+    const documentListeners = new Map<string, Array<() => void>>();
+    const windowListeners = new Map<string, Array<() => void>>();
+    const listen = (listeners: Map<string, Array<() => void>>) =>
+      vi.fn((type: string, listener: () => void) => {
+        listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+      });
     const transport = wakeableReliableFetch();
     const documentState = {
       visibilityState: "visible",
@@ -470,9 +474,7 @@ describe("host bridge", () => {
           }),
         },
       },
-      addEventListener: vi.fn((type: string, listener: () => void) => {
-        documentListeners.set(type, listener);
-      }),
+      addEventListener: listen(documentListeners),
       removeEventListener: vi.fn(),
     };
     vi.stubGlobal("fetch", transport.fetch);
@@ -482,9 +484,7 @@ describe("host bridge", () => {
     vi.stubGlobal("window", {
       acquireVsCodeApi: undefined,
       location: { pathname: "/" },
-      addEventListener: vi.fn((type: string, listener: () => void) => {
-        windowListeners.set(type, listener);
-      }),
+      addEventListener: listen(windowListeners),
       removeEventListener: vi.fn(),
     });
     const { getBackendConnection } = await installedHostBridge();
@@ -504,11 +504,13 @@ describe("host bridge", () => {
       params: { cursor: "cursor-2" },
     });
 
+    const fire = (listeners: Map<string, Array<() => void>>, type: string) =>
+      listeners.get(type)?.forEach((listener) => listener());
     documentState.visibilityState = "hidden";
-    documentListeners.get("visibilitychange")?.();
+    fire(documentListeners, "visibilitychange");
     documentState.visibilityState = "visible";
-    if (resume === "native") windowListeners.get("openaide:resume")?.();
-    else documentListeners.get("visibilitychange")?.();
+    if (resume === "native") fire(windowListeners, "openaide:resume");
+    else fire(documentListeners, "visibilitychange");
 
     await vi.waitFor(() => expect(onEvent).toHaveBeenCalledWith({ cursor: "cursor-2" }));
     expect(windowListeners.has("pageshow")).toBe(true);
