@@ -19,7 +19,7 @@ import type { AppState } from "./store";
 export type SettingsAgentCollectionEntry = {
   agentId: string;
   status: AgentSettingsRecord["status"];
-  setupReason?: "nodeJsRequired";
+  setupReason?: import("@openaide/app-server-client").AgentSetupReason;
   signIn?: AgentSignInFlowRecord;
 };
 

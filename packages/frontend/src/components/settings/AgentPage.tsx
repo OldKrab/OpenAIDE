@@ -22,7 +22,7 @@ import type { SettingsTone } from "./settingsModel";
 export function agentStatus(agent: AgentSettingsRecord): { tone: SettingsTone; text: string } | undefined {
   switch (agent.status) {
     case "auth_required": return { tone: "warn", text: "Sign in required" };
-    case "setup_required": return { tone: "warn", text: agent.setup_reason === "nodeJsRequired" ? "Needs Node.js" : "Finish setup" };
+    case "setup_required": return { tone: "warn", text: setupLabel(agent) };
     case "failed": return { tone: "warn", text: "Needs attention" };
     case "unsupported": return { tone: "warn", text: "Unsupported" };
     case "disabled": return { tone: "off", text: "Off" };
@@ -177,6 +177,11 @@ function AgentHealth({ agent, recoveryActions }: { agent: AgentSettingsRecord; r
         : null}
     </SettingsHealth>
   );
+}
+
+function setupLabel(agent: AgentSettingsRecord) {
+  if (agent.setup_reason === "nodeJsRequired") return "Needs Node.js";
+  return agent.setup_reason === "commandNotFound" ? "Command not found" : "Finish setup";
 }
 
 function agentSettingsRecoveryKind(agent: AgentSettingsRecord): AgentRecoveryKind | undefined {
