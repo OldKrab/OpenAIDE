@@ -268,6 +268,16 @@
   line-height: 1.3;
 }
 
+/* Stays in the document for assistive technology; sighted users are spared a reconnect that ends at once. */
+.composer-footer-status[data-delayed] {
+  animation: composer-status-reveal 0s linear 1s both;
+}
+
+@keyframes composer-status-reveal {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+
 .composer-footer-status strong {
   color: color-mix(in oklch, var(--oa-text) 88%, var(--oa-muted));
   font-size: 11px;

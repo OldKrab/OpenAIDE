@@ -817,6 +817,7 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).toContain("Reconnecting");
     expect(rendered).toContain("Draft saved");
     expect(rendered).not.toContain("Reconnecting to App Server.");
+    expect(tree.root.findByProps({ className: "composer-footer-status" }).props["data-delayed"]).toBe(true);
     expect(rendered).not.toContain("Connection closed.");
   });
 
@@ -841,6 +842,7 @@ describe("TaskView timeline presentation", () => {
     expect(rendered).toContain("Unable to refresh task.");
     expect(rendered).toContain("Disconnected");
     expect(rendered).not.toContain("Reconnecting");
+    expect(tree.root.findByProps({ className: "composer-footer-status" }).props["data-delayed"]).toBeUndefined();
     expect(rendered).toContain("Earlier response");
     expect(rendered).toContain("Connection closed.");
     expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe("plaintext-only");
