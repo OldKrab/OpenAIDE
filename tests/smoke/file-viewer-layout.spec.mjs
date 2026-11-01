@@ -259,6 +259,37 @@ test("shows a bounded photo preview with zoom and original download", async ({ p
   }
 });
 
+test("renders PDF content that needs the bundled decoders and CMaps", async ({ page }) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "openaide-pdf-test-"));
+  const pdfPath = path.join(directory, "scan.pdf");
+  try {
+    await writeFile(pdfPath, BUNDLED_DATA_PDF);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`${harness.baseUrl}/new-task`);
+    await expect(page.getByLabel("New task")).toBeVisible();
+    const agent = page.getByLabel("Task start context").locator(".new-task-context-anchor-agent > button");
+    if ((await agent.textContent())?.trim() !== "OpenAIDE Test Agent") {
+      await agent.click();
+      await page.getByRole("menu", { name: "Agent" }).getByRole("menuitemradio", { name: /OpenAIDE Test Agent/ }).click();
+    }
+    await page.getByRole("textbox", { name: "Message" }).fill(`smoke:file-viewer-layout\ndownload-file:${pdfPath}`);
+    await page.getByLabel("Send message").click();
+    await page.getByLabel("Task chat").getByRole("link", { name: "Build", exact: true }).click();
+    const viewer = page.getByRole("group", { name: "File Viewer" });
+    await expect(viewer.getByText("Page 1 of 1", { exact: true })).toBeVisible({ timeout: 30_000 });
+    const pdf = viewer.frameLocator("iframe");
+    await expect(pdf.locator(".textLayer").first()).toContainText("中文");
+    const paintedImage = () => pdf.locator(".page canvas").first().evaluate((canvas) => {
+      const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+      for (let index = 0; index < data.length; index += 4) if (data[index] > 180 && data[index + 1] < 70) return true;
+      return false;
+    });
+    await expect.poll(paintedImage, "The JPEG 2000 image was not decoded").toBe(true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("renders a PDF with selectable text inside the sandboxed viewer", async ({ page }) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "openaide-pdf-test-"));
   const filename = "report.pdf";
@@ -541,6 +572,29 @@ async function photoFixture(page) {
 }
 
 /** A minimal text-only PDF, one line per page, with a correct cross-reference table. */
+// A page holding a red JPEG 2000 image and text in a predefined CJK CMap, which pdf.js
+// decodes only with the decoder and CMap data bundled into the sandbox.
+const BUNDLED_DATA_PDF = Buffer.from([
+  "JVBERi0xLjUKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5",
+  "cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVu",
+  "dCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvWE9iamVjdCA8",
+  "PCAvSW0wIDUgMCBSID4+IC9Gb250IDw8IC9GMSA2IDAgUiA+PiA+PiA+PgplbmRvYmoKNCAwIG9iago8PCAvTGVuZ3RoIDc1",
+  "ID4+CnN0cmVhbQpxIDIwMCAwIDAgMjAwIDEwMCA1MDAgY20gL0ltMCBEbyBRIEJUIC9GMSAzNiBUZiAxMDAgNDAwIFRkIDw0",
+  "RTJENjU4Nz4gVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9YT2JqZWN0IC9TdWJ0eXBlIC9JbWFn",
+  "ZSAvV2lkdGggMzIgL0hlaWdodCAzMiAvRmlsdGVyIC9KUFhEZWNvZGUgL0xlbmd0aCAyNTYgPj4Kc3RyZWFtCgAAAAxqUCAg",
+  "DQqHCgAAABRmdHlwanAyIAAAAABqcDIgAAAALWpwMmgAAAAWaWhkcgAAACAAAAAgAAMHBwAAAAAAD2NvbHIBAAAAAAAQAAAA",
+  "s2pwMmP/T/9RAC8AAAAAACAAAAAgAAAAAAAAAAAAAAAgAAAAIAAAAAAAAAAAAAMHAQEHAQEHAQH/UgAMAAAAAQAFBAQAAf9c",
+  "ABNAQEhIUEhIUEhIUEhIUEhIUP9kACUAAUNyZWF0ZWQgYnkgT3BlbkpQRUcgdmVyc2lvbiAyLjUuM/+QAAoAAAAAACwAAf+T",
+  "z7QIAzPPtAgIH8+0CAgfgICAgICAgICAgICAgICA/9kKZW5kc3RyZWFtCmVuZG9iago2IDAgb2JqCjw8IC9UeXBlIC9Gb250",
+  "IC9TdWJ0eXBlIC9UeXBlMCAvQmFzZUZvbnQgL1NUU29uZy1MaWdodCAvRW5jb2RpbmcgL1VuaUdCLVVDUzItSCAvRGVzY2Vu",
+  "ZGFudEZvbnRzIFs3IDAgUl0gPj4KZW5kb2JqCjcgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL0NJREZvbnRUeXBl",
+  "MCAvQmFzZUZvbnQgL1NUU29uZy1MaWdodCAvQ0lEU3lzdGVtSW5mbyA8PCAvUmVnaXN0cnkgKEFkb2JlKSAvT3JkZXJpbmcg",
+  "KEdCMSkgL1N1cHBsZW1lbnQgMiA+PiA+PgplbmRvYmoKeHJlZgowIDgKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5",
+  "IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjY3IDAwMDAwIG4gCjAw",
+  "MDAwMDAzOTIgMDAwMDAgbiAKMDAwMDAwMDc3MCAwMDAwMCBuIAowMDAwMDAwODkyIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1Np",
+  "emUgOCAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTA0MQolJUVPRgo=",
+].join(""), "base64");
+
 function pdfFixture(pageTexts) {
   const kids = pageTexts.map((_, index) => `${4 + index * 2} 0 R`).join(" ");
   const objects = [

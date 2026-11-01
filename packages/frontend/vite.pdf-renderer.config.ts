@@ -8,6 +8,8 @@ const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 // fetch chunks, stylesheets, or images of its own.
 export default defineConfig({
   publicDir: false,
+  // The decoders and CMaps in `bundledBinaryData.ts`.
+  assetsInclude: ["**/*.bcmap", "**/*.wasm"],
   build: {
     outDir: "dist",
     emptyOutDir: false,

@@ -45,7 +45,7 @@ export function buildPdfViewerDocument(script: string, nonce: string) {
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; font-src data:; img-src data: blob:; style-src 'unsafe-inline'; worker-src blob:; script-src 'nonce-${nonce}';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; font-src data:; img-src data: blob:; style-src 'unsafe-inline'; worker-src blob:; script-src 'nonce-${nonce}' 'wasm-unsafe-eval';" />
     <title>OpenAIDE PDF Preview</title>
   </head>
   <body>
