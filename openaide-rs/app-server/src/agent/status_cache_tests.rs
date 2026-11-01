@@ -515,3 +515,23 @@ fn explicit_recheck_and_own_sign_in_drop_the_signed_out_report() {
     cache.record_connected("codex");
     assert_eq!(cache.snapshot("codex").status, AgentStatus::Connected);
 }
+
+#[test]
+fn a_probe_error_names_what_setup_is_missing() {
+    let statuses = AgentStatusCache::default();
+    for (error, reason) in [
+        (
+            RuntimeError::NodeJsRequired("node".to_string()),
+            AgentSetupReason::NodeJsRequired,
+        ),
+        (
+            RuntimeError::SetupRequired("command".to_string()),
+            AgentSetupReason::CommandNotFound,
+        ),
+    ] {
+        statuses.record_probe_error("agent", &error);
+        let snapshot = statuses.snapshot("agent");
+        assert_eq!(snapshot.status, AgentStatus::SetupRequired);
+        assert_eq!(snapshot.setup_reason, Some(reason));
+    }
+}

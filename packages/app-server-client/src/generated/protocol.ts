@@ -1415,7 +1415,7 @@ accountLimits?: AgentAccountLimits | null, };
 
 export type AgentStatus = "disconnected" | "installing" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
 
-export type AgentSetupReason = "nodeJsRequired";
+export type AgentSetupReason = "nodeJsRequired" | "commandNotFound";
 
 export type AgentSignInFlow = {
 /**

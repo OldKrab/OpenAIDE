@@ -273,6 +273,8 @@ pub enum AgentSignInPhase {
 #[serde(rename_all = "camelCase")]
 pub enum AgentSetupReason {
     NodeJsRequired,
+    /// The Agent's command is not on this computer's PATH.
+    CommandNotFound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

@@ -639,7 +639,12 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
 }
 
 fn setup_reason_from_probe_error(error: &RuntimeError) -> Option<AgentSetupReason> {
-    matches!(error, RuntimeError::NodeJsRequired(_)).then_some(AgentSetupReason::NodeJsRequired)
+    match error {
+        RuntimeError::NodeJsRequired(_) => Some(AgentSetupReason::NodeJsRequired),
+        // A missing command is the only cause of this error.
+        RuntimeError::SetupRequired(_) => Some(AgentSetupReason::CommandNotFound),
+        _ => None,
+    }
 }
 
 fn session_error_updates_agent_status(error: &RuntimeError) -> bool {

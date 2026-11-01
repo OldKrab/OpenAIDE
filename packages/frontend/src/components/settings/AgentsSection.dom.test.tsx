@@ -68,6 +68,18 @@ it("names Node.js as what an Agent's setup is missing", async () => {
   expect(page.textContent).not.toContain("Setup is incomplete");
 });
 
+it("names a missing command as what an Agent's setup is missing", async () => {
+  await mountSettings({
+    state: agentsState([builtInAgent({ id: "opencode", label: "OpenCode", icon: "opencode", status: "setup_required", setup_reason: "commandNotFound" })]),
+  });
+
+  expect(button("Open OpenCode").closest("li")!.textContent).toContain("Command not found");
+  await click("Open OpenCode");
+  const page = document.querySelector('section[aria-label="Agent details"]')!;
+  expect(page.textContent).toContain("can't find this agent's command");
+  expect(page.textContent).not.toContain("Setup is incomplete");
+});
+
 it("shows loading until the first Agent list arrives", async () => {
   await mountSettings({ state: { activeTab: "agents", loading: true } });
 
