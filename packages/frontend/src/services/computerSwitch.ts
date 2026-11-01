@@ -1,12 +1,15 @@
 import { useSyncExternalStore } from "react";
-import type { ComputersCapability } from "./computers";
-import { hasUnsentInput } from "./unsentInput";
+import { currentComputer, type ComputersCapability } from "./computers";
+import { draftCount, dropKeptDrafts, keepDrafts } from "./keptDrafts";
+import { hasUnsentInput, unsentDraftTexts } from "./unsentInput";
 
 export type ComputerSwitchState = {
   /** The row being connected: a computer id, or "" for this device. */
   pending?: string;
-  /** The row waiting for the user to agree to drop their unsent input. */
+  /** The row waiting for the user to agree to drop input that cannot be kept. */
   confirming?: string;
+  /** Device storage refused the draft text, so going on also drops that. */
+  draftsAtRisk?: boolean;
   /** The shell can still end the pending switch. */
   cancellable: boolean;
   /** The last refused switch and the shell's sentence for it. */
@@ -18,12 +21,12 @@ export type ComputerSwitch = {
   subscribe(listener: () => void): () => void;
   /**
    * Asks the shell to switch; settles when the shell accepted, refused, or
-   * cancelled, or when the switch waits for `confirm` because of unsent input.
+   * cancelled, or when the switch waits for `confirm` because of input it cannot keep.
    */
   request(id?: string): Promise<void>;
-  /** Drops the unsent input and goes on with the switch waiting for it. */
+  /** Drops the input that cannot be kept and goes on with the switch waiting for it. */
   confirm(): Promise<void>;
-  /** Keeps the unsent input and stays on the computer in use. */
+  /** Stays on the computer in use with all the input in place. */
   decline(): void;
   cancel(): void;
   /** Leaves a refused switch: the user stays on the computer in use. */
@@ -59,10 +62,12 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
       const result = await capability.use(attempt.id, operationId);
       console.info(`computer_switch_completed operation_id=${operationId} target=${target} outcome=${result} duration_ms=${elapsed(attempt)}`);
       if (result === "switched") rememberArrival(attempt);
+      else dropKeptDrafts(attempt.computer);
       // A switched shell replaces this page; until then the row stays pending.
       publish(result === "switched" ? { pending: row, cancellable: false } : idle);
     } catch (cause) {
       console.warn(`computer_switch_completed operation_id=${operationId} target=${target} outcome=refused duration_ms=${elapsed(attempt)}`);
+      dropKeptDrafts(attempt.computer);
       publish({ cancellable: false, failed: { id: row, message: refusal(cause) } });
     }
   };
@@ -76,17 +81,25 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
       if (state.pending !== undefined || state.confirming !== undefined) return;
       const row = id ?? "";
       const attempt = {
+        computer: currentComputer(capability.snapshot())?.id ?? "",
         id,
         operationId: `computer-switch-${crypto.randomUUID()}`,
         startedAt: performance.now(),
         target: id ? "computer" : "this_device",
       };
       console.info(`computer_switch_started operation_id=${attempt.operationId} target=${attempt.target}`);
-      if (hasUnsentInput()) {
+      // Kept before the shell is asked: a Desktop switch reloads the page inside
+      // `use`, so its answer may never arrive. Any other ending drops the copy.
+      const drafts = unsentDraftTexts();
+      const kept = keepDrafts(attempt.computer, drafts);
+      if (draftCount(drafts) > 0) {
+        console.info(`computer_switch_drafts_kept operation_id=${attempt.operationId} count=${draftCount(drafts)} outcome=${kept ? "kept" : "storage_failed"}`);
+      }
+      if (!kept || hasUnsentInput()) {
         // ADR-0070 asks before connecting rather than after: a refused or
         // cancelled connection then still leaves the input in place.
         waiting = attempt;
-        publish({ confirming: row, cancellable: false });
+        publish({ confirming: row, cancellable: false, ...(kept ? {} : { draftsAtRisk: true }) });
         return;
       }
       await run(attempt);
@@ -95,14 +108,13 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
       const attempt = waiting;
       if (!attempt) return;
       waiting = undefined;
-      // TODO: drafts are dropped with the page on a confirmed switch. Keep them
-      // per computer and Task in device storage so a switch loses nothing (ADR-0070).
       await run(attempt);
     },
     decline() {
       const attempt = waiting;
       if (!attempt) return;
       waiting = undefined;
+      dropKeptDrafts(attempt.computer);
       console.info(`computer_switch_completed operation_id=${attempt.operationId} target=${attempt.target} outcome=declined duration_ms=${elapsed(attempt)}`);
       publish(idle);
     },
@@ -123,7 +135,7 @@ export function computerSwitch(capability: ComputersCapability): ComputerSwitch 
   return store;
 }
 
-type Attempt = { id?: string; operationId: string; startedAt: number; target: string };
+type Attempt = { computer: string; id?: string; operationId: string; startedAt: number; target: string };
 
 const elapsed = (attempt: Attempt) => Math.round(performance.now() - attempt.startedAt);
 

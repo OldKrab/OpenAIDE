@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComputerSwitchResult, ComputersCapability } from "./computers";
 import { computerSwitch, reportComputerSwitchArrival } from "./computerSwitch";
-import { reportUnsentInput } from "./unsentInput";
+import { takeKeptDrafts } from "./keptDrafts";
+import { reportDraftTexts, reportUnsentInput } from "./unsentInput";
 
 function capability(use: ComputersCapability["use"], cancel?: () => Promise<void>): ComputersCapability {
   return {
@@ -30,6 +31,7 @@ describe("computer switch", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("is one switch per shell, shared by every place that offers it", () => {
@@ -92,6 +94,61 @@ describe("computer switch", () => {
     fail = false;
     await store.request("studio");
     expect(store.snapshot().failed).toBeUndefined();
+  });
+
+  describe("with draft text", () => {
+    let stopReporting: () => void;
+    beforeEach(() => { stopReporting = reportDraftTexts(() => ({ tasks: { "task-1": "half a thought" } })); });
+    afterEach(() => stopReporting());
+
+    it("switches without asking and keeps the text for the computer it leaves", async () => {
+      const use = vi.fn(async () => "switched" as const);
+      const store = computerSwitch(capability(use));
+      await store.request("studio");
+      expect(use).toHaveBeenCalledOnce();
+      expect(takeKeptDrafts("")).toEqual({ tasks: { "task-1": "half a thought" } });
+    });
+
+    it("has the text kept before the shell may replace the page", async () => {
+      let keptDuringUse: unknown;
+      const store = computerSwitch(capability(async () => {
+        keptDuringUse = takeKeptDrafts("");
+        return "switched";
+      }));
+      await store.request("studio");
+      expect(keptDuringUse).toEqual({ tasks: { "task-1": "half a thought" } });
+    });
+
+    it.each([
+      ["refused", async () => { throw new Error("Studio is unreachable."); }],
+      ["cancelled", async () => "cancelled" as const],
+      ["unchanged", async () => "unchanged" as const],
+    ])("drops the copy when the switch is %s, since the page stays", async (_ending, use) => {
+      await computerSwitch(capability(use)).request("studio");
+      expect(takeKeptDrafts("")).toBeUndefined();
+    });
+
+    it("drops the copy when the user stays after being asked about an attachment", async () => {
+      const stopProbe = reportUnsentInput(() => true);
+      const store = computerSwitch(capability(async () => "switched"));
+      await store.request("studio");
+      store.decline();
+      stopProbe();
+      expect(takeKeptDrafts("")).toBeUndefined();
+    });
+
+    it("asks when device storage refuses the text, and says the text is at risk", async () => {
+      const storageFull = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("full", "QuotaExceededError"); });
+      const use = vi.fn(async () => "switched" as const);
+      const store = computerSwitch(capability(use));
+      await store.request("studio");
+      storageFull.mockRestore();
+      expect(use).not.toHaveBeenCalled();
+      expect(store.snapshot()).toEqual({ confirming: "studio", cancellable: false, draftsAtRisk: true });
+      expect(console.info).toHaveBeenCalledWith(expect.stringContaining("computer_switch_drafts_kept"));
+      expect(vi.mocked(console.info).mock.calls.flat().join()).toContain("outcome=storage_failed");
+      expect(vi.mocked(console.info).mock.calls.flat().join()).not.toContain("half a thought");
+    });
   });
 
   describe("with unsent input", () => {
