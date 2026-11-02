@@ -1,13 +1,16 @@
 import { useEffect } from "react";
+import { useBackNavigation } from "./useBackNavigation";
 
 /**
- * Alt+Left returns from a subagent history to the Task's main history. The shortcut only
- * exists while a subagent is selected, so it cannot steal the key elsewhere.
+ * Alt+Left and Android Back return from a subagent history to the Task's main history. Both
+ * only exist while a subagent is selected, so they cannot steal the key elsewhere. Back ranks
+ * below every overlay, so whatever covers the history closes first.
  */
 export function useReturnToMainHistory(
   selectedSubagentId: string | undefined,
   selectSubagent: (subagentId?: string) => void,
 ) {
+  useBackNavigation(Boolean(selectedSubagentId), () => selectSubagent(undefined), 10);
   useEffect(() => {
     if (!selectedSubagentId) return;
     const returnToMain = (event: KeyboardEvent) => {

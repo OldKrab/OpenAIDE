@@ -86,6 +86,7 @@ body[data-input-modality="pointer"] button:focus-visible {
 
   body[data-shell="web"] .mobile-task-more-actions {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
 
@@ -102,9 +103,34 @@ body[data-input-modality="pointer"] button:focus-visible {
     display: flex;
   }
 
+  /* Lines up with the rows beside it: an 18px icon slot, the label, and the chevron at the end. */
   body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-trigger {
     max-width: none;
     color: var(--oa-text);
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: 18px minmax(0, 1fr);
+    grid-auto-columns: max-content;
+    align-items: center;
+    text-align: left;
+  }
+
+  body[data-shell="web"] .mobile-task-more .subagent-switcher-trigger > :first-child {
+    justify-self: center;
+  }
+
+  /* A row that opens a menu says so; Terminal opens a page and shows none. */
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .mobile-task-more-chevron,
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--oa-muted);
+  }
+
+  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .mobile-task-more-chevron {
+    display: block;
+    order: 1;
+    margin-left: auto;
   }
 
   body[data-shell="web"] .mobile-task-more .terminal-entry::after { content: "Terminal"; }

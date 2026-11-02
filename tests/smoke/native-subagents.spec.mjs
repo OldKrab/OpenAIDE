@@ -56,6 +56,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await selectHistory(page, "Check a nested detail");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
+    if (viewport.width <= COMPACT_TASK_BAR_WIDTH) await expectMoreRowToGiveWay(page, chat);
     // A label longer than the bar truncates; it must not widen Chat past the viewport.
     const returnBox = await page.getByRole("button", { name: "Back to Main Agent" }).boundingBox();
     expect(returnBox.x + returnBox.width).toBeLessThanOrEqual(viewport.width);
@@ -88,6 +89,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(chat.getByText("Child review result", { exact: true })).toBeVisible();
     await selectHistory(page, "Check a nested detail");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
+    // Back leaves a Subagent history the way its return button does.
+    await pressBack(page);
+    await expect(chat.getByText("Main review result", { exact: true })).toBeVisible();
   });
 }
 
@@ -146,6 +150,22 @@ async function openMoreOnPhone(page) {
   await expect(more.or(hide).first()).toBeVisible();
   if (await more.isVisible()) await more.click();
   await expect(switcher).toBeVisible();
+}
+
+const pressBack = (page) => page.evaluate(() => window.dispatchEvent(new Event("openaide:back", { cancelable: true })));
+
+/** The row leaves Chat in view: a choice closes it, and so do a press outside it and Back. */
+async function expectMoreRowToGiveWay(page, chat) {
+  const row = page.locator("#mobile-task-more");
+  await expect(row).toBeHidden();
+  await openMoreOnPhone(page);
+  // Open Chat below the row; the message itself is under it.
+  await page.mouse.click(195, 500);
+  await expect(row).toBeHidden();
+  await openMoreOnPhone(page);
+  await pressBack(page);
+  await expect(row).toBeHidden();
+  await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
 }
 
 async function selectHistory(page, name) {

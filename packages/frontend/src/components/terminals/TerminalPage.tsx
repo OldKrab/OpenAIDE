@@ -5,6 +5,7 @@ import type { TerminalIntents } from "../../intents/terminalIntents";
 import type { DesktopWindowCapability } from "../../services/frontendShell";
 import type { TerminalStreamState } from "../../services/terminalSockets";
 import { desktopDragRegionProps } from "../DesktopTitleBar";
+import { useBackNavigation } from "../useBackNavigation";
 import { StateDot, TerminalCloseButton, TerminalKeyRow, terminalTitles, useVisibleHeight } from "./TerminalParts";
 import { TerminalScreen } from "./TerminalScreen";
 import type { TerminalPageTarget } from "./terminalSurface";
@@ -39,6 +40,7 @@ export default function TerminalPage(props: TerminalPageProps) {
   const firstAttach = useRef(new Map<string, TerminalAttach>());
   const send = useRef<((data: string) => void) | undefined>(undefined);
   const visibleHeight = useVisibleHeight(phone);
+  useBackNavigation(true, props.onBack, 90);
   const active = projectTerminals.find((terminal) => terminal.terminalId === activeId) ?? projectTerminals.at(-1);
   const titles = terminalTitles(projectTerminals);
   const titleOf = (terminal: TerminalSummary) => titles.get(terminal.terminalId) ?? "";

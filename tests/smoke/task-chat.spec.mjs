@@ -500,6 +500,9 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
   expectSmoothNavigation(narrowNavigation, 18, false);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('.message-list-virtual-row[data-user-message-navigation-target="true"] .chat-user')).toHaveText(prompts[2]);
+  // The row closed with the jump, so it does not cover the message.
+  await expect(page.locator("#mobile-task-more")).toBeHidden();
+  await page.getByRole("button", { name: "More Task actions", exact: true }).click();
   await mobilePicker.click();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);

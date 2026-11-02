@@ -157,6 +157,7 @@ body[data-shell="desktop"] .task-header[data-desktop-window="macos"] > :not(.tas
 .task-permission-policy-trigger:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .task-permission-policy-menu { min-width: 248px; padding: 6px; }
+.mobile-task-more-chevron { display: none; }
 
 .task-permission-policy-menu-heading {
   color: var(--oa-muted);
@@ -184,6 +185,11 @@ body[data-shell="desktop"] .task-header[data-desktop-window="macos"] > :not(.tas
 .task-permission-policy-option strong, .task-permission-policy-option small { display: block; }
 .task-permission-policy-option strong { font-size: 12px; font-weight: 600; }
 .task-permission-policy-option small { color: var(--oa-muted); font-size: 11px; line-height: 1.35; margin-top: 2px; }
+@media (max-width: 640px) {
+  .oa-popup-menu .task-permission-policy-option[role] { min-height: 48px; }
+  .task-permission-policy-option strong { font-size: 14px; }
+  .task-permission-policy-option small { font-size: 12px; }
+}
 .task-permission-policy-radio { width: 12px; height: 12px; border: 1px solid var(--oa-border-strong); border-radius: 50%; margin-top: 2px; }
 .task-permission-policy-radio[data-selected] { border: 4px solid var(--oa-focus); }
 

@@ -96,6 +96,20 @@ it("shows only this Project's Terminals and asks before closing one that runs a 
   expect(terminalIntents.close).toHaveBeenCalledWith("t1", true);
 });
 
+it("leaves the page on Back, after closing a pending stop question first", async () => {
+  const onBack = vi.fn();
+  const pressBack = () => window.dispatchEvent(new Event("openaide:back", { cancelable: true }));
+  await render(page({ intents: intents(), onBack, terminals: [summary("t1", { status: "busy", command: "npm" })] }));
+  await act(async () => button("Close npm").click());
+
+  await act(async () => pressBack());
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  expect(onBack).not.toHaveBeenCalled();
+
+  await act(async () => pressBack());
+  expect(onBack).toHaveBeenCalledOnce();
+});
+
 it("numbers tabs whose titles would repeat", async () => {
   await render(page({ intents: intents(), terminals: [summary("t1"), summary("t2"), summary("t3", { folder: "/work/other" })] }));
 

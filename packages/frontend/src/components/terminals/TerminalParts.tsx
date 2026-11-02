@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, X } from "lucide-react";
 import type { TerminalSummary } from "@openaide/app-server-client";
+import { useBackNavigation } from "../useBackNavigation";
 
 /** The running command while one runs, else the name of the shell's current folder. */
 export function terminalTitle(terminal: TerminalSummary) {
@@ -41,6 +42,7 @@ export function TerminalCloseButton({ terminal, title, onClose }: {
   const [confirming, setConfirming] = useState(false);
   const [closing, setClosing] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
+  useBackNavigation(confirming, () => setConfirming(false));
   useEffect(() => {
     if (!confirming) return;
     panel.current?.querySelector<HTMLButtonElement>("button")?.focus();
