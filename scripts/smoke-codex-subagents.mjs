@@ -87,6 +87,8 @@ async function checkSubagents(adapter, enabled) {
       "the delegated prompt must reach the parent and open the child");
     assert.ok(prompts[1].update.senderMessageId, "the child's view must link to the parent's");
     assert.deepEqual(prompts[1].update.content, [{ type: "text", text: "Review the fixture" }]);
+    assert.ok(events.every(({ update }) => !update.messageId?.endsWith(":subagent-history-gap")),
+      "complete child history must not report a gap");
     const terminal = lifecycle.filter(({ update }) => update.state?.state === "idle");
     assert.equal(terminal.length, 1, "announced child must terminate exactly once");
     assert.equal(terminal[0].update.state.stopReason, "end_turn");
