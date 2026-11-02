@@ -35,6 +35,7 @@ pub(super) struct AcpNativeSubagentRouter {
 struct RouterState {
     negotiated: bool,
     codex_adapter: bool,
+    claude_adapter: bool,
     children: HashMap<String, ChildRoute>,
 }
 
@@ -79,6 +80,11 @@ impl AcpNativeSubagentRouter {
             || matches!(
                 implementation_name,
                 Some("@openaide/codex-acp" | "codex-acp")
+            );
+        state.claude_adapter = self.agent_id == "claude-code"
+            || matches!(
+                implementation_name,
+                Some("@openaide/claude-agent-acp" | "@agentclientprotocol/claude-agent-acp")
             );
         if !negotiated {
             state.children.clear();

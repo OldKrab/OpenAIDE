@@ -13,8 +13,8 @@ fn root_updates() -> Vec<SessionNotification> {
         serde_json::json!({
             "sessionUpdate": "subagent_update",
             "sessionId": "child",
-            "title": "general-purpose",
-            "description": "Fix the build",
+            "title": "Fix the build",
+            "description": "general-purpose",
             "state": { "state": "running" },
         }),
         serde_json::json!({

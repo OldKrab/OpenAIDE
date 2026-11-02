@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::super::tests::{claude_router, CaptureSink};
+use super::super::tests::{claude_router, router_for, CaptureSink};
 use super::super::{AcpNativeSubagentRouter, RoutedSessionNotification};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
 use crate::agent::acp_schema::SessionNotification;
@@ -36,8 +36,8 @@ fn announce(router: &AcpNativeSubagentRouter) {
         router,
         "root",
         subagent_update(serde_json::json!({
-            "title": "general-purpose",
-            "description": "Fix the build",
+            "title": "Fix the build",
+            "description": "general-purpose",
             "capabilities": { "cancel": {} },
             "state": { "state": "running" },
         })),
@@ -53,7 +53,7 @@ fn idle(stop_reason: Option<&str>) -> serde_json::Value {
     subagent_update(serde_json::json!({ "state": state }))
 }
 
-/// Replays the traffic shape `@openaide/claude-agent-acp` 1.7.0 sends for one
+/// Replays the traffic shape `@openaide/claude-agent-acp` sends for one
 /// delegated run, with synthetic text.
 #[test]
 fn claude_released_run_becomes_one_subagent_with_its_prompt_and_reply() {
@@ -183,6 +183,56 @@ fn idle_stop_reasons_and_unknown_state_map_to_product_statuses() {
             "{update}"
         );
     }
+}
+
+#[test]
+fn claude_task_title_stays_the_name_until_a_type_is_reported() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = claude_router(&capture);
+    route(
+        &router,
+        "root",
+        subagent_update(serde_json::json!({ "title": "Fix the build" })),
+    )
+    .unwrap();
+    route(
+        &router,
+        "root",
+        subagent_update(serde_json::json!({
+            "title": "Fix the build",
+            "description": "general-purpose",
+        })),
+    )
+    .unwrap();
+
+    let spawns = capture.spawns.lock().unwrap();
+    assert_eq!(spawns[0].name, "Fix the build");
+    assert_eq!(spawns[0].delegated_task, None);
+    let identities = capture.identities.lock().unwrap();
+    assert_eq!(identities[0].name.as_deref(), Some("general-purpose"));
+    assert_eq!(
+        identities[0].delegated_task.as_deref(),
+        Some("Fix the build")
+    );
+}
+
+#[test]
+fn codex_identity_keeps_the_reported_order() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = router_for(&capture, "codex", "@openaide/codex-acp");
+    route(
+        &router,
+        "root",
+        subagent_update(serde_json::json!({
+            "title": "Worker",
+            "description": "Compute 17 * 19",
+        })),
+    )
+    .unwrap();
+
+    let spawns = capture.spawns.lock().unwrap();
+    assert_eq!(spawns[0].name, "Worker");
+    assert_eq!(spawns[0].delegated_task.as_deref(), Some("Compute 17 * 19"));
 }
 
 #[test]

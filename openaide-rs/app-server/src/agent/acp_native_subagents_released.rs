@@ -17,8 +17,8 @@ use super::{claude_details, native_state_name, AcpNativeSubagentRouter, ChildRou
 use super::{RoutedSessionNotification, SubagentEventSink, SUBAGENT_NOT_OFFERED};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
 use crate::agent::acp_native_subagents_delegation::{
-    counterpart, description_patch, released_state, subagent_name, ChildDelegation, DelegationRow,
-    UNTITLED_SUBAGENT,
+    counterpart, description_patch, normalize_claude_identity, released_state, subagent_name,
+    ChildDelegation, DelegationRow, UNTITLED_SUBAGENT,
 };
 use crate::agent::acp_schema::{
     ContentBlock, MaybeUndefined, SessionId, SessionNotification, StateUpdate, SubagentUpdate,
@@ -47,8 +47,11 @@ impl AcpNativeSubagentRouter {
     pub(super) fn route_released_update(
         &self,
         parent_session_id: String,
-        update: SubagentUpdate,
+        mut update: SubagentUpdate,
     ) -> Result<RoutedSessionNotification, RuntimeError> {
+        if self.is_claude_adapter() {
+            normalize_claude_identity(&mut update);
+        }
         let child_session_id = update.session_id.to_string();
         let known_parent = self.known_child_parent(&child_session_id)?;
         match known_parent {
@@ -234,6 +237,13 @@ impl AcpNativeSubagentRouter {
                 .emit_user_prompt(text, Some(message.message_id))?;
         }
         Ok(true)
+    }
+
+    fn is_claude_adapter(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("ACP Subagent router poisoned")
+            .claude_adapter
     }
 
     /// The parent a known child was announced on, or `None` for a new child.
