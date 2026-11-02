@@ -56,8 +56,8 @@ final class ConnectionController extends ContextWrapper {
     void receive(JSONObject message) {
         if (disposed) return;
         String command = message.optString("action");
-        if (!localTools && !java.util.Arrays.asList("state", "close", "pair_setup", "app_settings", "diagnostics",
-            "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check").contains(command)) {
+        if (!localTools && !SetupPagePolicy.allowedWhileRemote(command)) {
+            diagnostics.record("setup_command_refused", SetupPagePolicy.safeAction(command), 0, 0);
             notice = "Switch to this phone before managing local tools.";
             emit();
             return;
