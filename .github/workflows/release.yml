@@ -181,6 +181,10 @@ jobs:
 
   desktop-update-feed:
     name: Publish Windows Desktop update feed
+    # A deploy replaces the whole site and each run writes only its own channel, so a prerelease
+    # would delete the stable feed.
+    # TODO: Deploy both channels together so prereleases can update in-app.
+    if: ${{ !contains(github.ref_name, '-') }}
     needs: [validate, github-release]
     runs-on: ubuntu-24.04
     permissions:
