@@ -173,22 +173,27 @@ async function runPrompt(message) {
       const childId = `${sessionId}:reviewer:${promptNumber}`;
       const nestedId = `${childId}:details`;
       update(sessionId, {
-        sessionUpdate: "subagent_spawned", subagentSessionId: childId,
-        name: "Reviewer", task: "Review the implementation", capabilities: {},
+        sessionUpdate: "subagent_update", sessionId: childId,
+        title: "Reviewer", description: "Review the implementation",
+        state: { state: "running" },
         _meta: { claudeCode: { nativeSubagent: { type: "reviewer", model: "test-model" } } },
       });
       textUpdate(childId, "agent_thought_chunk", "Checking the implementation", "child-thought");
       update(childId, {
-        sessionUpdate: "subagent_spawned", subagentSessionId: nestedId,
-        name: "Detail reviewer", task: "Check a nested detail with a delegated task longer than a phone-width inspection bar", capabilities: {},
+        sessionUpdate: "subagent_update", sessionId: nestedId,
+        title: "Detail reviewer",
+        description: "Check a nested detail with a delegated task longer than a phone-width inspection bar",
+        state: { state: "running" },
       });
       textUpdate(nestedId, "agent_message_chunk", "Nested review result", "nested-result");
       update(childId, {
-        sessionUpdate: "subagent_state_update", subagentSessionId: nestedId, state: "completed",
+        sessionUpdate: "subagent_update", sessionId: nestedId,
+        state: { state: "idle", stopReason: "end_turn" },
       });
       textUpdate(childId, "agent_message_chunk", "Child review result", "child-result");
       update(sessionId, {
-        sessionUpdate: "subagent_state_update", subagentSessionId: childId, state: "completed",
+        sessionUpdate: "subagent_update", sessionId: childId,
+        state: { state: "idle", stopReason: "end_turn" },
       });
       textUpdate(sessionId, "agent_message_chunk", "Main review result", `main-${promptNumber}`);
     }

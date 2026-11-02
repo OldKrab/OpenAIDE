@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::super::tests::{claude_router, router_for, CaptureSink};
+use super::super::tests::{claude_meta, claude_router, detail_pairs, router_for, CaptureSink};
 use super::super::{AcpNativeSubagentRouter, RoutedSessionNotification};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
 use crate::agent::acp_schema::SessionNotification;
@@ -101,8 +101,6 @@ fn claude_released_run_becomes_one_subagent_with_its_prompt_and_reply() {
     assert_eq!(spawns[0].native_session_id, "child");
     assert_eq!(spawns[0].name, "general-purpose");
     assert_eq!(spawns[0].delegated_task.as_deref(), Some("Fix the build"));
-    assert!(spawns[0].parent_records_delegation);
-    assert!(!spawns[0].parent_interaction);
     assert!(spawns[0].capabilities.cancel);
     let updates = capture.updates.lock().unwrap();
     assert!(matches!(
@@ -790,4 +788,59 @@ fn a_reply_to_a_launch_this_connection_never_saw_leaves_its_saved_row_alone() {
     ));
 
     assert!(capture.root_updates.lock().unwrap().is_empty());
+}
+
+#[test]
+fn claude_child_metadata_becomes_typed_details() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = claude_router(&capture);
+    route(
+        &router,
+        "root",
+        subagent_update(serde_json::json!({
+            "state": { "state": "running" },
+            "_meta": claude_meta(serde_json::json!({
+                "type": "Explore",
+                "requestedModel": "sonnet",
+                "unknown": "ignored",
+            })),
+        })),
+    )
+    .unwrap();
+    assert_eq!(
+        detail_pairs(&capture.spawns.lock().unwrap()[0].details),
+        [("Agent type", "Explore"), ("Model", "sonnet")],
+    );
+}
+
+#[test]
+fn child_session_info_reports_the_resolved_model() {
+    let capture = Arc::new(CaptureSink::default());
+    let router = claude_router(&capture);
+    announce(&router);
+    let info = |session_id: &str| {
+        route(
+            &router,
+            session_id,
+            serde_json::json!({
+                "sessionUpdate": "session_info_update",
+                "_meta": claude_meta(serde_json::json!({
+                    "model": "claude-sonnet-5-5",
+                    "requestedModel": "sonnet",
+                })),
+            }),
+        )
+        .unwrap()
+    };
+    assert!(matches!(info("child"), RoutedSessionNotification::Handled));
+    // The same update on the root session keeps its ordinary Task metadata meaning.
+    assert!(matches!(info("root"), RoutedSessionNotification::Root(_)));
+
+    let details = capture.details.lock().unwrap();
+    assert_eq!(details.len(), 1);
+    assert_eq!(details[0].native_session_id, "child");
+    assert_eq!(
+        detail_pairs(&details[0].details),
+        [("Model", "claude-sonnet-5-5")],
+    );
 }

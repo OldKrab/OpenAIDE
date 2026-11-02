@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 use crate::agent::acp_background_work::{
     route_async_task_update, AsyncTaskRouting, SESSION_STATE_METHOD,
 };
-use crate::agent::acp_draft_subagents::{decode_draft_subagent_update, DraftSubagentNotification};
 use crate::agent::acp_early_session_catalogs::EarlySessionCatalogs;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
@@ -76,8 +75,6 @@ where
     let state_trace = notification_trace.clone();
     let state_session_traces = notification_session_traces.clone();
     let notification_load_replay = context.load_replay;
-    let raw_load_replay = notification_load_replay.clone();
-    let raw_native_subagents = context.native_subagents.clone();
     let notification_native_subagents = context.native_subagents;
     let agent_reports = context.agent_reports;
     let raw_agent_id = notification_agent_id.clone();
@@ -117,17 +114,6 @@ where
                                 .and_then(serde_json::Value::as_str),
                             "reason": reason,
                         }),
-                    );
-                    return Ok(Handled::Yes);
-                }
-                if let Some(draft) = decode_draft_subagent_update(&notification) {
-                    handle_draft_subagent_notification(
-                        &notification,
-                        draft,
-                        &state_trace,
-                        &state_session_traces,
-                        &raw_load_replay,
-                        &raw_native_subagents,
                     );
                     return Ok(Handled::Yes);
                 }
@@ -478,48 +464,6 @@ fn handle_session_update_notification(
         return None;
     }
     Some(notification)
-}
-
-/// Draft Subagent updates have no type in the released schema. They take the
-/// same trace and load-replay path as a typed update before the router applies them.
-fn handle_draft_subagent_notification(
-    notification: &UntypedMessage,
-    draft: Result<DraftSubagentNotification, serde_json::Error>,
-    trace: &Option<AcpTraceSession>,
-    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
-    load_replay: &LoadReplayCaptures,
-    native_subagents: &AcpNativeSubagentRouter,
-) {
-    let draft = match draft {
-        Ok(draft) => draft,
-        Err(error) => {
-            crate::logging::warn(
-                "acp_subagent_update_rejected",
-                serde_json::json!({
-                    "form": "draft",
-                    "error_kind": "malformed",
-                    "error_category": format!("{:?}", error.classify()),
-                }),
-            );
-            return;
-        }
-    };
-    let announced_child = draft.announced_child();
-    if let Some(trace) = session_trace(&draft.session_id, announced_child, trace, session_traces) {
-        trace.record("agent_to_client", "session/update", notification.params());
-    }
-    if absorbed_by_load_replay(load_replay, &draft.session_id, announced_child, None) {
-        return;
-    }
-    if let Err(error) = native_subagents.route_draft(draft) {
-        crate::logging::warn(
-            "acp_subagent_update_rejected",
-            serde_json::json!({
-                "form": "draft",
-                "error_kind": error.code(),
-            }),
-        );
-    }
 }
 
 /// The trace that records `session_id`'s traffic. A child session never opens

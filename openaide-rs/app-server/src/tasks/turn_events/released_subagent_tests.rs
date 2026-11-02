@@ -22,8 +22,6 @@ fn released_spawn(
         native_session_id: "child_1".to_string(),
         name: name.to_string(),
         delegated_task: delegated_task.map(str::to_string),
-        parent_interaction: false,
-        parent_records_delegation: true,
         capabilities: AgentNativeSubagentCapabilities {
             cancel,
             close: false,

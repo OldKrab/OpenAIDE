@@ -289,11 +289,6 @@ impl AcpNativeSubagentRouter {
             native_session_id: child_session_id.to_string(),
             name: name.clone(),
             delegated_task: delegated_task.clone(),
-            parent_interaction: false,
-            // The parent transcript records the delegation: as the Agent's own
-            // tool call, or as the row App Server builds from the parent's
-            // session messages when the adapter hides that call.
-            parent_records_delegation: true,
             capabilities: AgentNativeSubagentCapabilities {
                 cancel,
                 close: false,
