@@ -34,6 +34,16 @@ final class SetupPagePolicy {
 
     static boolean allowedOnEveryPage(String action) { return EVERY_PAGE_ACTIONS.contains(action); }
 
+    /**
+     * What the workspace page may ask while this phone is not the computer in use; its
+     * local tools wait for the phone to be in use. Setup stays allowed: it is how an
+     * unready phone becomes usable (ADR-0070), and its own page runs those tools.
+     */
+    private static final java.util.Set<String> REMOTE_ACTIONS = java.util.Set.of("state", "close", "pair_setup", "phone_setup", "app_settings", "diagnostics",
+        "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check");
+
+    static boolean allowedWhileRemote(String action) { return REMOTE_ACTIONS.contains(action); }
+
     /** A command name as it may be logged: fixed command words pass, anything else is "other". */
     static String safeAction(String action) {
         return action != null && action.matches("[a-z_]{1,40}") ? action : "other";

@@ -159,6 +159,7 @@ public final class MainActivity extends Activity {
     }
 
     private void openSetup(String screen) {
+        diagnostics.record("setup_page", settingsOpen ? "already_open" : "opened", 0, 0, Map.of("screen", screen));
         if (settingsOpen) return;
         settingsOpen = true;
         startActivityForResult(new Intent(this, SetupActivity.class).putExtra("screen", screen)
