@@ -770,10 +770,10 @@ describe("AppSurfaces callback wiring", () => {
     const tree = render(controller);
     const header = tree.root.findByProps({ className: "mobile-workbench-bar" });
 
-    expect(header.findByType("small").children.join("")).toBe("Idle · Codex · Repo");
+    expect(header.findAllByType("small")[0]!.children.join("")).toBe("Idle · Codex · Repo");
     const more = header.findByProps({ className: "mobile-task-more" });
     // Permission handling is a rare setting: it waits in "More", not in the bar.
-    expect(more.findByProps({ "aria-label": "Permission handling: Ask every time" })).toBeDefined();
+    expect(more.findByProps({ "aria-label": "Auto-approve permissions", role: "switch" })).toBeDefined();
     expect(more.props.hidden).toBe(true);
 
     act(() => header.findByProps({ "aria-label": "More Task actions" }).props.onClick());

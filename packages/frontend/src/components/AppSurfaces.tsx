@@ -5,6 +5,7 @@ import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceMo
 import { DesktopTitleBar } from "./DesktopTitleBar";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
+import { MobileTaskMoreProvider } from "./MobileTaskMore";
 import { MobileWorkbenchBar } from "./MobileWorkbenchBar";
 import { taskStatusLabel } from "./TaskHeader";
 import { TaskLoadingView } from "./TaskLoadingView";
@@ -643,6 +644,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       />
     );
     return (
+      <MobileTaskMoreProvider>
       <TerminalSurfaceContext.Provider value={frontendShell?.terminals ? terminalPage.surface : undefined}>
       <AppSidebarFrame
         className={[
@@ -757,6 +759,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         </section>
       </AppSidebarFrame>
       </TerminalSurfaceContext.Provider>
+      </MobileTaskMoreProvider>
     );
   }
 

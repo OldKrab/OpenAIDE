@@ -157,7 +157,6 @@ body[data-shell="desktop"] .task-header[data-desktop-window="macos"] > :not(.tas
 .task-permission-policy-trigger:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .task-permission-policy-menu { min-width: 248px; padding: 6px; }
-.mobile-task-more-chevron { display: none; }
 
 .task-permission-policy-menu-heading {
   color: var(--oa-muted);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { createPortal } from "react-dom";
-import { UserMessagePicker } from "./UserMessagePicker";
+import { MobileUserMessages, UserMessagePicker } from "./UserMessagePicker";
 import type {
   UserMessageAnchor,
   UserMessageNavigation,
@@ -35,7 +35,7 @@ export function UserMessageNavigator({
   target,
 }: UserMessageNavigatorProps) {
   if (navigation.anchors.length === 0 || (navigation.anchors.length === 1 && !navigation.hasEarlier)) return null;
-  if (target) return createPortal(<UserMessagePicker navigation={navigation} />, target);
+  if (target) return createPortal(<MobileUserMessages navigation={navigation} />, target);
   return (
     <>
       <UserMessageRail navigation={navigation} />
