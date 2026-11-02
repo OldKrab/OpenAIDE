@@ -1,3 +1,14 @@
+/// A finished turn's thread releases its Store clone after shutdown returns.
+fn reopen_store_after_shutdown(root: std::path::PathBuf) -> Store {
+    crate::test_sync::wait_for("the Store lock to be released", || {
+        match Store::open(root.clone()) {
+            Ok(store) => Some(store),
+            Err(openaide_app_server::storage::StoreOpenError::LockedByLiveServer) => None,
+            Err(error) => panic!("reopen store after shutdown: {error}"),
+        }
+    })
+}
+
 #[test]
 fn runtime_shutdown_closes_agent_sessions() {
     let tmp = TempDir::new().unwrap();
@@ -116,7 +127,7 @@ fn shutdown_preserves_durable_native_session_bindings_before_restart() {
     let restart_resumes = Arc::new(AtomicUsize::new(0));
     let restart_prompts = Arc::new(AtomicUsize::new(0));
     let restarted = TaskService::new(
-        Store::open(store_root).unwrap(),
+        reopen_store_after_shutdown(store_root),
         Arc::new(SessionTrackingAgent {
             starts: restart_starts.clone(),
             resumes: restart_resumes.clone(),
@@ -221,7 +232,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
     runtime.service().shutdown().unwrap();
     drop(runtime);
 
-    let recovered_store = Store::open(store_root.clone()).unwrap();
+    let recovered_store = reopen_store_after_shutdown(store_root.clone());
     let recovered = recovered_store.read_task(&task_id).unwrap();
     assert_eq!(recovered.status, TaskStatus::Inactive);
     assert!(recovered.active_turn_id.is_none());
