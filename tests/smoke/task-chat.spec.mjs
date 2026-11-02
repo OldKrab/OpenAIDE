@@ -450,9 +450,7 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
   await prepareUserMessageNavigationObservation(page, 1, prompts[1]);
   await markers.nth(1).click();
   const adjacentNavigation = await page.evaluate(() => window.__openaideNavigationFinished);
-  // The indicator may already rest on this nearby message: once the first
-  // navigation's lock ends it follows the message nearest the viewport center.
-  const adjacentPaintedPositions = expectSmoothNavigation(adjacentNavigation, 12, false);
+  const adjacentPaintedPositions = expectSmoothNavigation(adjacentNavigation, 12);
   // Navigation uses the same painted-step budget for nearby and distant
   // messages. Under throttling, a costly range may stretch a frame instead
   // of skipping it and exposing an empty virtualized viewport.

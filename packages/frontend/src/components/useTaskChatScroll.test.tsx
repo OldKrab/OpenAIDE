@@ -399,6 +399,38 @@ describe("useTaskChatScroll", () => {
     act(() => tree.unmount());
   });
 
+  it("keeps the selection on the message navigated to until the reader scrolls", () => {
+    vi.useFakeTimers();
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const tree = renderHarness(messageList, {
+      itemKeys: ["message:user-1", "message:agent-1", "message:agent-2", "message:user-2", "message:agent-3", "message:agent-4"],
+      savedScrollState: { ownership: "reading", scrollTop: 216 },
+      userMessageAnchors: [
+        { key: "message:user-1", rowIndex: 0, text: "First question" },
+        { key: "message:user-2", rowIndex: 3, text: "Second question" },
+      ],
+    });
+    const selected = () => tree.root.findByProps({ className: "user-message-navigation-state" }).props["data-current-index"];
+    act(() => messageListView(tree).props.onScroll({ currentTarget: messageList }));
+    expect(selected()).toBe(1);
+
+    act(() => tree.root.findByProps({ className: "previous-user-message-test" }).props.onClick());
+    act(() => {
+      vi.advanceTimersByTime(1_800);
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+
+    // The second message is nearer the viewport center, but the reader asked for the first.
+    expect(selected()).toBe(0);
+
+    act(() => {
+      messageListView(tree).props.onWheel({ deltaY: 1 });
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+
+    expect(selected()).toBe(1);
+  });
+
   it("keeps sequential navigation relative to the selected message while smooth scrolling", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     const tree = renderHarness(messageList, {
