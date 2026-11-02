@@ -92,6 +92,11 @@ impl ManagedAcpInstaller for RecordingInstaller {
         fs::create_dir_all(&codex_root).expect("create managed native Codex fixture");
         fs::write(codex_root.join("codex.exe"), "native Codex fixture")
             .expect("write managed native Codex fixture");
+        if let Some(binary) = super::runtime::unix_codex_binary(destination) {
+            fs::create_dir_all(binary.parent().expect("native Codex parent"))
+                .expect("create managed native Codex fixture");
+            fs::write(binary, "native Codex fixture").expect("write managed native Codex fixture");
+        }
         Ok(())
     }
 }
@@ -729,6 +734,42 @@ fn claude_installation_without_its_native_runtime_is_not_published() {
         .to_string()
         .contains("Claude integration setup failed"));
     assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Claude));
+}
+
+struct MissingNativeCodexInstaller;
+
+impl ManagedAcpInstaller for MissingNativeCodexInstaller {
+    fn install(
+        &self,
+        runtime: ManagedAcpRuntime,
+        destination: &std::path::Path,
+    ) -> Result<(), String> {
+        RecordingInstaller::default().install(runtime, destination)?;
+        let _ = fs::remove_dir_all(destination.join("node_modules/@openai"));
+        Ok(())
+    }
+}
+
+/// npm skips a failed optional dependency and still exits successfully, which
+/// would otherwise publish a runtime whose every session fails to start.
+#[test]
+fn codex_installation_without_its_native_runtime_is_not_published() {
+    let storage = TempDir::new().unwrap();
+    let capture = capture_test_logs();
+    let provisioner = ManagedAcpProvisioner::with_installer(
+        storage.path().to_path_buf(),
+        Arc::new(MissingNativeCodexInstaller),
+    );
+
+    let error = provisioner
+        .prepare(AcpAgentConfig::codex())
+        .expect_err("a missing native runtime must fail installation");
+
+    assert!(error.to_string().contains("Codex integration setup failed"));
+    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Codex));
+    assert!(capture.snapshot().iter().any(|entry| {
+        entry.get("event").and_then(serde_json::Value::as_str) == Some("codex_acp_provision_failed")
+    }));
 }
 
 #[test]

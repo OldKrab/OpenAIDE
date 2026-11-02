@@ -414,7 +414,10 @@ fn validate_platform_runtime(
     windows: bool,
 ) -> Result<(), RuntimeError> {
     let present = match runtime {
-        ManagedAcpRuntime::Codex => !windows || windows_codex_binary(version_root).is_file(),
+        ManagedAcpRuntime::Codex if windows => windows_codex_binary(version_root).is_file(),
+        ManagedAcpRuntime::Codex => {
+            runtime::unix_codex_binary(version_root).is_none_or(|binary| binary.is_file())
+        }
         ManagedAcpRuntime::Claude => {
             let candidates = runtime::claude_native_binaries(version_root, windows);
             candidates.is_empty() || candidates.iter().any(|binary| binary.is_file())

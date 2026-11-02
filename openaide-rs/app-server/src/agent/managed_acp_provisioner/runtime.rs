@@ -165,6 +165,26 @@ pub(super) fn claude_native_binaries(version_root: &Path, windows: bool) -> Vec<
         .collect()
 }
 
+/// Native Codex binary npm installs for this Unix host, at the path the
+/// `@openai/codex` launcher resolves. None on hosts Codex publishes no binary for.
+pub(super) fn unix_codex_binary(version_root: &Path) -> Option<PathBuf> {
+    let (package, target) = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => ("linux-x64", "x86_64-unknown-linux-musl"),
+        ("linux", "aarch64") => ("linux-arm64", "aarch64-unknown-linux-musl"),
+        ("macos", "x86_64") => ("darwin-x64", "x86_64-apple-darwin"),
+        ("macos", "aarch64") => ("darwin-arm64", "aarch64-apple-darwin"),
+        _ => return None,
+    };
+    Some(
+        version_root
+            .join("node_modules/@openai")
+            .join(format!("codex-{package}"))
+            .join("vendor")
+            .join(target)
+            .join("bin/codex"),
+    )
+}
+
 fn pinned_version(package_json: &str, package_name: &str) -> String {
     let policy: serde_json::Value =
         serde_json::from_str(package_json).expect("embedded ACP policy is valid JSON");
