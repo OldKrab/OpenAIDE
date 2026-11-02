@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Ref } from "react";
 import { ListTodo, Menu, MoreHorizontal, X } from "lucide-react";
 import type { TaskPermissionPolicy } from "@openaide/app-shell-contracts";
 import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
+import { useBackNavigation } from "./useBackNavigation";
 
 /**
  * The phone's Task bar. Title and status get the width; only the frequent actions stay in the
  * bar: Project files (portaled into `onActionsTarget`) and the Plan when the Task has one. The
  * rest (Terminal, jump to a message, Subagents, permission handling) portal into a second row
  * that "More" opens below the bar. The row stays mounted while closed so the portaled controls
- * keep their state, and it is a row rather than a popup so their own menus anchor normally.
+ * keep their state, and it is a row rather than a popup so their own menus anchor normally. It
+ * still closes like a menu; see `useMoreRowDismissal`.
  */
 export function MobileWorkbenchBar({
   coverTitle,
@@ -47,6 +49,7 @@ export function MobileWorkbenchBar({
   useEffect(() => setMoreOpen(false), [taskKey]);
   const taskControls = !coverTitle && Boolean(permission);
   const showMore = taskControls && moreOpen;
+  useMoreRowDismissal(showMore, useCallback(() => setMoreOpen(false), []));
 
   return (
     <header
@@ -105,4 +108,38 @@ export function MobileWorkbenchBar({
       </div>
     </header>
   );
+}
+
+/** What counts as inside the open row: the row, its trigger, and the menus its controls open. */
+const MORE_ROW_PARTS = "#mobile-task-more, .mobile-task-more-trigger, #openaide-popup-layer";
+
+/**
+ * Closes the open row on a press outside it, on Back, on Escape, and once an action inside it
+ * ran, so it never covers what that action showed. TaskView portals most of the controls in, so
+ * only document listeners see them all. A trigger that opens a control's own menu is no action
+ * yet; the choice in that menu is.
+ */
+function useMoreRowDismissal(open: boolean, close: () => void) {
+  useBackNavigation(open, close);
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element && event.target.closest(MORE_ROW_PARTS))) close();
+    };
+    const onClick = (event: MouseEvent) => {
+      const action = event.target instanceof Element ? event.target.closest("button") : null;
+      if (action?.closest(MORE_ROW_PARTS) && !action.matches(".mobile-task-more-trigger, [data-oa-popup-trigger]")) close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [close, open]);
 }

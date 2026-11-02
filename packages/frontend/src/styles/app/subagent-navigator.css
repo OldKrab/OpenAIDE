@@ -399,4 +399,9 @@
     display: inline;
   }
 
+  /* The name gives way instead, or the label would run under Stop. */
+  .subagent-details-trigger {
+    flex: 0 0 auto;
+  }
+
 }
