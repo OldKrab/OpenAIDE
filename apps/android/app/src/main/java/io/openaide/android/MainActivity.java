@@ -53,6 +53,8 @@ public final class MainActivity extends Activity {
     private long pausedAt;
     private final WebResourcePolicy resourcePolicy = new WebResourcePolicy();
     private boolean connecting;
+    /** Whether the skip of a turned-off background service is already in the diagnostics. */
+    private boolean backgroundSkipRecorded;
     /** The last connection attempt reached the workspace's App Server; the setup screen reports it. */
     private boolean connected;
     private boolean mainFrameFailed;
@@ -183,7 +185,13 @@ public final class MainActivity extends Activity {
 
     /** Keeps work on this phone or an SSH Computer running, or a paired computer's Task notifications arriving, while the app is hidden. */
     private void startBackgroundWork() {
-        if (!getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true)) return;
+        if (!getSharedPreferences("connection", MODE_PRIVATE).getBoolean("background", true)) {
+            // This runs on every connect and every leave of the screen; once says why nothing started.
+            if (!backgroundSkipRecorded) diagnostics.record("background_work", "skipped", 0, 0, Map.of("cause", "turned_off"));
+            backgroundSkipRecorded = true;
+            return;
+        }
+        backgroundSkipRecorded = false;
         try { startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", visible)); }
         catch (RuntimeException error) {
             diagnostics.record("background_work", "start_failed", 0, 0);

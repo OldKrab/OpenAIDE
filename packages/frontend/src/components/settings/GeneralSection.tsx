@@ -200,28 +200,35 @@ function useRuntimeGroup(capability: DesktopRuntimeCapability | undefined): Sett
   };
 }
 
-/** Phone only, and only while the phone itself runs the Agents. */
+/**
+ * Phone only. One setting: it keeps this phone's or an SSH Computer's work going, or
+ * a paired computer's Task notifications arriving, so it stays reachable in all three.
+ */
 function backgroundGroup(phone: PhoneConnection | undefined): SettingsGroup | undefined {
   const state = phone?.state;
-  if (!phone || !state || state.remote) return undefined;
+  if (!phone || !state) return undefined;
+  const notifies = state.remote && !state.sshComputers?.some((computer) => computer.current);
+  const label = notifies ? "Task notifications" : "Continue while locked";
+  const batteryNeeded = !state.appBattery || (!state.remote && !state.termuxBattery);
   const rows: SettingsRow[] = [{
     id: "background",
-    label: "Continue while locked",
-    keywords: "background battery phone termux screen",
+    label,
+    description: notifies ? "Tell me when a task finishes or needs me while OpenAIDE is hidden" : undefined,
+    keywords: "background battery phone termux screen notifications",
     control: (
       <SettingsSwitch
         checked={state.background}
         disabled={phone.busy}
-        label="Continue while locked"
+        label={label}
         onChange={(enabled) => { void phone.execute({ action: "background", enabled }); }}
       />
     ),
   }];
-  if (state.background && (!state.appBattery || !state.termuxBattery)) {
+  if (state.background && batteryNeeded) {
     rows.push({
       id: "battery",
       label: "Allow background activity",
-      description: "Unrestricted battery use for OpenAIDE and Termux",
+      description: state.remote ? "Unrestricted battery use for OpenAIDE" : "Unrestricted battery use for OpenAIDE and Termux",
       status: { tone: "warn", text: "Needed" },
       control: <SettingsButton disabled={phone.busy} onClick={() => void phone.execute({ action: "battery" })}>Open settings</SettingsButton>,
     });
@@ -229,19 +236,21 @@ function backgroundGroup(phone: PhoneConnection | undefined): SettingsGroup | un
   if (state.background && !state.notifications) {
     rows.push({
       id: "work-notification",
-      label: "Work notification",
-      description: "See and stop background work",
+      label: notifies ? "Allow notifications" : "Work notification",
+      description: notifies ? "Android blocks them until you do" : "See and stop background work",
       status: { tone: "warn", text: "Needed" },
       control: <SettingsButton disabled={phone.busy} onClick={() => void phone.execute({ action: "app_settings" })}>Allow</SettingsButton>,
     });
   }
   return {
     id: "background",
-    title: "Background work",
-    info: settingsInfo.background,
+    title: notifies ? "Stay notified" : "Background work",
+    info: notifies ? settingsInfo.notifications : settingsInfo.background,
     notice: (
       <>
-        {state.background && state.batterySaver ? <SettingsNotice>Battery Saver is on. Android may pause work.</SettingsNotice> : null}
+        {state.background && state.batterySaver
+          ? <SettingsNotice>{notifies ? "Battery Saver is on. Android may pause notifications." : "Battery Saver is on. Android may pause work."}</SettingsNotice>
+          : null}
         {phone.error ? <SettingsInlineError>{phone.error}</SettingsInlineError> : null}
       </>
     ),
