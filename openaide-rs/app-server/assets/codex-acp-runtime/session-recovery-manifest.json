@@ -1,8 +1,8 @@
 {
   "packageName": "@openaide/codex-acp",
-  "packageVersion": "2.2.1",
-  "runtimeId": "2.2.1-openaide.1",
-  "upstreamSha256": "92ed93704b140b080bc8f2ee3dafbbafb226da4b441dc8964ece9ec8121b04ab",
-  "patchedSha256": "78935fe75da85cefe405019e47cf5335f063e524841631f06c042614c25c550c",
+  "packageVersion": "2.2.2",
+  "runtimeId": "2.2.2-openaide.1",
+  "upstreamSha256": "03e41175eb31ae8178d078d202cd6f2e8cb80ce18077551cc28f5f62e5c8a806",
+  "patchedSha256": "46a8254efb23470d20eb9c4077ef161a32ae87f914364a6431f6558e2fd8af1e",
   "helperSha256": "06b0e834e9bb86860a2ffa73c80bee8fb8013a4ff73cc03a64f35554e061ad24"
 }

@@ -136,7 +136,10 @@ function emitSubagentTurn(turn) {
     threadId: childThread.id, turnId: "child-turn", itemId: childMessage.id, delta: childMessage.text,
   } });
   event("item/completed", childThread.id, "child-turn", childMessage);
-  const childTurn = { id: "child-turn", items: [childMessage], status: "completed", error: null };
+  // Native records a child's launch prompt in the child's own history, but never streams it.
+  const childInput = { type: "userMessage", id: "child-input", clientId: null,
+    content: [{ type: "text", text: spawn.prompt, text_elements: [] }] };
+  const childTurn = { id: "child-turn", items: [childInput, childMessage], status: "completed", error: null };
   childThread.turns = [childTurn];
   send({ method: "turn/completed", params: { threadId: childThread.id, turn: childTurn } });
   event("item/started", thread.id, turn.id, { ...wait, status: "inProgress" });
