@@ -19,6 +19,7 @@ import {
   formatElapsedDuration,
   useElapsedSeconds,
 } from "./elapsedDuration";
+import { keepTextEntryFocusOnTap } from "./mobileComposerBehavior";
 import { QuoteSelectionAction } from "./QuoteSelectionAction";
 import {
   permissionResponseForMessage,
@@ -135,6 +136,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
       className="message-list-shell"
       data-more-above={String(moreAbove)}
       data-more-below={String(chatScroll.moreBelow)}
+      onMouseDown={keepTextEntryFocusOnTap}
     >
       <div
         className="message-list"

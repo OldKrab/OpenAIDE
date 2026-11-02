@@ -643,6 +643,58 @@ test("keeps an Agent link clickable while its message is streaming", async ({ pa
   await harness.release("streaming-link-clicked");
 });
 
+// Focus stands in for the software keyboard: Android closes it when the Composer loses focus.
+test("keeps the Composer focused through touch taps on Chat and Stop and releases it on delivery", async ({ browser }) => {
+  const context = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 390, height: 844 },
+  });
+  const page = await context.newPage();
+  try {
+    await openPreparedNewTask(page);
+    await send(page, "Touch focus message");
+    await waitForReply(page, "Touch focus message");
+
+    const editor = page.getByRole("textbox", { name: "Message" });
+    await editor.tap();
+    await expect(editor).toBeFocused();
+
+    await page.evaluate(() => {
+      window.__openaideChatTap = new Promise((resolve) => {
+        document.addEventListener("click", resolve, { once: true });
+      });
+    });
+    await page.locator(".chat-user").first().tap();
+    // Focus would move on the tap's mousedown, so the click orders this check after it.
+    await page.evaluate(() => window.__openaideChatTap.then(() => undefined));
+    await expect(editor).toBeFocused();
+
+    await editor.pressSequentially("Touch follow-up");
+    await page.getByLabel("Send message").tap();
+    await expect(page.locator(".chat-user", { hasText: "Touch follow-up" })).toBeVisible();
+    await expect(editor).not.toBeFocused();
+    await waitForReply(page, "Touch follow-up");
+
+    await send(page, "smoke:hold");
+    await expect(page.getByLabel("Task chat").getByText("Waiting for steering", { exact: true })).toBeVisible();
+    await editor.tap();
+    await editor.pressSequentially("Touch queued follow-up");
+    await page.getByRole("button", { name: "Add to queue", exact: true }).tap();
+    const queue = page.getByRole("region", { name: "Queued messages", exact: true });
+    await expect(queue).toContainText("Touch queued follow-up");
+    await expect(editor).not.toBeFocused();
+
+    await editor.tap();
+    await expect(editor).toBeFocused();
+    await page.getByLabel("Stop task").tap();
+    await expect(queue).toContainText("Paused after interrupted work");
+    await expect(editor).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
 test("uses a mobile context button and keeps the desktop meter on the rounded edge", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   await openPreparedNewTask(page);

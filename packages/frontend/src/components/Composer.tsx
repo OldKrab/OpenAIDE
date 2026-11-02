@@ -32,7 +32,7 @@ import { attachEveryImage } from "./imageAttachmentBatch";
 import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
-import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
+import { keepTextEntryFocusOnTap, usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 import {
   FileMentionPicker,
@@ -670,7 +670,13 @@ export function Composer({
             </span>
           ) : null}
           {showStopAction && onCancel ? (
-            <IconButton ariaLabel={cancelLabel} className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
+            <IconButton
+              ariaLabel={cancelLabel}
+              className="composer-stop-button"
+              icon={<CircleStop size={14} />}
+              onClick={onCancel}
+              onMouseDown={keepTextEntryFocusOnTap}
+            />
           ) : null}
           {onAddToQueue && hasDraftContent && !availability.submitting ? (
             <IconButton

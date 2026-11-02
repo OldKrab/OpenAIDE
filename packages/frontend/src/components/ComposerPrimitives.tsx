@@ -1,5 +1,5 @@
 import { Check, ChevronDown } from "lucide-react";
-import { forwardRef, type ForwardedRef, type ReactNode } from "react";
+import { forwardRef, type ForwardedRef, type MouseEventHandler, type ReactNode } from "react";
 import type { PopupTriggerProps } from "./Popup";
 
 export const Selector = forwardRef<HTMLButtonElement, {
@@ -73,6 +73,7 @@ export const IconButton = forwardRef<HTMLButtonElement, {
   icon: ReactNode;
   keyShortcuts?: string;
   onClick?: () => void;
+  onMouseDown?: MouseEventHandler<HTMLButtonElement>;
   popupTrigger?: PopupTriggerProps;
   pressed?: boolean;
   title?: string;
@@ -83,6 +84,7 @@ export const IconButton = forwardRef<HTMLButtonElement, {
   icon,
   keyShortcuts,
   onClick,
+  onMouseDown,
   popupTrigger,
   pressed,
   title,
@@ -99,6 +101,7 @@ export const IconButton = forwardRef<HTMLButtonElement, {
       className={classes}
       disabled={disabled}
       onClick={popupTrigger?.onClick ?? onClick}
+      onMouseDown={onMouseDown}
       title={title}
       type="button"
     >
