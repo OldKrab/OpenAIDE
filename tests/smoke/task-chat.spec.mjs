@@ -660,7 +660,17 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   const mobileBounds = await mobileMeter.boundingBox();
   const mobileComposer = await composer.boundingBox();
   expect(mobileBounds.width).toBeGreaterThanOrEqual(44);
-  expect(mobileBounds.height).toBeGreaterThanOrEqual(44);
+  // The meter leaves the Composer footer at its controls' height, and its hit area still spans
+  // the 44px touch target.
+  const mobileFooter = await page.locator(".composer-footer").boundingBox();
+  const sendButton = await page.locator(".composer-send-button").boundingBox();
+  expect(mobileFooter.height).toBe(sendButton.height);
+  const meterTouchTarget = await mobileMeter.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const middle = bounds.y + bounds.height / 2;
+    return [middle - 21.5, middle + 21.5].map((y) => element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, y)));
+  });
+  expect(meterTouchTarget).toEqual([true, true]);
   expect(mobileBounds.x).toBeGreaterThanOrEqual(mobileComposer.x);
   expect(mobileBounds.x + mobileBounds.width).toBeLessThanOrEqual(mobileComposer.x + mobileComposer.width);
   await mobileMeter.click();

@@ -20,8 +20,9 @@
 
 .context-usage-compact {
   --context-usage-color: var(--oa-focus);
+  position: relative;
   min-width: 52px;
-  min-height: 44px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -35,6 +36,13 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+}
+
+/* Extends the touch target to 44px without making the Composer footer taller than its controls. */
+.context-usage-compact::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
 }
 
 .context-usage-compact:hover,
