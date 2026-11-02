@@ -92,7 +92,9 @@ Before that release:
    installers with the operating system. This GitHub Release is
    the canonical release. Every
    release then reconciles the same downloaded bytes with Open VSX; stable
-   releases also reconcile them with the VS Code Marketplace.
+   releases also reconcile them with the VS Code Marketplace. Only stable
+   releases deploy the Windows Desktop update feed, because a deploy replaces
+   the whole site. A prerelease is installed from its release page.
 7. Confirm that the Release workflow completed successfully. No manual rebuild
    or replacement of its assets is permitted.
 

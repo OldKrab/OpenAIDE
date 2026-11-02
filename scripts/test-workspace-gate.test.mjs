@@ -155,6 +155,14 @@ test("a manual workflow commits and tags an exact release version", () => {
   assert.doesNotMatch(versionBump, /inputs\.bump|options:\s*\n\s*- patch/);
 });
 
+test("a prerelease leaves the deployed stable Windows update feed in place", () => {
+  const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  const job = release.slice(release.indexOf("  desktop-update-feed:"), release.indexOf("  marketplace:"));
+
+  assert.match(job, /actions\/deploy-pages@/);
+  assert.match(job, /^ {4}if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}$/m);
+});
+
 test("release publishing produces every supported VSIX and desktop package", () => {
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const artifactBuild = readFileSync(path.join(repoRoot, ".github/workflows/build-vsix.yml"), "utf8");
