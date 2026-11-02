@@ -30,6 +30,7 @@ import {
   setMcpServerEnabledThroughBackend,
 } from "../intents/mcpSettingsIntents";
 import { createRemoteDeviceIntents } from "../intents/remoteDeviceIntents";
+import { withSettingsRequestLog } from "../intents/settingsRequestLog";
 
 type SettingsDependencies = Pick<
   AppCallbacksDependencies,
@@ -48,8 +49,11 @@ export function createSettingsCallbacks({
     if (action.type === "settings:error") console.warn(`settings_action_failed tab=${action.tab ?? "none"}`);
     dispatchAction(action);
   };
+  const settingsConnection = () => backendConnection?.request
+    ? withSettingsRequestLog({ request: backendConnection.request })
+    : undefined;
   const agentSettingsContext = () => ({
-    backendConnection: backendConnection?.request ? { request: backendConnection.request } : undefined,
+    backendConnection: settingsConnection(),
     currentAgentId: state.newTask.selection.agentId,
     dispatch,
     setAgents: setAgents ?? (() => undefined),
@@ -79,7 +83,7 @@ export function createSettingsCallbacks({
   };
   return {
     dismissError: () => dispatch({ type: "settings:error:clear" }),
-    devices: createRemoteDeviceIntents(backendConnection?.request ? { request: backendConnection.request } : undefined),
+    devices: createRemoteDeviceIntents(settingsConnection()),
     // Sign-in Flow state is App Server-owned and arrives through the agents subscription, so
     // these callbacks only send intents; they never stage optimistic status.
     authenticateAgent: async (agentId, methodId, values) => {
@@ -156,8 +160,9 @@ export function createSettingsCallbacks({
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
     resetTaskHistory: async () => {
-      if (!backendConnection?.request) throw new Error(appServerRequiredMessage());
-      await backendConnection.request(SETTINGS_RESET_TASK_HISTORY, {});
+      const connection = settingsConnection();
+      if (!connection) throw new Error(appServerRequiredMessage());
+      await connection.request(SETTINGS_RESET_TASK_HISTORY, {});
     },
     replaceCustomAgent: (payload) => {
       dispatch({ type: "settings:start" });
@@ -178,11 +183,12 @@ export function createSettingsCallbacks({
     },
     setAcpTrace: (enabled) => {
       dispatch({ type: "settings:developerAcpTrace", enabled });
-      if (!backendConnection?.request) {
+      const connection = settingsConnection();
+      if (!connection) {
         dispatch({ type: "settings:error", tab: "troubleshooting", message: settingsReadRequiredMessage() });
         return;
       }
-      void backendConnection.request(SETTINGS_UPDATE_RUNTIME, {
+      void connection.request(SETTINGS_UPDATE_RUNTIME, {
         developer: { acpTrace: { enabled } },
       })
         .then((settings) => dispatch({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(settings) }))
@@ -201,11 +207,12 @@ export function createSettingsCallbacks({
       const nextPreferences = { composer_submit_shortcut: shortcut };
       setPreferences(nextPreferences);
       dispatch({ type: "settings:preferences", preferences: nextPreferences });
-      if (!backendConnection?.request) {
+      const connection = settingsConnection();
+      if (!connection) {
         dispatch({ type: "settings:error", tab: "general", message: appServerRequiredMessage() });
         return;
       }
-      void backendConnection.request(SETTINGS_UPDATE_PREFERENCES, {
+      void connection.request(SETTINGS_UPDATE_PREFERENCES, {
         preferences: { composerSubmitShortcut: protocolComposerSubmitShortcut(shortcut) },
       })
         .then((result) => {
