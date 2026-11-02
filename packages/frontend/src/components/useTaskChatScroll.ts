@@ -335,6 +335,9 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     });
     scrollOwnershipRef.current = ownership;
     setScrollOwnershipState(ownership);
+    // The navigation lock holds the selection on the message the reader chose
+    // until they scroll, however long the travel took. Following ends it too.
+    if (ownership === "following") userMessageNavigationLockRef.current = undefined;
     const messageList = messageListRef.current;
     if (ownership === "reading" && messageList) {
       // TanStack keeps reconciling the last follow until its end target is
@@ -698,9 +701,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       userMessageScrollActiveRef.current = false;
       setUserMessageScrollTargetIndex(undefined);
       persistScrollState("reading");
-      if (userMessageNavigationLockRef.current === anchor.key) {
-        userMessageNavigationLockRef.current = undefined;
-      }
       setUserMessageTargetKey((current) => current === anchor.key ? undefined : current);
       userMessageOrientationTimerRef.current = undefined;
     }, USER_MESSAGE_ORIENTATION_DURATION_MS);
