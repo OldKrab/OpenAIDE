@@ -199,6 +199,7 @@ impl AcpActiveSessionManager {
         Ok(AgentLoadedSession {
             session: started.session,
             replayed_messages: started.replayed_messages,
+            replayed_subagents: started.replayed_subagents,
         })
     }
 

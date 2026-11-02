@@ -455,12 +455,7 @@ fn handle_session_update_notification(
     if let Some(trace) = session_trace(&session_id, announced_child, trace, session_traces) {
         trace.record("agent_to_client", "session/update", &notification);
     }
-    if absorbed_by_load_replay(
-        load_replay,
-        &session_id,
-        announced_child,
-        Some(&notification.update),
-    ) {
+    if absorbed_by_load_replay(load_replay, &notification, announced_child) {
         return None;
     }
     Some(notification)
@@ -487,16 +482,18 @@ fn session_trace(
 }
 
 /// Lets an active `session/load` capture absorb one update of the loaded
-/// session or of a child it announced. Only a root `update` joins the replay,
+/// session or of a child it announced. Only a root update joins the replay,
 /// including the root's `subagent_update`s, whose labels and states the
 /// replayed delegation rows need; child streams stay out of the main
-/// projection. Returns whether it was absorbed.
+/// projection and join the capture's Subagent traffic instead. Returns whether
+/// it was absorbed.
 fn absorbed_by_load_replay(
     load_replay: &LoadReplayCaptures,
-    session_id: &str,
+    notification: &SessionNotification,
     announced_child: Option<&str>,
-    update: Option<&SessionUpdate>,
 ) -> bool {
+    let session_id = notification.session_id.to_string();
+    let session_id = session_id.as_str();
     let mut active = load_replay
         .lock()
         .expect("ACP load replay capture lock poisoned");
@@ -510,10 +507,24 @@ fn absorbed_by_load_replay(
             .subagent_session_ids
             .insert(child_session_id.to_string());
     }
-    if let Some(update) = update.filter(|_| *capture.session_id.0 == *session_id) {
-        capture.updates.push(update.clone());
+    let is_root = *capture.session_id.0 == *session_id;
+    if is_root {
+        capture.updates.push(notification.update.clone());
+    }
+    if !is_root || is_subagent_traffic(&notification.update) {
+        capture.subagent_traffic.push(notification.clone());
     }
     true
+}
+
+/// The root updates that describe a child. Every update of a child session does.
+fn is_subagent_traffic(update: &SessionUpdate) -> bool {
+    matches!(
+        update,
+        SessionUpdate::SubagentUpdate(_)
+            | SessionUpdate::SessionMessage(_)
+            | SessionUpdate::SessionMessageChunk(_)
+    )
 }
 
 /// An Agent may publish a session's catalogs before this client finishes attaching the

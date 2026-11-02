@@ -87,6 +87,7 @@ impl AgentRuntime for MockAgent {
                 }],
                 created_at: "2026-05-18T00:00:00Z".to_string(),
             }],
+            replayed_subagents: Vec::new(),
         })
     }
 

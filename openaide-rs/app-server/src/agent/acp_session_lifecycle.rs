@@ -4,11 +4,12 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_schema::{
     InitializeResponse, ListSessionsResponse, McpServer, NewSessionResponse, SessionConfigOption,
-    SessionId, SessionUpdate,
+    SessionId, SessionNotification, SessionUpdate,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use crate::agent::acp_errors::acp_request_error;
+use crate::agent::acp_replayed_subagents::project_replayed_subagents;
 pub(super) use crate::agent::acp_session_capabilities::{
     auth_method_kind, initialize_supports_session_close, initialize_supports_session_delete,
     validate_initialize_protocol, validate_load_session_capability,
@@ -32,9 +33,11 @@ use crate::protocol::model::{
 pub(super) struct LoadReplayCapture {
     pub(super) session_id: SessionId,
     pub(super) updates: Vec<SessionUpdate>,
-    /// Native child streams are isolated from the main replay projection. OpenAIDE's
-    /// durable child histories remain authoritative until atomic child replay exists.
+    /// Native child streams are isolated from the main replay projection.
     pub(super) subagent_session_ids: HashSet<String>,
+    /// The root's Subagent updates and every child's updates, in arrival order.
+    /// The Task restores these children once the complete replay commits.
+    pub(super) subagent_traffic: Vec<SessionNotification>,
 }
 
 pub(super) type LoadReplayCaptures = Arc<Mutex<HashMap<String, LoadReplayCapture>>>;
@@ -111,6 +114,7 @@ pub(super) async fn load_active_session(
                 session_id: session_id.clone(),
                 updates: Vec::new(),
                 subagent_session_ids: HashSet::new(),
+                subagent_traffic: Vec::new(),
             },
         );
     }
@@ -127,11 +131,11 @@ pub(super) async fn load_active_session(
     )
     .await
     .map_err(|error| acp_request_error(&error));
-    let replayed_updates = load_replay
+    let (replayed_updates, subagent_traffic) = load_replay
         .lock()
         .expect("ACP load replay capture lock poisoned")
         .remove(&session_id.to_string())
-        .map(|capture| capture.updates)
+        .map(|capture| (capture.updates, capture.subagent_traffic))
         .unwrap_or_default();
     let response = response?;
     let response_options = response.config_options.clone().unwrap_or_default();
@@ -143,8 +147,17 @@ pub(super) async fn load_active_session(
         .attach_session(active_response, Vec::new())
         .map_err(|error| acp_request_error(&error))?;
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
-    let replay = ReplayProjection::for_agent(agent_id, session_id.to_string())
+    let mut replay = ReplayProjection::for_agent(agent_id, session_id.to_string())
         .project_with_plan(replayed_updates);
+    replay.subagents = project_replayed_subagents(
+        agent_id,
+        initialize
+            .agent_info
+            .as_ref()
+            .map(|info| info.name.as_str()),
+        &session_id.to_string(),
+        subagent_traffic,
+    );
     Ok((
         active_session,
         normalize_config_options(agent_id, response_options),

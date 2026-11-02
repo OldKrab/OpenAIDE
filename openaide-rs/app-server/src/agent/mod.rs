@@ -38,6 +38,7 @@ mod acp_process_diagnostics;
 mod acp_process_lifetime;
 pub(crate) mod acp_prompt_runner;
 pub(crate) mod acp_replay_projection;
+mod acp_replayed_subagents;
 pub(crate) mod acp_response_boundary;
 pub(crate) mod acp_runtime_kernel;
 pub(crate) mod acp_runtime_threading;
