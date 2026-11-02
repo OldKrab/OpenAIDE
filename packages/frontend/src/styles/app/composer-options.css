@@ -356,6 +356,17 @@
   grid-template-columns: 18px minmax(0, 1fr) 16px;
 }
 
+/* Each attach row is a label over a description, so its icon centres on the pair. */
+.composer-popover button.composer-attach-choice {
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.composer-attach-choice > svg {
+  justify-self: center;
+}
+
 .composer-menu-end-icon {
   width: 16px;
   height: 18px;
