@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { SubagentCatalogEntrySnapshot, SubagentId } from "@openaide/app-server-client";
 
@@ -28,7 +28,7 @@ export function SubagentInspectionBar({
     <div className="subagent-inspection-footer" role="note">
       <span className="subagent-inspection-context">
         <span className="subagent-inspection-name">
-          Viewing <strong title={label}>{label}</strong>
+          <span className="subagent-inspection-prefix">Viewing </span><strong title={label}>{label}</strong>
         </span>
         {/* Keyed so an open disclosure never carries over to another Subagent. */}
         <SubagentDetails details={selected.details ?? []} key={selected.subagentId} />
@@ -43,12 +43,14 @@ export function SubagentInspectionBar({
       ) : null}
       <button
         aria-keyshortcuts="Alt+ArrowLeft"
+        aria-label="Back to Main Agent"
         className="subagent-inspection-return"
         onClick={onReturn}
         title="Back to Main Agent (Alt+Left)"
         type="button"
       >
-        Back to Main Agent
+        <ArrowLeft aria-hidden="true" className="subagent-inspection-return-arrow" size={16} />
+        <span className="subagent-inspection-prefix">Back to&nbsp;</span>Main Agent
       </button>
     </div>
   );

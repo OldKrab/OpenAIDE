@@ -110,7 +110,7 @@ describe("UserMessageNavigator", () => {
     expect(toggle.props["aria-expanded"]).toBe(false);
     expect(toggle.props["aria-label"]).toBe("Jump to a message");
     expect(toggle.props.title).toBe("Jump to a message");
-    expect(toggle.findAllByType("svg").map((icon) => icon.props["aria-hidden"])).toEqual(["true", "true"]);
+    expect(toggle.findAllByType("svg").map((icon) => icon.props["aria-hidden"])).toEqual(["true"]);
     act(() => toggle.props.onClick());
     expect(toggle.props["aria-expanded"]).toBe(true);
     const message = tree.root.findByProps({ title: "Second" });

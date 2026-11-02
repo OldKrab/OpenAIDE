@@ -1,6 +1,7 @@
-import { ChevronDown, ShieldCheck, ShieldQuestion } from "lucide-react";
+import { ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useState } from "react";
 import type { TaskPermissionPolicy } from "@openaide/app-shell-contracts";
+import { MobileTaskMoreRow } from "./MobileTaskMore";
 import { PopupMenu } from "./Popup";
 
 const POLICY_COPY: Record<TaskPermissionPolicy, { label: string; description: string }> = {
@@ -60,7 +61,6 @@ export function TaskPermissionPolicyControl({
         >
           {autoApprove ? <ShieldCheck aria-hidden="true" size={15} /> : <ShieldQuestion aria-hidden="true" size={15} />}
           {autoApprove ? <span>Auto-approve on</span> : null}
-          <ChevronDown aria-hidden="true" className="mobile-task-more-chevron" />
         </button>
       )}
     >
@@ -85,5 +85,42 @@ export function TaskPermissionPolicyControl({
         );
       })}
     </PopupMenu>
+  );
+}
+
+/**
+ * The same policy as a switch in the phone's More menu. It has two values, so a submenu would only
+ * add a step, and the menu stays open so the new state can be read before moving on.
+ */
+export function TaskPermissionSwitch({
+  disabled = false,
+  disabledReason,
+  onChange,
+  policy,
+}: {
+  disabled?: boolean;
+  disabledReason?: string;
+  onChange: (policy: TaskPermissionPolicy) => Promise<void>;
+  policy: TaskPermissionPolicy;
+}) {
+  const [pending, setPending] = useState(false);
+  const autoApprove = policy === "auto_approve";
+  const state = autoApprove ? "On, one-time permissions" : "Off, ask every time";
+  return (
+    <MobileTaskMoreRow
+      aria-checked={autoApprove}
+      aria-label="Auto-approve permissions"
+      disabled={disabled || pending}
+      end={<span aria-hidden="true" className="mobile-task-more-switch" data-on={autoApprove || undefined} />}
+      icon={autoApprove ? <ShieldCheck aria-hidden="true" /> : <ShieldQuestion aria-hidden="true" />}
+      label="Auto-approve"
+      onClick={() => {
+        setPending(true);
+        void onChange(autoApprove ? "ask_every_time" : "auto_approve").finally(() => setPending(false));
+      }}
+      role="switch"
+      slot="permission"
+      value={disabled && disabledReason ? disabledReason : state}
+    />
   );
 }

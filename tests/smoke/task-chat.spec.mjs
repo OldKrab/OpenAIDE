@@ -475,7 +475,7 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
 
   await page.setViewportSize({ width: 390, height: 760 });
   await expect(rail).toHaveCount(0);
-  // On a phone the picker is a row in the Task bar's More panel, just under the bar.
+  // On a phone the picker is a row in the Task bar's More menu, just under the bar.
   await page.getByRole("button", { name: "More Task actions" }).click();
   const mobilePicker = page.getByRole("button", { name: "Jump to a message", exact: true });
   await expect(mobilePicker).toBeVisible();
@@ -486,8 +486,10 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
   expect(pickerBounds.y).toBeGreaterThanOrEqual(barBounds.y + barBounds.height);
   expect(pickerBounds.y + pickerBounds.height).toBeLessThanOrEqual(760);
   await mobilePicker.click();
-  const dialog = page.getByRole("dialog", { name: "Jump to a message" });
+  // The list replaces the menu's rows rather than opening over them.
+  const dialog = page.getByRole("group", { name: "Jump to a message" });
   await expect(dialog).toBeVisible();
+  await expect(page.getByRole("switch", { name: "Auto-approve permissions" })).toHaveCount(0);
   const dialogBounds = await dialog.boundingBox();
   expect(dialogBounds.x).toBeGreaterThanOrEqual(0);
   expect(dialogBounds.x + dialogBounds.width).toBeLessThanOrEqual(390);
@@ -500,7 +502,7 @@ test("navigates User messages with a desktop rail and mobile header picker", asy
   expectSmoothNavigation(narrowNavigation, 18, false);
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('.message-list-virtual-row[data-user-message-navigation-target="true"] .chat-user')).toHaveText(prompts[2]);
-  // The row closed with the jump, so it does not cover the message.
+  // The menu closed with the jump, so it does not cover the message.
   await expect(page.locator("#mobile-task-more")).toBeHidden();
   await page.getByRole("button", { name: "More Task actions", exact: true }).click();
   await mobilePicker.click();

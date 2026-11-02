@@ -56,7 +56,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await selectHistory(page, "Check a nested detail");
     await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
     await expect(chat.getByText("Child review result", { exact: true })).toHaveCount(0);
-    if (viewport.width <= COMPACT_TASK_BAR_WIDTH) await expectMoreRowToGiveWay(page, chat);
+    if (viewport.width <= COMPACT_TASK_BAR_WIDTH) await expectMoreMenuToGiveWay(page, chat);
     // A label longer than the bar truncates; it must not widen Chat past the viewport.
     const returnBox = await page.getByRole("button", { name: "Back to Main Agent" }).boundingBox();
     expect(returnBox.x + returnBox.width).toBeLessThanOrEqual(viewport.width);
@@ -133,10 +133,10 @@ test("follows released-form Subagents and stops a running one", async ({ page })
 const COMPACT_TASK_BAR_WIDTH = 760;
 
 /**
- * On a phone the Agent switcher waits in the Task bar's More row, which stays open
- * across resizes. The row is opened only when it is closed: role names match as
- * substrings, so "More Task actions" also finds the open row's "Hide more Task
- * actions", and clicking it closed the row. The layout follows the viewport rather
+ * On a phone the Agent switcher waits in the Task bar's More menu, which stays open
+ * across resizes. The menu is opened only when it is closed: role names match as
+ * substrings, so "More Task actions" also finds the open menu's "Hide more Task
+ * actions", and clicking it closed the menu. The layout follows the viewport rather
  * than a visibility check made while a resize may still be settling.
  */
 async function openMoreOnPhone(page) {
@@ -154,17 +154,30 @@ async function openMoreOnPhone(page) {
 
 const pressBack = (page) => page.evaluate(() => window.dispatchEvent(new Event("openaide:back", { cancelable: true })));
 
-/** The row leaves Chat in view: a choice closes it, and so do a press outside it and Back. */
-async function expectMoreRowToGiveWay(page, chat) {
-  const row = page.locator("#mobile-task-more");
-  await expect(row).toBeHidden();
+/** The menu leaves Chat in view: a choice closes it, and so do a press outside it and Back. */
+async function expectMoreMenuToGiveWay(page, chat) {
+  const menu = page.locator("#mobile-task-more");
+  await expect(menu).toBeHidden();
   await openMoreOnPhone(page);
-  // Open Chat below the row; the message itself is under it.
+  // The scrim covers everything below the bar, so a press outside the card cannot reach Chat.
+  const scrim = await page.locator(".mobile-task-more-scrim").boundingBox();
+  expect(scrim.width).toBe(page.viewportSize().width);
+  expect(scrim.y + scrim.height).toBeGreaterThanOrEqual(page.viewportSize().height);
   await page.mouse.click(195, 500);
-  await expect(row).toBeHidden();
+  await expect(menu).toBeHidden();
   await openMoreOnPhone(page);
   await pressBack(page);
-  await expect(row).toBeHidden();
+  await expect(menu).toBeHidden();
+  // A submenu replaces the rows, and Back steps out one level at a time.
+  await openMoreOnPhone(page);
+  const switcher = page.getByRole("button", { name: /^Switch agent\. Currently viewing/ });
+  await switcher.click();
+  await expect(page.getByRole("menu", { name: "Switch agent" })).toBeVisible();
+  await expect(switcher).toHaveCount(0);
+  await pressBack(page);
+  await expect(switcher).toBeVisible();
+  await pressBack(page);
+  await expect(menu).toBeHidden();
   await expect(chat.getByText("Nested review result", { exact: true })).toBeVisible();
 }
 

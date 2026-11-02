@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Ref } from "react";
+import { useEffect, useRef } from "react";
+import type { Ref, RefObject } from "react";
 import { ListTodo, Menu, MoreHorizontal, X } from "lucide-react";
 import type { TaskPermissionPolicy } from "@openaide/app-shell-contracts";
-import { TaskPermissionPolicyControl } from "./TaskPermissionPolicyControl";
+import { useMobileTaskMore } from "./MobileTaskMore";
+import { TaskPermissionSwitch } from "./TaskPermissionPolicyControl";
 import { useBackNavigation } from "./useBackNavigation";
 
 /**
  * The phone's Task bar. Title and status get the width; only the frequent actions stay in the
  * bar: Project files (portaled into `onActionsTarget`) and the Plan when the Task has one. The
- * rest (Terminal, jump to a message, Subagents, permission handling) portal into a second row
- * that "More" opens below the bar. The row stays mounted while closed so the portaled controls
- * keep their state, and it is a row rather than a popup so their own menus anchor normally. It
- * still closes like a menu; see `useMoreRowDismissal`.
+ * rest (Terminal, Subagents, jump to a message, permission handling) wait in a menu that "More"
+ * opens under its button. The menu stays mounted while closed so the portaled controls keep their
+ * state; a submenu replaces its content in place, so nothing stacks. See `useMoreDismissal`.
  */
 export function MobileWorkbenchBar({
   coverTitle,
@@ -45,11 +45,13 @@ export function MobileWorkbenchBar({
   taskKey?: string;
   title?: string;
 }) {
-  const [moreOpen, setMoreOpen] = useState(false);
-  useEffect(() => setMoreOpen(false), [taskKey]);
+  const more = useMobileTaskMore();
+  const { close } = more;
+  useEffect(() => close(), [close, taskKey]);
   const taskControls = !coverTitle && Boolean(permission);
-  const showMore = taskControls && moreOpen;
-  useMoreRowDismissal(showMore, useCallback(() => setMoreOpen(false), []));
+  const showMore = taskControls && more.open;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useMoreDismissal(showMore, triggerRef);
 
   return (
     <header
@@ -89,16 +91,29 @@ export function MobileWorkbenchBar({
           aria-expanded={showMore}
           aria-label={showMore ? "Hide more Task actions" : "More Task actions"}
           className="mobile-task-more-trigger"
-          onClick={() => setMoreOpen((open) => !open)}
+          onClick={more.toggle}
+          ref={triggerRef}
           type="button"
         >
           {showMore ? <X size={17} /> : <MoreHorizontal size={17} />}
         </button>
       ) : null}
-      <div className="mobile-task-more" hidden={!showMore} id="mobile-task-more">
+      {showMore ? (
+        // A press outside lands here, so the same press cannot also act on what is underneath.
+        <button aria-hidden="true" className="mobile-task-more-scrim" onClick={close} tabIndex={-1} type="button" />
+      ) : null}
+      <div
+        className="mobile-task-more"
+        data-motion={more.motion}
+        data-submenu={more.submenu}
+        hidden={!showMore}
+        id="mobile-task-more"
+        role="group"
+        aria-label="Task actions"
+      >
         <div className="mobile-task-more-actions" ref={onOverflowTarget} />
         {permission && taskControls ? (
-          <TaskPermissionPolicyControl
+          <TaskPermissionSwitch
             disabled={permission.disabled}
             disabledReason={permission.disabledReason}
             onChange={permission.onChange}
@@ -110,36 +125,31 @@ export function MobileWorkbenchBar({
   );
 }
 
-/** What counts as inside the open row: the row, its trigger, and the menus its controls open. */
-const MORE_ROW_PARTS = "#mobile-task-more, .mobile-task-more-trigger, #openaide-popup-layer";
+/** What counts as inside the open menu: the menu, its trigger, and the scrim, which closes it itself. */
+const MORE_PARTS = "#mobile-task-more, .mobile-task-more-trigger, .mobile-task-more-scrim";
 
 /**
- * Closes the open row on a press outside it, on Back, on Escape, and once an action inside it
- * ran, so it never covers what that action showed. TaskView portals most of the controls in, so
- * only document listeners see them all. A trigger that opens a control's own menu is no action
- * yet; the choice in that menu is.
+ * Back steps out one level. A press on the rest of the bar and Escape close the whole menu; a press
+ * elsewhere reaches the scrim. Rows that ran an action close the menu themselves.
  */
-function useMoreRowDismissal(open: boolean, close: () => void) {
-  useBackNavigation(open, close);
+function useMoreDismissal(open: boolean, triggerRef: RefObject<HTMLButtonElement | null>) {
+  const { close, closeSubmenu, submenu } = useMobileTaskMore();
+  useBackNavigation(open, () => (submenu ? closeSubmenu() : close()));
   useEffect(() => {
     if (!open || typeof document === "undefined") return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Element && event.target.closest(MORE_ROW_PARTS))) close();
-    };
-    const onClick = (event: MouseEvent) => {
-      const action = event.target instanceof Element ? event.target.closest("button") : null;
-      if (action?.closest(MORE_ROW_PARTS) && !action.matches(".mobile-task-more-trigger, [data-oa-popup-trigger]")) close();
+      if (!(event.target instanceof Element && event.target.closest(MORE_PARTS))) close();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key !== "Escape") return;
+      close();
+      triggerRef.current?.focus();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [close, open]);
+  }, [close, open, triggerRef]);
 }

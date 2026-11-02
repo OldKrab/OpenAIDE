@@ -8,14 +8,14 @@ body[data-input-modality="pointer"] button:focus-visible {
 }
 
 @media (hover: none) {
-  body[data-shell="web"] .mobile-workbench-bar button:hover,
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)):hover,
   body[data-shell="web"] .sidebar .settings-button:not(.selected):hover,
   body[data-shell="web"] .sidebar .sidebar-actions button:hover,
   body[data-shell="web"] .sidebar .task-row:not(.selected):hover {
     background: transparent;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar button:active,
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)):active,
   body[data-shell="web"] .sidebar .settings-button:not(.selected):active,
   body[data-shell="web"] .sidebar .sidebar-actions button:active,
   body[data-shell="web"] .sidebar .task-row:not(.selected):active {
@@ -65,99 +65,7 @@ body[data-input-modality="pointer"] button:focus-visible {
     gap: inherit;
   }
 
-  /* "More": the less frequent Task controls, as labelled rows in a panel under the bar. */
-  body[data-shell="web"] .mobile-task-more {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    left: 0;
-    border-top: 1px solid var(--oa-border);
-    border-bottom: 1px solid var(--oa-border);
-    background: var(--oa-panel);
-    box-shadow: 0 12px 32px color-mix(in oklch, var(--oa-text) 16%, transparent);
-    display: grid;
-    gap: 2px;
-    padding: 6px 10px 8px;
-  }
-
-  body[data-shell="web"] .mobile-task-more[hidden] {
-    display: none;
-  }
-
-  body[data-shell="web"] .mobile-task-more-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more button {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 0 10px;
-    font-size: 14px;
-    font-weight: 400;
-  }
-
-  body[data-shell="web"] .mobile-task-more .subagent-navigator {
-    display: flex;
-  }
-
-  /* Lines up with the rows beside it: an 18px icon slot, the label, and the chevron at the end. */
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-trigger {
-    max-width: none;
-    color: var(--oa-text);
-    display: grid;
-    grid-auto-flow: column;
-    grid-template-columns: 18px minmax(0, 1fr);
-    grid-auto-columns: max-content;
-    align-items: center;
-    text-align: left;
-  }
-
-  body[data-shell="web"] .mobile-task-more .subagent-switcher-trigger > :first-child {
-    justify-self: center;
-  }
-
-  /* A row that opens a menu says so; Terminal opens a page and shows none. */
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .mobile-task-more-chevron,
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-chevron {
-    width: 14px;
-    height: 14px;
-    color: var(--oa-muted);
-  }
-
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .mobile-task-more-chevron {
-    display: block;
-    order: 1;
-    margin-left: auto;
-  }
-
-  body[data-shell="web"] .mobile-task-more .terminal-entry::after { content: "Terminal"; }
-  body[data-shell="web"] .mobile-task-more .user-message-picker-trigger::after { content: "Jump to a message"; }
-  body[data-shell="web"] .mobile-task-more .task-permission-policy-trigger:not([data-enabled])::after { content: "Ask every time"; }
-
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .task-permission-policy-trigger > span,
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-switcher-value,
-  body[data-shell="web"] .mobile-workbench-bar .mobile-task-more .subagent-count {
-    display: inline;
-  }
-
-  body[data-shell="web"] .mobile-task-more .terminal-count {
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
-    border-radius: 9px;
-    background: var(--oa-success);
-    color: var(--oa-bg);
-    font-size: 11px;
-    font-weight: 700;
-    display: inline-grid;
-    place-items: center;
-    order: 1;
-  }
-
-  body[data-shell="web"] .mobile-workbench-bar button {
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) {
     width: 44px;
     min-height: 44px;
     border: 0;
@@ -170,48 +78,37 @@ body[data-input-modality="pointer"] button:focus-visible {
     padding: 0;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar button:hover {
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)):hover {
     background: var(--oa-raised);
   }
 
-  body[data-shell="web"] .mobile-workbench-bar button > svg {
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) > svg {
     width: 18px;
     height: 18px;
     flex-shrink: 0;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar .task-permission-policy-trigger > span {
-    display: none;
-  }
-
-  /* The shared navigator moves into this compact header. Its accessible name
-     and menu retain the full selected identity inside the existing touch target. */
-  body[data-shell="web"] .mobile-workbench-bar .subagent-switcher-value,
-  body[data-shell="web"] .mobile-workbench-bar .subagent-count {
-    display: none;
-  }
-
-  body[data-shell="web"] .mobile-workbench-bar span {
+  body[data-shell="web"] .mobile-workbench-bar span:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) {
     min-width: 0;
     display: grid;
     gap: 1px;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar strong,
-  body[data-shell="web"] .mobile-workbench-bar small {
+  body[data-shell="web"] .mobile-workbench-bar strong:where(:not(.mobile-task-more *, .mobile-task-more-scrim)),
+  body[data-shell="web"] .mobile-workbench-bar small:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar strong {
+  body[data-shell="web"] .mobile-workbench-bar strong:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) {
     color: var(--oa-text);
     font-size: 13px;
     font-weight: 600;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar small {
+  body[data-shell="web"] .mobile-workbench-bar small:where(:not(.mobile-task-more *, .mobile-task-more-scrim)) {
     color: var(--oa-muted);
     font-size: 12px;
   }
@@ -478,11 +375,11 @@ body[data-input-modality="pointer"] button:focus-visible {
 }
 
 @media (hover: none) {
-  body[data-shell="web"] .mobile-workbench-bar button:hover {
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)):hover {
     background: transparent;
   }
 
-  body[data-shell="web"] .mobile-workbench-bar button:active {
+  body[data-shell="web"] .mobile-workbench-bar button:where(:not(.mobile-task-more *, .mobile-task-more-scrim)):active {
     background: var(--oa-raised);
   }
 }

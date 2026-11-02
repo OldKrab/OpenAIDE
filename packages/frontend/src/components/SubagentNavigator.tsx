@@ -1,11 +1,13 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Users } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { SubagentCatalogEntrySnapshot } from "@openaide/app-server-client";
 import type { AgentIconId } from "@openaide/app-shell-contracts";
 
 import { AgentIcon } from "./AgentIcon";
+import { MobileTaskMoreSubmenu, useMobileTaskMore } from "./MobileTaskMore";
 import { PopupMenu } from "./Popup";
+import { subagentTreeRows } from "./subagentTree";
 
 export function SubagentNavigator({
   agentIcon,
@@ -24,21 +26,50 @@ export function SubagentNavigator({
   entries: SubagentCatalogEntrySnapshot[];
   onSelect: (subagentId?: string) => void;
   selectedId?: string;
-  /** Compact App Shell headers host the same navigator when Task chrome is hidden. */
+  /** The phone's More menu, where the navigator is a submenu instead of a popup. */
   target?: HTMLElement | null;
   unseen: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
+  const more = useMobileTaskMore();
   if (entries.length === 0) return null;
   const selected = entries.find((entry) => entry.subagentId === selectedId);
   const selectedLabel = selected ? subagentLabel(selected) : "Main Agent";
-  const depth = hierarchyDepths(entries);
-  const choose = (subagentId?: string) => {
-    setOpen(false);
-    onSelect(subagentId);
-  };
+  const choices = (close: () => void) => (
+    <SubagentChoices
+      agentIcon={agentIcon}
+      agentId={agentId}
+      agentName={agentName}
+      entries={entries}
+      onSelect={(subagentId) => {
+        close();
+        onSelect(subagentId);
+      }}
+      selectedId={selectedId}
+      unseen={unseen}
+    />
+  );
 
-  const navigator = (
+  if (target) {
+    const hasUnseen = entries.some((entry) => unseen.has(entry.subagentId));
+    const running = entries.filter(({ status }) => status === "running" || status === "waitingForActivity").length;
+    return createPortal(
+      <MobileTaskMoreSubmenu
+        aria-label={`Switch agent. Currently viewing ${selectedLabel}${hasUnseen ? ". New activity" : ""}`}
+        end={hasUnseen ? <em>New</em> : undefined}
+        icon={<Users aria-hidden="true" />}
+        label="Agents"
+        meta={running > 0 ? `${running} running` : undefined}
+        slot="agents"
+        value={selectedLabel}
+      >
+        <div aria-label="Switch agent" className="subagent-tree" role="menu">{choices(more.close)}</div>
+      </MobileTaskMoreSubmenu>,
+      target,
+    );
+  }
+
+  return (
     <div className="subagent-navigator">
       <PopupMenu
         className="subagent-menu"
@@ -71,35 +102,61 @@ export function SubagentNavigator({
           <strong>Agents</strong>
           <span>{entries.length + 1} histories</span>
         </div>
-        <button
-          aria-checked={!selected}
-          className="subagent-menu-item"
-          onClick={() => choose(undefined)}
-          role="menuitemradio"
-          type="button"
-        >
-          <span className="subagent-menu-icon">
-            <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={14} />
-          </span>
-          <span className="subagent-menu-copy">
-            <strong>Main Agent</strong>
-            <small>Primary conversation</small>
-          </span>
-          {!selected ? <Check aria-hidden="true" className="subagent-menu-check" size={14} /> : null}
-        </button>
-        <div className="subagent-menu-separator" role="separator" />
-        {entries.map((entry) => {
-          const label = subagentLabel(entry);
-          return (
+        {choices(() => setOpen(false))}
+      </PopupMenu>
+    </div>
+  );
+}
+
+/** Main Agent and every Subagent; the popup and the phone's More menu both list these. */
+function SubagentChoices({
+  agentIcon,
+  agentId,
+  agentName,
+  entries,
+  onSelect,
+  selectedId,
+  unseen,
+}: Pick<Parameters<typeof SubagentNavigator>[0], "agentIcon" | "agentId" | "agentName" | "entries" | "onSelect" | "selectedId" | "unseen">) {
+  const selected = entries.some((entry) => entry.subagentId === selectedId);
+  return (
+    <>
+      <button
+        aria-checked={!selected}
+        className="subagent-menu-item"
+        onClick={() => onSelect(undefined)}
+        role="menuitemradio"
+        type="button"
+      >
+        <span className="subagent-menu-icon">
+          <AgentIcon agentId={agentId} agentName={agentName} icon={agentIcon} size={14} />
+        </span>
+        <span className="subagent-menu-copy">
+          <strong>Main Agent</strong>
+          <small>Primary conversation</small>
+        </span>
+        {!selected ? <Check aria-hidden="true" className="subagent-menu-check" size={14} /> : null}
+      </button>
+      <div className="subagent-menu-separator" role="separator" />
+      {subagentTreeRows(entries).map(({ depth, entry, guides }) => {
+        const label = subagentLabel(entry);
+        return (
           <button
             aria-checked={entry.subagentId === selectedId}
             className="subagent-menu-item"
             key={entry.subagentId}
-            onClick={() => choose(entry.subagentId)}
+            onClick={() => onSelect(entry.subagentId)}
             role="menuitemradio"
-            style={{ "--subagent-depth": depth.get(entry.subagentId) ?? 0 } as CSSProperties}
+            style={{ "--subagent-depth": depth } as CSSProperties}
             type="button"
           >
+            {guides.length > 0 ? (
+              <span aria-hidden="true" className="subagent-tree-guides">
+                {guides.map(({ level, part }) => (
+                  <i data-part={part} key={`${level}-${part}`} style={{ "--subagent-guide-level": level } as CSSProperties} />
+                ))}
+              </span>
+            ) : null}
             <span className="subagent-menu-icon">
               <span className={`subagent-status-dot ${entry.status}`} aria-hidden="true" />
             </span>
@@ -113,12 +170,10 @@ export function SubagentNavigator({
             </span>
             {entry.subagentId === selectedId ? <Check aria-hidden="true" className="subagent-menu-check" size={14} /> : null}
           </button>
-          );
-        })}
-      </PopupMenu>
-    </div>
+        );
+      })}
+    </>
   );
-  return target ? createPortal(navigator, target) : navigator;
 }
 
 /**
@@ -128,21 +183,6 @@ export function SubagentNavigator({
  */
 export function subagentLabel(entry: Pick<SubagentCatalogEntrySnapshot, "delegatedTask" | "name">) {
   return entry.delegatedTask.trim() || entry.name;
-}
-
-function hierarchyDepths(entries: SubagentCatalogEntrySnapshot[]) {
-  const parents = new Map(entries.map((entry) => [entry.subagentId, entry.parentSubagentId]));
-  return new Map(entries.map((entry) => {
-    let current = entry.parentSubagentId;
-    let value = 0;
-    const visited = new Set<string>();
-    while (current && parents.has(current) && !visited.has(current)) {
-      visited.add(current);
-      value += 1;
-      current = parents.get(current) ?? undefined;
-    }
-    return [entry.subagentId, value] as const;
-  }));
 }
 
 function statusLabel(status: SubagentCatalogEntrySnapshot["status"]) {
