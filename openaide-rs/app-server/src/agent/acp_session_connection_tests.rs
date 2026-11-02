@@ -503,39 +503,25 @@ fn connection_captures_matching_load_replay_updates() {
     }
 }
 
-/// Codex's draft announcement, through the raw path the connection takes.
-fn handle_codex_draft_spawn(
+/// A child announcement, through the path the connection takes.
+fn announce_child(
     parent_session_id: &str,
     child_session_id: &str,
     trace: &Option<AcpTraceSession>,
     session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     load_replay: &LoadReplayCaptures,
 ) {
-    let message = UntypedMessage::new(
-        "session/update",
-        serde_json::json!({
-            "sessionId": parent_session_id,
-            "update": {
-                "sessionUpdate": "subagent_spawned",
-                "subagentSessionId": child_session_id,
-                "name": "Explorer",
-                "task": "Inspect",
-                "capabilities": {},
-            },
-        }),
-    )
+    let notification: SessionNotification = serde_json::from_value(serde_json::json!({
+        "sessionId": parent_session_id,
+        "update": {
+            "sessionUpdate": "subagent_update",
+            "sessionId": child_session_id,
+            "title": "Explorer",
+            "state": { "state": "running" },
+        },
+    }))
     .unwrap();
-    let router = AcpNativeSubagentRouter::new("codex", Arc::default());
-    router.set_negotiated(true, None);
-    let draft = decode_draft_subagent_update(&message).expect("draft update");
-    handle_draft_subagent_notification(
-        &message,
-        draft,
-        trace,
-        session_traces,
-        load_replay,
-        &router,
-    );
+    handle_session_update_notification(notification, trace, session_traces, load_replay);
 }
 
 #[test]
@@ -550,7 +536,7 @@ fn load_replay_isolates_native_child_streams_from_the_main_projection() {
     )])));
     let traces = Arc::new(Mutex::new(HashMap::new()));
 
-    handle_codex_draft_spawn("session_1", "child_1", &None, &traces, &load_replay);
+    announce_child("session_1", "child_1", &None, &traces, &load_replay);
     let child_chunk = SessionNotification::new(
         "child_1",
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
@@ -565,7 +551,10 @@ fn load_replay_isolates_native_child_streams_from_the_main_projection() {
     let capture = capture.get("session_1").unwrap();
     assert!(capture.subagent_session_ids.contains("child_1"));
     assert!(
-        capture.updates.is_empty(),
+        matches!(
+            capture.updates.as_slice(),
+            [SessionUpdate::SubagentUpdate(_)]
+        ),
         "child history must not flatten into Main Agent replay"
     );
 }
@@ -877,7 +866,7 @@ fn child_session_updates_are_traced_with_the_session_that_spawned_them() {
     )])));
     let load_replay = Arc::new(Mutex::new(HashMap::new()));
 
-    handle_codex_draft_spawn(
+    announce_child(
         "root_session",
         "child_1",
         &connection_trace,

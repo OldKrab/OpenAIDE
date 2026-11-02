@@ -168,11 +168,6 @@ impl AgentSessionEventSink for TaskSessionEventSink {
 
     fn subagent_spawned(&self, event: AgentNativeSubagentSpawned) -> Result<(), RuntimeError> {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        let now = now_string();
-        // A released-form child gets its prompt as a child message, not here;
-        // the parent's delegation row is the Agent's tool call or the row App
-        // Server builds from the parent's session messages.
-        let prompt_unavailable = !event.parent_records_delegation && event.delegated_task.is_none();
         let child_already_exists = match self
             .mutations
             .store()
@@ -182,24 +177,12 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             Err(RuntimeError::TaskNotFound(_)) => false,
             Err(error) => return Err(error),
         };
-        // A resumed Codex connection has a fresh in-memory router, so its first
-        // repeated announcement cannot be classified there. Codex omits the
-        // delegated prompt, while the durable child identity proves this is not
-        // the child's first announcement.
-        let parent_interaction =
-            event.parent_interaction || (prompt_unavailable && child_already_exists);
-        let actor = if event.parent_native_session_id == self.session_id {
-            "Main Agent"
-        } else {
-            "Parent Agent"
-        };
-        let parent_records_delegation = event.parent_records_delegation;
         let announced_identity = (
             event.name.clone(),
             event.delegated_task.clone().unwrap_or_default(),
             event.capabilities.cancel,
         );
-        let mut record = self.mutations.store().record_subagent_spawn(
+        let record = self.mutations.store().record_subagent_spawn(
             &self.task_id,
             &event.parent_native_session_id,
             &event.native_session_id,
@@ -218,95 +201,21 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
                 .collect(),
         )?;
-        if parent_records_delegation {
-            if child_already_exists {
-                // A resumed connection announces a stored child again; the
-                // announcement is its current identity.
-                let (name, delegated_task, cancel) = announced_identity;
-                self.mutations.store().update_subagent_identity(
-                    &self.task_id,
-                    &record.native_session_id,
-                    Some(name),
-                    Some(delegated_task),
-                    Some(cancel),
-                )?;
-            }
-            // The parent's Tool row shows this delegation in its Chat: the
-            // Agent's own tool call, or the row App Server builds from the
-            // parent's session messages when the adapter hides that call.
-            return Ok(());
-        }
-        if parent_interaction {
-            record = self.mutations.store().update_subagent_status(
+        if child_already_exists {
+            // A resumed connection announces a stored child again; the
+            // announcement is its current identity.
+            let (name, delegated_task, cancel) = announced_identity;
+            self.mutations.store().update_subagent_identity(
                 &self.task_id,
                 &record.native_session_id,
-                crate::storage::subagents::SubagentStatusRecord::WaitingForActivity,
-            )?;
-            self.mutations.store().append_subagent_message(
-                &self.task_id,
-                &record.native_session_id,
-                codex_subagent_notice(
-                    // The persisted catalog's history revision may trail the
-                    // history, so it cannot name a new message.
-                    format!(
-                        "{}:codex:interaction:{}",
-                        record.subagent_id,
-                        uuid::Uuid::new_v4().simple(),
-                    ),
-                    &format!("{actor} interacted with this subagent"),
-                    "The inter-agent message is unavailable because Codex does not expose it to clients.",
-                    &now,
-                ),
-                false,
-            )?;
-        } else if prompt_unavailable {
-            self.mutations.store().append_subagent_message(
-                &self.task_id,
-                &record.native_session_id,
-                codex_subagent_notice(
-                    format!("{}:codex:started", record.subagent_id),
-                    &format!("{actor} started this subagent"),
-                    "The original delegated prompt is unavailable because Codex does not expose it to clients.",
-                    &now,
-                ),
-                true,
+                Some(name),
+                Some(delegated_task),
+                Some(cancel),
             )?;
         }
-        let identity = subagent_lifecycle_identity(&record.subagent_id);
-        self.mutations.commit_existing_task(
-            &self.task_id,
-            TaskCommitOptions {
-                refresh_message_history: true,
-                response_snapshot_tail_limit: None,
-            },
-            |ctx| {
-                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-                ctx.upsert_message_with_details(NormalizedMessage::Activity {
-                    id: identity.clone(),
-                    title: format!("Delegated to {}", record.name),
-                    status: ActivityStatus::Running,
-                    created_at: now.clone(),
-                    collapsed: true,
-                    steps: vec![ActivityStep::Subagent {
-                        subagent_id: Some(record.subagent_id.clone()),
-                        tool_call_id: None,
-                        title: (!record.delegated_task.is_empty())
-                            .then_some(record.delegated_task.clone()),
-                        thread_id: None,
-                        raw_path: None,
-                        activity: None,
-                        name: record.name.clone(),
-                        path: Vec::new(),
-                        status: ActivityStatus::Running,
-                        events: Vec::new(),
-                    }],
-                })?;
-                ctx.task_mut().updated_at = now.clone();
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
+        // The parent's Tool row shows this delegation in its Chat: the Agent's
+        // own tool call, or the row App Server builds from the parent's session
+        // messages when the adapter hides that call.
         Ok(())
     }
 
@@ -474,8 +383,8 @@ impl AgentSessionEventSink for TaskSessionEventSink {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let (stored_status, activity_status) = match event.state {
             AgentNativeSubagentState::Running => {
-                // A reused child works again. Released-form children have no
-                // Delegated Activity row to reopen.
+                // A reused child works again; it has no Delegated Activity row
+                // to reopen.
                 self.mutations.store().update_subagent_status(
                     &self.task_id,
                     &event.native_session_id,

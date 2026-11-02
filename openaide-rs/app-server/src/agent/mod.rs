@@ -19,7 +19,6 @@ pub(crate) mod acp_compaction_projection;
 pub(crate) mod acp_config_options_apply;
 pub(crate) mod acp_config_projection;
 pub(crate) mod acp_content_projection;
-mod acp_draft_subagents;
 mod acp_early_exit_backoff;
 pub(crate) mod acp_early_session_catalogs;
 pub(crate) mod acp_elicitation_form;
