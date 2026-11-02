@@ -1,4 +1,4 @@
-import { Camera, FileUp, Image, Plus } from "lucide-react";
+import { Camera, Images, Paperclip, Plus } from "lucide-react";
 import type { ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import { reportUnsentInput } from "../services/unsentInput";
@@ -259,11 +259,12 @@ export function ComposerControls({
           )}
         >
             <MenuButton
+              className="composer-attach-choice"
               description={fileBrowser?.attachmentMode === "nativePicker"
                 ? "Choose files from this computer."
                 : "Upload files to this task."}
               disabled={disabled || uploadsActive || !fileBrowser?.attachFiles || attachmentCount >= 20}
-              icon={<FileUp size={13} />}
+              icon={<Paperclip size={18} strokeWidth={1.75} />}
               label="Attach files"
               onClick={() => {
                 if (fileBrowser?.attachmentMode === "nativePicker") attachFiles([]);
@@ -271,17 +272,19 @@ export function ComposerControls({
               }}
             />
             <MenuButton
+              className="composer-attach-choice"
               description="Choose images from this device."
               disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
-              icon={<Image size={13} />}
+              icon={<Images size={18} strokeWidth={1.75} />}
               label="Attach images"
               onClick={() => imageUploadRef.current?.click()}
             />
             {fileBrowser?.photoCapture ? (
               <MenuButton
+                className="composer-attach-choice"
                 description="Use this device's camera."
                 disabled={disabled || !imageAttachmentsAllowed}
-                icon={<Camera size={13} />}
+                icon={<Camera size={18} strokeWidth={1.75} />}
                 label="Take photo"
                 onClick={() => photoCaptureRef.current?.click()}
               />
