@@ -300,7 +300,7 @@
     radial-gradient(circle at 2.75px 9.25px, var(--task-state-background-ink) 0.8px, transparent 1px),
     radial-gradient(circle at 1.40px 6.00px, var(--task-state-background-ink) 0.8px, transparent 1px),
     radial-gradient(circle at 2.75px 2.75px, var(--task-state-background-ink) 0.8px, transparent 1px);
-  animation: task-state-spin 6s linear infinite;
+  animation: task-state-spin 4s linear infinite;
 }
 
 .task-state-pause {
