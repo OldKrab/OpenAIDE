@@ -277,8 +277,8 @@ nothing itself, and only downloads from the workspace's own origin are accepted.
 The gateway cookie stays in the app, so the system download manager is not used.
 Diagnostics record each download's outcome and duration, not its name or URL.
 
-The Android document picker grants access only to selected, readable `content:`
-URIs. The WebView resource policy allows those exact documents while continuing
+The Android document and photo pickers grant access only to selected, readable
+`content:` URIs. The WebView resource policy allows those exact documents while continuing
 to block arbitrary providers, local files and external network resources.
 
 A WebView never opens the camera for a file input, so the app does it for the
@@ -286,7 +286,8 @@ composer's **Take photo**, an image input with `capture`. The camera writes the
 photo to the app's cache through the app's own provider, and it is delivered as
 a selected document. Android refuses the camera to an app that declares the camera
 permission (pairing scans with it) until that permission is granted, so Take photo
-asks for it; **Attach images** opens the document picker and never asks.
+asks for it; **Attach images** opens the photo picker, or the document picker on
+a phone without one, and never asks.
 
 Existing Codex sessions are grouped by their original working directory. A CLI
 session started in Termux home appears under the home Project, even if commands

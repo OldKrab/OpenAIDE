@@ -485,12 +485,8 @@ public final class MainActivity extends Activity {
                     }
                     return true;
                 }
-                diagnostics.record("file_picker", "started", 0, 0);
-                Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE);
-                picker.setType(types.length == 1 && types[0].contains("/") ? types[0] : "*/*");
-                if (types.length > 1) picker.putExtra(Intent.EXTRA_MIME_TYPES, types);
-                picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
-                picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                Intent picker = DocumentPicker.intent(types, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
+                diagnostics.record("file_picker", DocumentPicker.opensPhotos(picker) ? "photos_started" : "started", 0, 0);
                 try { startActivityForResult(picker, FILE_REQUEST); }
                 catch (ActivityNotFoundException error) {
                     diagnostics.record("file_picker", "unavailable", 0, SystemClock.elapsedRealtime() - pickerStarted);
@@ -552,7 +548,7 @@ public final class MainActivity extends Activity {
             boolean capturing = camera.capturing();
             Uri photo = camera.photo(result);
             Uri[] selected = capturing ? (photo == null ? null : new Uri[]{photo})
-                : WebChromeClient.FileChooserParams.parseResult(result, data);
+                : DocumentPicker.selection(result, data);
             diagnostics.record("file_picker", selected == null ? "cancelled" : photo != null ? "captured" : "selected",
                 selected == null ? 0 : selected.length, SystemClock.elapsedRealtime() - pickerStarted);
             ValueCallback<Uri[]> callback = fileCallback;
