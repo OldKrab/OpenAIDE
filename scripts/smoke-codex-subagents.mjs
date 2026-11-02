@@ -74,15 +74,22 @@ async function checkSubagents(adapter, enabled) {
     } finally { clearTimeout(timer); }
   }
   function assertNativeHistory(events) {
-    const spawn = events.find(({ update }) => update.sessionUpdate === "subagent_spawned");
-    assert.equal(spawn?.sessionId, "native-session", "child must be announced on its parent");
-    assert.equal(spawn?.update.subagentSessionId, "child-fixture");
-    const childEvents = events.filter(({ sessionId }) => sessionId === "child-fixture");
+    const childId = "native-session:subagent:child-fixture";
+    const lifecycle = events.filter(({ sessionId, update }) => sessionId === "native-session"
+      && update.sessionUpdate === "subagent_update" && update.sessionId === childId);
+    const spawn = lifecycle[0];
+    assert.equal(spawn?.update.description, "Review the fixture", "child must be announced on its parent");
+    const childEvents = events.filter(({ sessionId }) => sessionId === childId);
     assert.ok(childEvents.some(({ update }) => update.sessionUpdate === "agent_message_chunk"
       && update.content?.text === "Packaged child result"), "child text must have its own session");
-    const terminal = events.filter(({ update }) => update.sessionUpdate === "subagent_state_update");
+    const prompts = events.filter(({ update }) => update.sessionUpdate === "session_message");
+    assert.deepEqual(prompts.map(({ sessionId }) => sessionId), ["native-session", childId],
+      "the delegated prompt must reach the parent and open the child");
+    assert.ok(prompts[1].update.senderMessageId, "the child's view must link to the parent's");
+    assert.deepEqual(prompts[1].update.content, [{ type: "text", text: "Review the fixture" }]);
+    const terminal = lifecycle.filter(({ update }) => update.state?.state === "idle");
     assert.equal(terminal.length, 1, "announced child must terminate exactly once");
-    assert.equal(terminal[0].update.state, "completed");
+    assert.equal(terminal[0].update.state.stopReason, "end_turn");
     assert.ok(events.indexOf(spawn) < events.indexOf(childEvents[0]), "announcement must precede child traffic");
   }
   try {

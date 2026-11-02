@@ -16,7 +16,7 @@ const recoveryFailure = (code, fresh = false) => Object.assign(new Error(fresh
 const writeRecoveryLog = (event) => console.error(JSON.stringify(event));
 
 /**
- * Version-scoped bridge for Codex 0.160.1 and earlier native history. Its resume RPC restores
+ * Version-scoped bridge for Codex 0.165.0 and earlier native history. Its resume RPC restores
  * model/approval history but rebuilds sandbox permissions from current config.
  * Read the native-owned rollout before resume can append those new defaults;
  * no OpenAIDE option cache or global Codex configuration is replayed or changed.
@@ -124,6 +124,7 @@ async function readNativePolicy(filename, sessionId, log) {
   let identity = false;
   let interaction = false;
   let latest;
+  let startingRoots;
   try {
     if (!(await stat(filename)).isFile()) throw unsupported();
     const input = createReadStream(filename);
@@ -167,28 +168,36 @@ async function readNativePolicy(filename, sessionId, log) {
       malformedRecords += 1;
       needsFullSnapshot = true;
       latest = undefined;
+      startingRoots = undefined;
       return;
     }
     if (!record(entry) || typeof entry.type !== "string" || !record(entry.payload)) throw unsupported();
     if (entry.type === "session_meta") {
       if (entry.payload.id !== sessionId) throw unsupported();
       identity = true;
+      startingRoots = { cwd: entry.payload.cwd, workspace_roots: entry.payload.runtime_workspace_roots };
     } else if (entry.type === "response_item") interaction = true;
     else if (entry.type === "turn_context") {
-      latest = entry.payload;
+      latest = withRoots(entry.payload);
       if (record(latest.permission_profile) && latest.approval_policy !== undefined
-        && latest.approvals_reviewer !== undefined && typeof latest.cwd === "string"
-        && Array.isArray(latest.workspace_roots)) needsFullSnapshot = false;
+        && latest.approvals_reviewer !== undefined && typeof latest.cwd === "string") needsFullSnapshot = false;
     }
     else if (entry.type === "event_msg" && entry.payload.type === "thread_settings_applied") {
       if (entry.payload.thread_id !== undefined && entry.payload.thread_id !== sessionId) throw unsupported();
       if (!record(entry.payload.thread_settings)) throw unsupported();
-      const next = entry.payload.thread_settings;
-      const roots = next.workspace_roots ?? (latest?.workspace_roots !== undefined
-        ? (next.cwd === latest.cwd ? latest.workspace_roots : null) : undefined);
-      latest = { ...next, ...(roots !== undefined && { workspace_roots: roots }),
+      latest = { ...withRoots(entry.payload.thread_settings),
         ...(latest?.network !== undefined && { network: latest.network }) };
     }
+  }
+
+  // Codex 0.165 persists roots only in session metadata and settings snapshots
+  // (openai/codex#51492). A record naming none keeps the known roots of its cwd;
+  // in another cwd they are unknown, which refuses a roots-scoped restoration.
+  function withRoots(next) {
+    const known = latest ?? startingRoots;
+    const roots = next.workspace_roots ?? next.runtime_workspace_roots ?? (known?.workspace_roots !== undefined
+      ? (next.cwd === known.cwd ? known.workspace_roots : null) : undefined);
+    return { ...next, ...(roots !== undefined && { workspace_roots: roots }) };
   }
 }
 
