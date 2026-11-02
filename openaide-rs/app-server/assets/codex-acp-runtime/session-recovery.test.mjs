@@ -17,12 +17,12 @@ const settings = (profile = restricted) => ({
   },
 });
 
-async function withHistory(records, run) {
+async function withHistory(records, run, meta = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-history-recovery-test-"));
   const history = path.join(root, "history.jsonl");
   try {
     await writeFile(history, [
-      JSON.stringify({ type: "session_meta", payload: { id: "session" } }),
+      JSON.stringify({ type: "session_meta", payload: { id: "session", ...meta } }),
       ...records.map((record) => typeof record === "string" ? record : JSON.stringify(record)),
     ].join("\n") + "\n");
     const calls = [];
@@ -96,6 +96,53 @@ test("materialized permissions keep native workspace scope across a settings-onl
   ], async (client, calls) => {
     await recovery.resumeNativeSession(client, { threadId: "session", cwd });
     assert.deepEqual(calls[1].params.runtimeWorkspaceRoots, roots);
+  });
+});
+
+// Codex 0.165 stopped persisting workspace roots in turn context (openai/codex#51492).
+const rootlessTurn = (cwd) => ({ type: "turn_context", payload: {
+  cwd, approval_policy: "on-request", approvals_reviewer: "user", permission_profile: restricted,
+} });
+const nativeRoots = (cwd) => [cwd, path.resolve(os.tmpdir(), "native-extra")];
+const rootsSnapshot = (cwd, roots) => {
+  const value = settings();
+  Object.assign(value.payload.thread_settings, { cwd, runtime_workspace_roots: roots });
+  return value;
+};
+
+test("a settings snapshot's roots outlive a later rootless turn context", async () => {
+  const cwd = path.resolve(os.tmpdir(), "native-cwd");
+  await withHistory([rootsSnapshot(cwd, nativeRoots(cwd)), rootlessTurn(cwd)], async (client, calls) => {
+    await recovery.resumeNativeSession(client, { threadId: "session", cwd });
+    assert.deepEqual(calls[1].params.runtimeWorkspaceRoots, nativeRoots(cwd));
+  });
+});
+
+test("a first rootless turn context keeps the roots its session started with", async () => {
+  const cwd = path.resolve(os.tmpdir(), "native-cwd");
+  await withHistory([rootlessTurn(cwd)], async (client, calls) => {
+    await recovery.resumeNativeSession(client, { threadId: "session", cwd });
+    assert.deepEqual(calls[1].params.runtimeWorkspaceRoots, nativeRoots(cwd));
+  }, { cwd, runtime_workspace_roots: nativeRoots(cwd) });
+});
+
+test("damage forgets the known roots until a settings snapshot restates them", async () => {
+  const cwd = path.resolve(os.tmpdir(), "native-cwd");
+  await withHistory([rootsSnapshot(cwd, nativeRoots(cwd)), "malformed", rootlessTurn(cwd)], async (client, calls) => {
+    await recovery.resumeNativeSession(client, { threadId: "session", cwd });
+    assert.equal(calls[1].params.runtimeWorkspaceRoots, undefined);
+  });
+  await withHistory(["malformed", rootlessTurn(cwd), rootsSnapshot(cwd, [cwd])], async (client, calls) => {
+    await recovery.resumeNativeSession(client, { threadId: "session", cwd });
+    assert.deepEqual(calls[1].params.runtimeWorkspaceRoots, [cwd]);
+  }, { cwd, runtime_workspace_roots: nativeRoots(cwd) });
+});
+
+test("a turn in another directory cannot inherit roots recorded for the previous one", async () => {
+  const cwd = path.resolve(os.tmpdir(), "native-cwd");
+  await withHistory([rootsSnapshot(cwd, nativeRoots(cwd)), rootlessTurn(path.resolve(os.tmpdir(), "elsewhere"))], async (client, calls) => {
+    await assert.rejects(recovery.resumeNativeSession(client, { threadId: "session" }), /Cannot safely restore/);
+    assert.deepEqual(calls.map(call => call.method), ["read"]);
   });
 });
 
@@ -388,8 +435,22 @@ test("a complete later turn context supersedes historical malformed records with
 });
 
 
+test("a later turn context supersedes malformed records without naming workspace roots", async () => {
+  const saved = workspaceSettings().payload.thread_settings;
+  await withHistory([settings({ type: "disabled" }), "malformed historical record", { type: "turn_context", payload: saved }], async (client, calls) => {
+    const events = [];
+    await recovery.resumeNativeSession(client, { threadId: "session", cwd: saved.cwd }, { log: event => events.push(event) });
+    const read = events.filter(event => event.operation === "codex.native_policy_read").at(-1);
+    assert.equal(read.outcome, "success");
+    assert.equal(read.malformed_record_count, 1);
+    assert.deepEqual(calls.map(call => call.method), ["read", "resume", "update"]);
+    assert.equal(calls[1].params.sandbox, "read-only");
+  });
+});
+
 for (const [name, later] of [
   ["settings-only update", settings()],
+  ["settings snapshot naming its roots", rootsSnapshot(path.resolve(os.tmpdir(), "native-cwd"), [path.resolve(os.tmpdir(), "native-cwd")])],
   ["legacy snapshot", { type: "turn_context", payload: {
     cwd: path.resolve(os.tmpdir(), "native-cwd"), approval_policy: "never", sandbox_policy: { type: "danger-full-access" },
   } }],

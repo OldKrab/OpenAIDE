@@ -14,7 +14,9 @@ use crate::agent::acp_live_prompt_projection::project_plan_entry;
 use crate::agent::acp_message_identity::{
     stable_agent_message_id, stable_compaction_id, stable_message_id,
 };
-use crate::agent::acp_native_subagents_delegation::{is_delegation_row, ReplayDelegations};
+use crate::agent::acp_native_subagents_delegation::{
+    is_delegation_row, normalize_claude_identity, ReplayDelegations,
+};
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -64,8 +66,11 @@ impl ReplayProjection {
         let tool_calls = Arc::new(Mutex::new(Default::default()));
         let codex_subagents =
             (self.agent_id.as_deref() == Some("codex")).then(CodexSubagentState::default);
-        let mut replay =
-            ReplayBuffer::new(&self.session_id, self.agent_id.as_deref() == Some("codex"));
+        let mut replay = ReplayBuffer::new(
+            &self.session_id,
+            self.agent_id.as_deref() == Some("codex"),
+            self.agent_id.as_deref() == Some("claude-code"),
+        );
         for update in updates {
             replay.project(update, &created_at, &tool_calls, codex_subagents.as_ref());
         }
@@ -108,10 +113,11 @@ struct ReplayBuffer {
     /// Rebuilds the delegation rows the live router builds from the root's
     /// session messages, with the same ids.
     delegations: ReplayDelegations,
+    claude_identity: bool,
 }
 
 impl ReplayBuffer {
-    fn new(session_id: &str, dedupe_anonymous_copies: bool) -> Self {
+    fn new(session_id: &str, dedupe_anonymous_copies: bool, claude_identity: bool) -> Self {
         Self {
             messages: Vec::new(),
             active_anonymous_text: None,
@@ -125,6 +131,7 @@ impl ReplayBuffer {
             completed_plan_message_id: None,
             next_plan_ordinal: 0,
             delegations: ReplayDelegations::default(),
+            claude_identity,
         }
     }
 
@@ -241,8 +248,11 @@ impl ReplayBuffer {
                     self.apply_compaction(&compaction_id, change, created_at);
                 }
             }
-            SessionUpdate::SubagentUpdate(update) => {
+            SessionUpdate::SubagentUpdate(mut update) => {
                 self.end_anonymous_text_run();
+                if self.claude_identity {
+                    normalize_claude_identity(&mut update);
+                }
                 if let Some(row) = self.delegations.subagent_update(&update) {
                     self.project(row, created_at, tool_calls, codex_subagents);
                 }

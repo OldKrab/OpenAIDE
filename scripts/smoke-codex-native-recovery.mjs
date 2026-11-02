@@ -90,7 +90,7 @@ async function verifyRecovery(binary, adapter, scenario) {
       .filter(line => line !== damagedRecord).map(JSON.parse);
     const initialHistory = await history();
     const expected = initialHistory.filter((entry) => entry.payload?.type === "thread_settings_applied").at(-1).payload.thread_settings;
-    const workspaceRoots = initialHistory.filter((entry) => entry.type === "turn_context").at(-1).payload.workspace_roots;
+    assert.ok(expected.runtime_workspace_roots?.length > 0, `${scenario}: native must record its workspace roots`);
     if (scenario === "workspace") {
       // Only this disposable native rollout is damaged. A later full context
       // must still restore exact permissions across resume, load, and new turns.
@@ -126,9 +126,11 @@ async function verifyRecovery(binary, adapter, scenario) {
       assert.ok(fresh.length > 0, `${scenario}: restart ${cycle + 1} must create a fresh native turn context`);
       for (const entry of fresh) {
         assert.deepEqual(policy(entry.payload), policy(expected), `${scenario}: restart ${cycle + 1} must retain the exact native policy`);
-        assert.deepEqual(entry.payload.workspace_roots, workspaceRoots, `${scenario}: restart ${cycle + 1} must retain the native workspace roots`);
         seenTurns.add(entry.payload.turn_id);
       }
+      const settled = (await history()).filter((entry) => entry.payload?.type === "thread_settings_applied").at(-1).payload.thread_settings;
+      assert.deepEqual(settled.runtime_workspace_roots, expected.runtime_workspace_roots,
+        `${scenario}: restart ${cycle + 1} must retain the native workspace roots`);
       console.log(`Verified actual native ${scenario}: restart ${cycle + 1}, fresh turn, exact policy.`);
     }
   } finally {

@@ -294,6 +294,16 @@ pub(super) fn subagent_name(title: Option<&str>) -> String {
         .to_string()
 }
 
+/// Claude ACP reports a child's task as `title` and its agent type as
+/// `description`. App Server and every stored Subagent hold them the other way
+/// round, as Codex ACP reports them, so the live router and `session/load` both
+/// swap them here. A child with no reported type keeps its title as its name.
+pub(super) fn normalize_claude_identity(update: &mut SubagentUpdate) {
+    if update.description.is_value() {
+        std::mem::swap(&mut update.title, &mut update.description);
+    }
+}
+
 /// A `description` patch: `None` leaves it unchanged, `Some(None)` clears it.
 pub(super) fn description_patch(description: &MaybeUndefined<String>) -> Option<Option<String>> {
     match description {

@@ -21,14 +21,9 @@ export function patchBundle(original) {
     "#!/usr/bin/env node" + newline + 'import { recoveredSessionMode, resumeNativeSession } from "./openaide-session-recovery.mjs";' + newline,
     1,
   );
-  // TODO(codex-acp): drop this patch when upstream uses indexed discovery and
-  // reports its weaker absence evidence. Repeated scan-and-repair reads gigabytes
-  // per Project; an incomplete native index must never authorize history removal.
-  replace(
-    "const listResponse = await this.codexClient.threadList({" + newline,
-    "const listResponse = await this.codexClient.threadList({" + newline + "      useStateDbOnly: true," + newline,
-    1,
-  );
+  // TODO(codex-acp): drop this patch when upstream reports the weaker absence
+  // evidence of its indexed discovery. An incomplete native index must never
+  // authorize history removal.
   replace(
     "sessions: listResponse.data.map(mapThreadToSession)," + newline,
     'sessions: listResponse.data.map(mapThreadToSession),' + newline
@@ -67,29 +62,6 @@ export function patchBundle(original) {
   replace(
     "applyModeChange(sessionState, value) {" + newline + "    const newMode = AgentMode.find(value);",
     "applyModeChange(sessionState, value) {" + newline + "    if (value === sessionState.agentMode.id) return;" + newline + "    const newMode = AgentMode.find(value);",
-    1,
-  );
-  // TODO(codex-acp): remove when upstream implements the host-owned idle
-  // steering fallback. A detached prompt has no ACP completion for the Host.
-  replace(
-    "return await this.startNewTurnFromSteering(params);",
-    [
-      'if (params._meta?.steering?.idleBehavior === "promptRequired") {',
-      "      await this.activePrompts.get(params.sessionId)?.completion;",
-      '      return { outcome: "promptRequired", reason: "noRunningTurn" };',
-      "    }",
-      "    return await this.startNewTurnFromSteering(params);",
-    ].join(newline),
-    1,
-  );
-  replace(
-    ["  parseSessionSteerParams(params) {", '    const sessionId = params["sessionId"];'].join(newline),
-    ["  parseSessionSteerParams(params) {", '    const meta = params["_meta"];', '    const sessionId = params["sessionId"];'].join(newline),
-    1,
-  );
-  replace(
-    ["      sessionId,", "      prompt", "    };", "  }", "  createSessionConfigOptions(sessionState) {"].join(newline),
-    ["      sessionId,", "      prompt,", "      _meta: meta", "    };", "  }", "  createSessionConfigOptions(sessionState) {"].join(newline),
     1,
   );
   return source;
