@@ -96,7 +96,7 @@
   font-size: 11px;
 }
 
-.oa-popup-menu .subagent-menu-item {
+.oa-popup-menu .subagent-menu-item[role] {
   align-items: center;
   display: grid;
   gap: 9px;
@@ -402,6 +402,26 @@
   /* The name gives way instead, or the label would run under Stop. */
   .subagent-details-trigger {
     flex: 0 0 auto;
+    min-height: 44px;
+  }
+
+  .subagent-inspection-stop,
+  .subagent-inspection-return {
+    min-height: 44px;
+  }
+
+  .oa-popup-menu .subagent-menu-item[role] {
+    min-height: 48px;
+  }
+
+  .subagent-menu-copy > strong,
+  .subagent-menu-name strong {
+    font-size: 14px;
+  }
+
+  .subagent-menu-copy > small,
+  .subagent-menu-name > span {
+    font-size: 12px;
   }
 
 }

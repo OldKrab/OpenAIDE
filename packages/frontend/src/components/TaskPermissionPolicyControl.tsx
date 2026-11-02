@@ -1,4 +1,4 @@
-import { ShieldCheck, ShieldQuestion } from "lucide-react";
+import { ChevronDown, ShieldCheck, ShieldQuestion } from "lucide-react";
 import { useState } from "react";
 import type { TaskPermissionPolicy } from "@openaide/app-shell-contracts";
 import { PopupMenu } from "./Popup";
@@ -60,6 +60,7 @@ export function TaskPermissionPolicyControl({
         >
           {autoApprove ? <ShieldCheck aria-hidden="true" size={15} /> : <ShieldQuestion aria-hidden="true" size={15} />}
           {autoApprove ? <span>Auto-approve on</span> : null}
+          <ChevronDown aria-hidden="true" className="mobile-task-more-chevron" />
         </button>
       )}
     >

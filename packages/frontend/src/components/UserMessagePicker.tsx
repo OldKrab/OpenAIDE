@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageSquareText, X } from "lucide-react";
+import { ChevronDown, MessageSquareText, X } from "lucide-react";
 import { PopupPanel } from "./Popup";
 import type { UserMessageNavigation } from "./useTaskChatScroll";
 
@@ -15,6 +15,7 @@ export function UserMessagePicker({ navigation }: { navigation: UserMessageNavig
       trigger={(props) => (
         <button {...props} aria-label="Jump to a message" className="user-message-picker-trigger" title="Jump to a message" type="button">
           <MessageSquareText aria-hidden="true" size={18} />
+          <ChevronDown aria-hidden="true" className="mobile-task-more-chevron" />
         </button>
       )}
     >
