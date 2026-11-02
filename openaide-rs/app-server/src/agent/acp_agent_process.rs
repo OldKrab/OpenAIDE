@@ -96,6 +96,7 @@ impl AcpSessionOpenRequest {
 pub(super) struct AcpStartedSession {
     pub(super) session: AgentSession,
     pub(super) replayed_messages: Vec<NormalizedMessage>,
+    pub(super) replayed_subagents: Vec<crate::agent::events::AgentReplayedSubagentEvent>,
 }
 
 pub(super) struct AcpAgentProcessOpen {
@@ -682,6 +683,7 @@ async fn open_on_shared_process(
     snapshot.publish(&started_session);
     early_open.finish(&started_session.session_id);
     let replayed_messages = opened.replayed_messages.clone();
+    let replayed_subagents = opened.replayed_subagents.clone();
     let session_id = started_session.session_id.clone();
     terminal_owner.activate_session(&session_id);
     let duplicate = {
@@ -768,6 +770,7 @@ async fn open_on_shared_process(
     let _ = started_tx.send(Ok(AcpStartedSession {
         session: started_session,
         replayed_messages,
+        replayed_subagents,
     }));
     Ok(())
 }

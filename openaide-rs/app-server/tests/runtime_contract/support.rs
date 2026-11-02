@@ -175,6 +175,7 @@ impl AgentRuntime for LoadSessionAgent {
         });
         Ok(AgentLoadedSession {
             session,
+            replayed_subagents: Vec::new(),
             replayed_messages: vec![
                 NormalizedMessage::User {
                     id: "replayed-user".to_string(),
@@ -233,6 +234,7 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
         Ok(AgentLoadedSession {
             session: AgentSession::new(request.agent_id, request.session_id),
             replayed_messages: Vec::new(),
+            replayed_subagents: Vec::new(),
         })
     }
 

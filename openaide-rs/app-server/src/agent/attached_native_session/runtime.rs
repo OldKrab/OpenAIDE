@@ -196,6 +196,7 @@ pub(super) async fn run(
                                 AgentLoadedSession {
                                     session,
                                     replayed_messages: replay.messages,
+                                    replayed_subagents: replay.subagents,
                                 }
                             });
                         if let Ok(loaded) = &result {

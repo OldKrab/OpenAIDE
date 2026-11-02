@@ -109,7 +109,7 @@ impl TaskProductApi {
             &task_id,
             openaide_app_server_protocol::ids::ProjectId::from(catalog_entry.project_id.clone()),
         );
-        let loaded = match self.agent_gateway.load_session(AgentSessionLoad {
+        let mut loaded = match self.agent_gateway.load_session(AgentSessionLoad {
             agent_id: params.agent_id.as_str().to_string(),
             task_id: task_id.clone(),
             cwd: catalog_entry.workspace_root.clone(),
@@ -147,6 +147,7 @@ impl TaskProductApi {
                     .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent))
             });
         let session_id = session_start.session_id().to_string();
+        let replayed_subagents = std::mem::take(&mut loaded.replayed_subagents);
 
         let persist_result = self.persist_adopted_session_task(
             &params,
@@ -174,6 +175,11 @@ impl TaskProductApi {
             }
         };
 
+        self.turn_runner.restore_replayed_subagents(
+            &task_id,
+            &session_start.session().key(),
+            replayed_subagents,
+        );
         if let Err(error) = self
             .turn_runner
             .attach_session_events(task_id.clone(), &session_start.session().key())

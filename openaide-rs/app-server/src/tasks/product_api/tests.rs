@@ -10025,6 +10025,7 @@ impl AgentRuntime for RecordingAgent {
         Ok(AgentLoadedSession {
             session,
             replayed_messages: self.replayed_messages.lock().unwrap().clone(),
+            replayed_subagents: Vec::new(),
         })
     }
 

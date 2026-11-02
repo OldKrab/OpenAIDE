@@ -44,6 +44,7 @@ pub(super) struct OpenedAcpSession {
     pub(super) content_policy: PromptContentPolicy,
     pub(super) started_session: AgentSession,
     pub(super) replayed_messages: Vec<NormalizedMessage>,
+    pub(super) replayed_subagents: Vec<crate::agent::events::AgentReplayedSubagentEvent>,
 }
 
 pub(super) async fn open_acp_session<'a>(
@@ -267,6 +268,7 @@ async fn open_acp_session_inner<'a>(
         content_policy,
         started_session,
         replayed_messages: replay.messages,
+        replayed_subagents: replay.subagents,
     })
 }
 

@@ -633,6 +633,23 @@ impl TurnRunner {
         Ok(sink)
     }
 
+    /// Restores the children of a replay whose Chat has committed. Callers run
+    /// this before attaching the session's events.
+    pub(crate) fn restore_replayed_subagents(
+        &self,
+        task_id: &str,
+        session: &AgentSessionKey,
+        events: Vec<crate::agent::events::AgentReplayedSubagentEvent>,
+    ) {
+        TaskSessionEventSink::new(
+            self.mutations.clone(),
+            task_id.to_string(),
+            session.session_id().to_string(),
+            self.server_requests.clone(),
+        )
+        .restore_replayed_subagents(events);
+    }
+
     /// Reattaches the Task-owned sink after a Native Session attachment was closed and resumed.
     pub(crate) fn reattach_session_events(
         &self,

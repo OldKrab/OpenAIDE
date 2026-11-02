@@ -37,6 +37,7 @@ pub(super) struct ReplayProjection {
 pub(super) struct ReplayProjectionResult {
     pub(super) messages: Vec<NormalizedMessage>,
     pub(super) plan: AgentReplayPlanState,
+    pub(super) subagents: Vec<crate::agent::events::AgentReplayedSubagentEvent>,
 }
 
 impl ReplayProjection {
@@ -88,6 +89,7 @@ impl ReplayProjection {
         }
         ReplayProjectionResult {
             messages: replay.messages,
+            subagents: Vec::new(),
             plan: AgentReplayPlanState {
                 current_plan: replay.current_plan,
                 completed_plan_message_id: replay.completed_plan_message_id,

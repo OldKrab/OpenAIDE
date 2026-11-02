@@ -6,6 +6,9 @@ mod permissions;
 mod questions;
 #[cfg(test)]
 mod released_subagent_tests;
+#[cfg(test)]
+mod replayed_subagent_tests;
+mod replayed_subagents;
 mod session;
 #[cfg(test)]
 mod tests;

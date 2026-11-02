@@ -35,6 +35,7 @@ impl TaskTurnLifecycle {
             cancellation: TurnCancellation::new(),
             secret_resolver: None,
         })?;
+        let replayed_subagents = loaded.replayed_subagents;
         let mut session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
         let title = TaskTitle::new(params.title, TaskTitleSource::Agent);
 
@@ -110,6 +111,11 @@ impl TaskTurnLifecycle {
             }
         };
 
+        self.turn_runner.restore_replayed_subagents(
+            &task_id,
+            &session_start.session().key(),
+            replayed_subagents,
+        );
         if let Err(error) = self
             .turn_runner
             .attach_session_events(task_id.clone(), &session_start.session().key())

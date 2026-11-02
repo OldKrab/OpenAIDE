@@ -109,6 +109,9 @@ impl AgentSession {
 pub struct AgentLoadedSession {
     pub session: AgentSession,
     pub replayed_messages: Vec<NormalizedMessage>,
+    /// The Subagents the replay reported. The caller restores them once it has
+    /// committed `replayed_messages`.
+    pub replayed_subagents: Vec<crate::agent::events::AgentReplayedSubagentEvent>,
 }
 
 /// Semantic result of one primary ACP prompt request.

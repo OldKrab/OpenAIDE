@@ -469,6 +469,7 @@ fn connection_captures_matching_load_replay_updates() {
             session_id: "session_1".into(),
             updates: Vec::new(),
             subagent_session_ids: HashSet::new(),
+            subagent_traffic: Vec::new(),
         },
     )])));
     let replay = load_replay.clone();
@@ -532,6 +533,7 @@ fn load_replay_isolates_native_child_streams_from_the_main_projection() {
             session_id: "session_1".into(),
             updates: Vec::new(),
             subagent_session_ids: HashSet::new(),
+            subagent_traffic: Vec::new(),
         },
     )])));
     let traces = Arc::new(Mutex::new(HashMap::new()));
@@ -567,6 +569,7 @@ fn load_replay_absorbs_released_subagent_announcements_and_child_messages() {
             session_id: "session_1".into(),
             updates: Vec::new(),
             subagent_session_ids: HashSet::new(),
+            subagent_traffic: Vec::new(),
         },
     )])));
     let traces = Arc::new(Mutex::new(HashMap::new()));
@@ -621,6 +624,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
             session_id: "streaming_session".into(),
             updates: Vec::new(),
             subagent_session_ids: HashSet::new(),
+            subagent_traffic: Vec::new(),
         },
     )])));
     let replay = load_replay.clone();

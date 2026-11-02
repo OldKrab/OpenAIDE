@@ -105,6 +105,7 @@ impl NativeSessionService {
             metadata_is_authoritative: true,
         };
         let replayed_messages = loaded.replayed_messages;
+        let replayed_subagents = loaded.replayed_subagents;
         let replayed_message_count = replayed_messages.len();
 
         let commit_started = std::time::Instant::now();
@@ -155,6 +156,11 @@ impl NativeSessionService {
             TaskCommitOutcome::Rejected(_) => return Ok(None),
         };
 
+        self.turn_runner.restore_replayed_subagents(
+            &task.task_id,
+            &session_start.session().key(),
+            replayed_subagents,
+        );
         let attach_started = std::time::Instant::now();
         self.ensure_update_subscription(&task.task_id, &session_start.session().key())?;
         let attach_ms = attach_started.elapsed().as_millis();

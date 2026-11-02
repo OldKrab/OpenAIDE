@@ -607,6 +607,53 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
 }
 
 #[test]
+fn adopting_a_native_session_restores_its_replayed_subagents() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "subagent_replay") else {
+        return;
+    };
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace(&workspace_root),
+        cursor: None,
+    })
+    .expect("list replayable ACP session");
+
+    let adopted = api
+        .adopt_native_session(TaskAdoptNativeSessionParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "task-chat-session".to_string(),
+        })
+        .expect("adopt replayed ACP session");
+    let task_id = adopted.task.task_id;
+
+    let child = store
+        .subagent_record_by_native(task_id.as_str(), "child-1")
+        .expect("the replayed child is a Subagent");
+    assert_eq!(child.name, "Reviewer");
+    assert_eq!(
+        child.status,
+        crate::storage::subagents::SubagentStatusRecord::Completed
+    );
+    let history = store
+        .subagent_history(task_id.as_str(), &child.subagent_id)
+        .expect("read the replayed child history");
+    assert!(matches!(
+        history
+            .messages
+            .iter()
+            .map(|stored| &stored.chat.message)
+            .collect::<Vec<_>>()
+            .as_slice(),
+        [
+            NormalizedMessage::User { text, .. },
+            NormalizedMessage::AgentMessage { .. },
+        ] if text == "Review it"
+    ));
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn adopting_a_native_session_open_elsewhere_returns_a_recoverable_conflict() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, _store, workspace_root)) = task_chat_fixture(&temp, "active_writer") else {
@@ -1556,6 +1603,16 @@ for line in sys.stdin:
             update_chunk("agent_thought_chunk", "Work ", "66666666-6666-4666-8666-666666666666")
             update_chunk("agent_thought_chunk", "it out", "66666666-6666-4666-8666-666666666666")
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="}, "replayed-image")
+        if mode == "subagent_replay":
+            update_raw({"sessionUpdate": "subagent_update", "sessionId": "child-1", "title": "Reviewer", "state": {"state": "running"}})
+            write({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-1", "update": {
+                "sessionUpdate": "session_message", "messageId": "child-1-prompt", "senderSessionId": session_id, "recipientSessionId": "child-1",
+                "content": [{"type": "text", "text": "Review it"}],
+            }}})
+            write({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "child-1", "update": {
+                "sessionUpdate": "agent_message_chunk", "messageId": "child-1-reply", "content": {"type": "text", "text": "Looks good"},
+            }}})
+            update_raw({"sessionUpdate": "subagent_update", "sessionId": "child-1", "state": {"state": "idle", "stopReason": "end_turn"}})
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
         prompt_count += 1

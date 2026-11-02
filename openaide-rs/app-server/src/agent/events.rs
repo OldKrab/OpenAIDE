@@ -174,6 +174,19 @@ pub struct AgentNativeSubagentStateUpdate {
     pub state: AgentNativeSubagentState,
 }
 
+/// One Subagent fact from a complete `session/load` replay, in replay order.
+#[derive(Debug, Clone)]
+pub enum AgentReplayedSubagentEvent {
+    Spawned(AgentNativeSubagentSpawned),
+    Update {
+        native_session_id: String,
+        event: AgentEvent,
+    },
+    State(AgentNativeSubagentStateUpdate),
+    Details(AgentNativeSubagentDetailsUpdate),
+    Identity(AgentNativeSubagentIdentityUpdate),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentAccountLimitsUpdate {
     pub agent_id: String,
