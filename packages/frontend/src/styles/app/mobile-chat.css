@@ -274,6 +274,11 @@
   .composer .composer-pill[aria-expanded="true"] {
     background: color-mix(in oklch, var(--oa-text) 7%, transparent);
   }
+
+  /* A disabled button swallows the tap's mouse events and still takes focus from the Composer. */
+  .composer-icon-button:disabled {
+    pointer-events: none;
+  }
 }
 
 @media (max-width: 430px) {

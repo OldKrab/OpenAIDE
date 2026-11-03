@@ -45,6 +45,7 @@ import { recentToolPaths } from "./projectFilesModel";
 import { useFileSearchShortcuts } from "./useFileSearchShortcuts";
 import { useTaskProjectFiles } from "./useTaskProjectFiles";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
+import { keepTextEntryFocusOnBlankTap } from "./mobileComposerBehavior";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
@@ -556,7 +557,7 @@ export function TaskView({
         </div>
       </div>
       <div className="task-workbench" data-file-viewer={files.open ? "open" : undefined}>
-        <div className="chat-column task-conversation">
+        <div className="chat-column task-conversation" onMouseDown={keepTextEntryFocusOnBlankTap}>
         {visiblePlan ? (
           <aside aria-label="Current plan" className="task-plan-column">
             <AgentPlanView

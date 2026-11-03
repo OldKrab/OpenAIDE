@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keepTextEntryFocusOnTap } from "./mobileComposerBehavior";
+import { keepTextEntryFocusOnBlankTap, keepTextEntryFocusOnTap } from "./mobileComposerBehavior";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -52,6 +52,44 @@ describe("keepTextEntryFocusOnTap", () => {
     expect(pressCancelled("Chat message")).toBe(false);
   });
 });
+
+describe("keepTextEntryFocusOnBlankTap", () => {
+  it("keeps focus on the Composer when a touch taps blank space around it", async () => {
+    await renderComposerSurroundings({ touch: true });
+    focusComposer();
+
+    expect(pressCancelled("Blank space")).toBe(true);
+  });
+
+  it("leaves a Composer control's focus change alone", async () => {
+    await renderComposerSurroundings({ touch: true });
+    focusComposer();
+
+    expect(pressCancelled("Send message")).toBe(false);
+    expect(pressCancelled("Send icon")).toBe(false);
+  });
+
+  it("leaves focus alone on desktop", async () => {
+    await renderComposerSurroundings({ touch: false });
+    focusComposer();
+
+    expect(pressCancelled("Blank space")).toBe(false);
+  });
+});
+
+async function renderComposerSurroundings({ touch }: { touch: boolean }) {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: touch })));
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root?.render(<>
+    <div aria-label="Message" contentEditable="plaintext-only" suppressContentEditableWarning tabIndex={0} />
+    <div onMouseDown={keepTextEntryFocusOnBlankTap}>
+      <div aria-label="Blank space" />
+      <button aria-label="Send message" type="button"><svg aria-label="Send icon" /></button>
+    </div>
+  </>));
+}
 
 async function renderChat({ touch }: { touch: boolean }) {
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: touch })));
