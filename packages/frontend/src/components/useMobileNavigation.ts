@@ -14,6 +14,11 @@ type MobileNavigationGesture = {
 };
 
 const EDGE_WIDTH = 40;
+/**
+ * Marks a full-screen page that has no navigation button. An edge swipe that starts on it does
+ * not open the drawer: the page's own Back would then close the page behind the open drawer.
+ */
+const NO_NAVIGATION_SWIPE = "[data-no-navigation-swipe]";
 const CAPTURE_DISTANCE = 8;
 const MAX_VERTICAL_DRIFT = 42;
 const SETTLE_PROGRESS = 0.42;
@@ -37,6 +42,7 @@ export function useMobileNavigation(enabled: boolean) {
     if (event.isPrimary === false) return;
     if (event.pointerType === "mouse" && event.buttons !== 1) return;
     if (!open && event.clientX > EDGE_WIDTH) return;
+    if (!open && (event.target as Element | null)?.closest?.(NO_NAVIGATION_SWIPE)) return;
     if (gestureRef.current) setDragProgress(undefined);
     gestureRef.current = {
       captured: false,

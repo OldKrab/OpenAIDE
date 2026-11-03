@@ -805,6 +805,21 @@ describe("AppSurfaces callback wiring", () => {
     expect(latestMockProps<{ planDrawerOpen?: boolean }>(surfaceMocks.task)?.planDrawerOpen).toBe(true);
   });
 
+  it("ignores an edge swipe that starts on a full-screen page without a navigation button", () => {
+    stubMobileWindow();
+    const tree = render(webControllerFor("task"));
+    const shell = tree.root.findByType("main");
+    const page = { closest: (selector: string) => selector === "[data-no-navigation-swipe]" ? {} : null };
+
+    act(() => {
+      shell.props.onPointerDownCapture(pointerEvent({ clientX: 8, clientY: 120, pointerId: 1, target: page }));
+      shell.props.onPointerMoveCapture(pointerEvent({ clientX: 160, clientY: 126, pointerId: 1, target: page }));
+      shell.props.onPointerUpCapture(pointerEvent({ clientX: 160, clientY: 126, pointerId: 1, target: page }));
+    });
+
+    expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
+  });
+
   it("ignores mobile web navigation swipes that do not start at the left edge", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
@@ -1793,6 +1808,7 @@ function pointerEvent({
   pointerId,
   setPointerCapture = vi.fn(),
   releasePointerCapture = vi.fn(),
+  target,
   timeStamp = 0,
 }: {
   clientX: number;
@@ -1800,9 +1816,11 @@ function pointerEvent({
   pointerId: number;
   setPointerCapture?: (pointerId: number) => void;
   releasePointerCapture?: (pointerId: number) => void;
+  target?: { closest(selector: string): unknown };
   timeStamp?: number;
 }) {
   return {
+    target,
     buttons: 1,
     clientX,
     clientY,

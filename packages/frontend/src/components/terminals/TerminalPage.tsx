@@ -132,7 +132,7 @@ export default function TerminalPage(props: TerminalPageProps) {
 
   if (phone) {
     return (
-      <section aria-label="Terminal" className="terminal-page terminal-page-phone" style={visibleHeight ? { height: visibleHeight } : undefined}>
+      <section aria-label="Terminal" className="terminal-page terminal-page-phone" data-no-navigation-swipe style={visibleHeight ? { height: visibleHeight } : undefined}>
         <header className="terminal-phone-bar">
           <button aria-label="Back to conversation" className="terminal-icon" onClick={props.onBack} type="button"><ArrowLeft size={18} /></button>
           <span className="terminal-phone-heading">
@@ -176,7 +176,7 @@ export default function TerminalPage(props: TerminalPageProps) {
   }
 
   return (
-    <section aria-label="Terminal" className="terminal-page">
+    <section aria-label="Terminal" className="terminal-page" data-no-navigation-swipe>
       <header className="terminal-page-header" {...(props.desktopWindow ? desktopDragRegionProps(props.desktopWindow) : {})}>
         <button className="terminal-button terminal-quiet" onClick={props.onBack} type="button"><ArrowLeft size={15} />Conversation</button>
         <div className="terminal-page-title">
