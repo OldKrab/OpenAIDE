@@ -87,6 +87,28 @@ test('archive links cannot escape the staging directory', context => {
   assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
 });
 
+// What a partial Termux upgrade leaves behind: node needs a newer library than the phone has.
+function brokenNode(installation, upgradeRepairs) {
+  const tools = path.join(installation.runtimeRoot, '../../../../tools/bin');
+  const repaired = path.join(tools, 'repaired');
+  fs.writeFileSync(path.join(tools, 'node'), `#!/bin/sh\ntest -e '${repaired}'\n`, { mode: 0o700 });
+  fs.writeFileSync(path.join(tools, 'pkg'), `#!/bin/sh\n${upgradeRepairs ? `test "$1" != upgrade || touch '${repaired}'\n` : ''}exit 0\n`, { mode: 0o700 });
+}
+
+test('a whole Termux upgrade repairs a node that cannot start', context => {
+  const installation = fixture(context);
+  brokenNode(installation, true);
+  assert.equal(installation.run().status, 0);
+  assert.ok(fs.existsSync(path.join(installation.runtimeRoot, 'runtime/bin/openaide-app-server')));
+});
+
+test('a node that stays broken fails the install instead of finishing without it', context => {
+  const installation = fixture(context);
+  brokenNode(installation, false);
+  assert.notEqual(installation.run().status, 0);
+  assert.equal(fs.existsSync(path.join(installation.runtimeRoot, 'runtime')), false);
+});
+
 // Replaces the fixture's agents with what the Claude install drives: npm, Termux's glibc files and a shell.
 // The stand-in binary is a shell script, so the step that rewrites a real binary's loader path is a stand-in too.
 function claudeTools(installation, starts, termuxExec = false) {
@@ -98,7 +120,7 @@ function claudeTools(installation, starts, termuxExec = false) {
   fs.writeFileSync(path.join(prefix, 'glibc/lib/ld-linux-aarch64.so.1'), '', { mode: 0o700 });
   fs.writeFileSync(path.join(prefix, 'glibc/lib/libtermux-exec.so'), '');
   if (termuxExec) { fs.mkdirSync(path.join(prefix, 'lib')); fs.writeFileSync(path.join(prefix, 'lib/libtermux-exec.so'), ''); }
-  fs.writeFileSync(path.join(tools, 'node'), `#!${process.execPath}\nprocess.exit(process.argv[2] === '-' ? 0 : 1);\n`, { mode: 0o700 });
+  fs.writeFileSync(path.join(tools, 'node'), `#!${process.execPath}\nprocess.exit(['-', '--version'].includes(process.argv[2]) ? 0 : 1);\n`, { mode: 0o700 });
   const preload = termuxExec ? `test "$LD_PRELOAD" = '${prefix}/opt/openaide-claude/preload/$LIB/exec.so' || exit 1` : 'test -z "${LD_PRELOAD:-}" || exit 1';
   fs.writeFileSync(path.join(tools, 'npm'), `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path'), args = process.argv.slice(2);

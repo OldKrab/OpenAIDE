@@ -3,6 +3,13 @@ umask 077
 export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export PATH="$PREFIX/bin:$PATH"
 pkg install -y nodejs-lts git curl ripgrep >/dev/null 2>&1
+# Termux supports only whole upgrades: installing one package does not bring the newer library it
+# may need, which leaves a node that cannot start. Nothing here can ask about changed config files.
+node_starts() { node --version >/dev/null 2>&1 </dev/null; }
+if ! node_starts; then
+    pkg upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold >/dev/null 2>&1 </dev/null || true
+    node_starts
+fi
 root="$HOME/.local/share/${OPENAIDE_DATA_NAME:-openaide-android}"
 mkdir -p "$root"
 
