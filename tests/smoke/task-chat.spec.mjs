@@ -644,7 +644,7 @@ test("keeps an Agent link clickable while its message is streaming", async ({ pa
 });
 
 // Focus stands in for the software keyboard: Android closes it when the Composer loses focus.
-test("keeps the Composer focused through touch taps on Chat and Stop and releases it on delivery", async ({ browser }) => {
+test("keeps the Composer focused through touch taps on Chat, blank space, and Stop and releases it on delivery", async ({ browser }) => {
   const context = await browser.newContext({
     hasTouch: true,
     isMobile: true,
@@ -669,6 +669,24 @@ test("keeps the Composer focused through touch taps on Chat and Stop and release
     // Focus would move on the tap's mousedown, so the click orders this check after it.
     await page.evaluate(() => window.__openaideChatTap.then(() => undefined));
     await expect(editor).toBeFocused();
+
+    // The strip under the card, the disabled Send button, and the card's blank edge.
+    const composer = await page.locator(".task-surface .composer").boundingBox();
+    const sendButton = await page.getByLabel("Send message").boundingBox();
+    for (const point of [
+      { x: composer.x + composer.width / 2, y: composer.y + composer.height + 3 },
+      { x: sendButton.x + sendButton.width / 2, y: sendButton.y + sendButton.height / 2 },
+      { x: composer.x + composer.width - 3, y: composer.y + composer.height - 2 },
+    ]) {
+      await page.evaluate(() => {
+        window.__openaideChatTap = new Promise((resolve) => {
+          document.addEventListener("click", resolve, { once: true });
+        });
+      });
+      await page.touchscreen.tap(point.x, point.y);
+      await page.evaluate(() => window.__openaideChatTap.then(() => undefined));
+      await expect(editor).toBeFocused();
+    }
 
     await editor.pressSequentially("Touch follow-up");
     await page.getByLabel("Send message").tap();
