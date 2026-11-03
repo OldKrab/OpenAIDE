@@ -1,5 +1,6 @@
 package io.openaide.android;
 
+import android.annotation.TargetApi;
 import android.os.Build;
 import android.os.SystemClock;
 import android.view.View;
@@ -14,6 +15,7 @@ import android.webkit.WebView;
  * window (before Android 15), so every layout reads the root insets instead. Android 10 and older
  * report no IME state; there the page keeps its focus, as it always did.
  */
+@TargetApi(30)
 final class SoftwareKeyboard {
     static final String HIDDEN_EVENT = "openaide:keyboardHidden";
 
