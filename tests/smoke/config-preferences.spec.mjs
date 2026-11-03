@@ -23,6 +23,16 @@ test.afterEach(async ({}, info) => {
 });
 test.afterAll(async () => { await harness?.close(); });
 
+test("keeps the way back on screen while a Settings page scrolls on a phone", async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 420 });
+  await page.goto(`${harness.baseUrl}/settings?tab=troubleshooting`);
+  const back = page.getByRole("button", { name: "All settings", exact: true });
+  await expect(back).toBeVisible();
+  await page.locator(".settings-page").evaluate((element) => element.scrollTo(0, element.scrollHeight));
+  await expect(back).toBeInViewport({ ratio: 1 });
+  await info.attach("phone-settings-scrolled", { body: await page.screenshot(), contentType: "image/png" });
+});
+
 test("shows live preferences and explicit recovery at wide and narrow widths", async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`${harness.baseUrl}/new-task`);
