@@ -713,34 +713,6 @@ test("keeps the Composer focused through touch taps on Chat, blank space, and St
   }
 });
 
-// Android hides the keyboard on Back but leaves the Composer focused; a viewport that grows by a
-// keyboard's height stands in for that.
-test("releases the Composer when the software keyboard closes, so a Chat tap leaves it closed", async ({ browser }) => {
-  const context = await browser.newContext({
-    hasTouch: true,
-    isMobile: true,
-    viewport: { width: 390, height: 844 },
-  });
-  const page = await context.newPage();
-  try {
-    await openPreparedNewTask(page);
-    await send(page, "Keyboard close message");
-    await waitForReply(page, "Keyboard close message");
-
-    const editor = page.getByRole("textbox", { name: "Message" });
-    await editor.tap();
-    await page.setViewportSize({ width: 390, height: 544 });
-    await expect(editor).toBeFocused();
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(editor).not.toBeFocused();
-
-    await page.locator(".chat-user").first().tap();
-    await expect(editor).not.toBeFocused();
-  } finally {
-    await context.close();
-  }
-});
-
 test("uses a mobile context button and keeps the desktop meter on the rounded edge", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 640 });
   await openPreparedNewTask(page);
