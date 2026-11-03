@@ -278,7 +278,7 @@ async function submitNewTask({
     });
     if (asyncOperations.owns(operation)) {
       asyncOperations.expectNavigation(taskNavigationTarget(taskId));
-      openTaskSurface(taskId, snapshot.task.title, snapshot.task.agent_id);
+      openTaskSurface(taskId, snapshot.task.title, snapshot.task.agent_id, { replace: true });
     }
     if (attempt.cancelled) {
       await request(TASK_CANCEL, { taskId });

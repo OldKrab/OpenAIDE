@@ -183,7 +183,11 @@ export type FrontendShell = {
     retainNewTaskProject?(projectId: string): void;
     openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent): void;
-    openTask(taskId: string, title?: string, agentId?: string): void;
+    /**
+     * `replace` puts the Task in place of the current route where the shell keeps history:
+     * first Send turns the New Task into its Task, so Back must not return to an empty New Task.
+     */
+    openTask(taskId: string, title?: string, agentId?: string, options?: { replace?: boolean }): void;
     /**
      * Routes to a Project's files page (`projectFiles` in the bootstrap), so reload and Back keep
      * it. A shell without it leaves the page as Frontend presentation state over the current surface.

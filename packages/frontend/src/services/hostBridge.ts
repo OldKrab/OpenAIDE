@@ -54,8 +54,8 @@ export function openSettingsSurface(
   frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, tab, settingsIntent);
 }
 
-export function openTaskSurface(taskId: string, title?: string, agentId?: string) {
-  frontendShell().navigation.openTask(taskId, title, agentId);
+export function openTaskSurface(taskId: string, title?: string, agentId?: string, options?: { replace?: boolean }) {
+  frontendShell().navigation.openTask(taskId, title, agentId, options);
 }
 
 export function updateTaskSurfaceTitle(taskId: string, title: string) {

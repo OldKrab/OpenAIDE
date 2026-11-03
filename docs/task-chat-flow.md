@@ -154,6 +154,8 @@ Initialization never acquires a Prepared Task or launches an Agent. The Prepared
 
 Frontend renders its cached leased Prepared Task immediately. Clicking New Task, returning through browser history, or switching back from another Task performs no product request while the cache and event subscription remain continuous.
 
+In shells with browser history, the Task created by first Send takes the place of its New Task entry, and moving from one New Task route to another, the start page included, replaces the entry rather than adding one. Back from a new Task therefore returns to where the New Task was opened from, never to the spent New Task.
+
 ### Acquiring a Prepared Task
 
 When its live New Task composer needs a Prepared Task, Frontend renders the preparation state and calls typed `task/acquire` with the selected Project, Agent, and Task Workspace identity. App Server derives the canonical workspace and pool key; Frontend never supplies a canonical pool key. The protocol gateway supplies initialized client identity from the trusted connection context.
