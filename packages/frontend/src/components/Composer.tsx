@@ -34,6 +34,7 @@ import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
 import { keepTextEntryFocusOnTap, releaseTextEntryWhenKeyboardHides, usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
+import { useBackNavigation } from "./useBackNavigation";
 import {
   FileMentionPicker,
   fileMentionTokenAtCursor,
@@ -170,6 +171,11 @@ export function Composer({
       )
     : undefined;
   const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
+  // The platform Back action dismisses an open completion list, as Escape does.
+  useBackNavigation(Boolean(slashPicker || filePicker), () => {
+    setSlashPicker(undefined);
+    setFileMentionToken(undefined);
+  });
   const completionListboxId = filePicker
     ? `${completionId}-files`
     : slashPicker ? `${completionId}-commands` : undefined;
