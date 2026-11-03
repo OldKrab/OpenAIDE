@@ -128,6 +128,10 @@ export function SettingsView({
   const [query, setQuery] = useState("");
   // A phone starts on the index unless the route already names the section to show.
   const [indexOpen, setIndexOpen] = useState(() => isNarrowSettingsViewport() && !routeNamesSection());
+  // Settings opened straight at a section, by a link from elsewhere, returns there on Back; once
+  // the index has been shown, a phone steps back to it first.
+  const indexShown = useRef(indexOpen);
+  if (indexOpen) indexShown.current = true;
   const searchRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLElement>(null);
 
@@ -218,7 +222,7 @@ export function SettingsView({
   useBackNavigation(Boolean(onBackToApp), () => {
     const section = sections.find((candidate) => candidate.id === current?.id);
     if (section?.closeDetail && !indexOpen) section.closeDetail();
-    else if (isNarrowSettingsViewport() && !indexOpen) setIndexOpen(true);
+    else if (isNarrowSettingsViewport() && !indexOpen && indexShown.current) setIndexOpen(true);
     else onBackToApp?.();
   }, 20);
 
