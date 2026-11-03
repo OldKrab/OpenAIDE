@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import { MessageSquare, Pencil, Quote, X } from "lucide-react";
 import { highlightFileViewerLines } from "./fileViewerHighlight";
 import type { ProjectDiffLine } from "@openaide/app-server-client";
+import { useBackNavigation } from "./useBackNavigation";
 import "../styles/app/file-code-reader.css";
 
 export type CodeLine = ProjectDiffLine & { heading?: string };
@@ -51,6 +52,9 @@ export function FileCodeReader({
   const last = lines.length - 1;
   const start = range ? Math.min(range.anchor, range.end, last) : -1;
   const end = range ? Math.min(Math.max(range.anchor, range.end), last) : -1;
+  // An open comment box takes the platform Back action, as it takes Escape, before the reader
+  // that holds it (110) closes; pickers layered above (120 and up) still go first.
+  useBackNavigation(Boolean(range), close, 115);
   const tokens = useMemo(() => {
     const side = (skip: string) =>
       highlightFileViewerLines(
