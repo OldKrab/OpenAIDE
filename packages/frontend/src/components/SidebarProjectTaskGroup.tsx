@@ -3,6 +3,7 @@ import { Check, Folder, FolderOpen, FolderTree, GitBranch, Monitor, MoreHorizont
 import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
+import { useBackNavigation } from "./useBackNavigation";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import {
   liveFirstVisibleRows,
@@ -120,6 +121,12 @@ export function SidebarProjectTaskGroup({
   const [renameDraft, setRenameDraft] = useState(group.label);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string>();
+  const cancelRename = () => {
+    setRenaming(false);
+    setRenameError(undefined);
+  };
+  // The platform Back action cancels an open rename, as its cancel button does, before the drawer closes.
+  useBackNavigation(renaming && !renameSaving, cancelRename);
   const headerRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const taskRows = projectGroupRows(group.tasks, []);
@@ -208,7 +215,7 @@ export function SidebarProjectTaskGroup({
             setRenameError(undefined);
           }} value={renameDraft} />
           <button aria-label="Save Project name" disabled={renameSaving || !renameDraft.trim()} type="submit"><Check size={13} /></button>
-          <button aria-label="Cancel Project rename" disabled={renameSaving} onClick={() => { setRenaming(false); setRenameError(undefined); }} type="button"><X size={13} /></button>
+          <button aria-label="Cancel Project rename" disabled={renameSaving} onClick={cancelRename} type="button"><X size={13} /></button>
           {renameError ? <small role="alert">{renameError}</small> : null}
         </form> : <button
           aria-expanded={!collapsed}
