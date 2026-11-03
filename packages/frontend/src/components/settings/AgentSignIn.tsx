@@ -4,6 +4,7 @@ import type { AgentSettingsRecord, AgentSignInFlowRecord } from "@openaide/app-s
 import { authMethodUsesValues, type AgentAuthMethod } from "./agentSettingsModel";
 import { authTerminalForAgent, subscribeAuthTerminals } from "../../services/authTerminals";
 import { SettingsButton, SettingsField, SettingsRowView } from "./settingsKit";
+import { useBackNavigation } from "../useBackNavigation";
 const AgentAuthTerminal = lazy(() => import("./AgentAuthTerminal").then((module) => ({ default: module.AgentAuthTerminal })));
 
 type AuthenticateAgent = (agentId: string, methodId: string, values?: Record<string, string>) => void;
@@ -31,6 +32,12 @@ export function AgentSignIn({
   const [selectedMethodId, setSelectedMethodId] = useState<string>();
   const [logoutPending, setLogoutPending] = useState(false);
   const selectedMethod = agent.auth_methods.find((method) => method.id === selectedMethodId);
+  // Before a flow starts, the platform Back action steps back as the step's Back button does;
+  // from the summary, and while a flow runs, it leaves the page as before.
+  useBackNavigation(!flow && (Boolean(selectedMethod) || panel === "methods"), () => {
+    if (selectedMethod) setSelectedMethodId(undefined);
+    else setPanel("summary");
+  });
   const authenticate: AuthenticateAgent = (agentId, methodId, values) => {
     setPanel("summary");
     setSelectedMethodId(undefined);
