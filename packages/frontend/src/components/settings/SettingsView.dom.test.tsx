@@ -217,6 +217,51 @@ it("offers phone setup checks only while the phone does its own work", async () 
   expect(field("Search settings")).toBeTruthy();
 });
 
+it("keeps Task notifications reachable on a phone that works on a paired computer", async () => {
+  const execute = vi.fn(async () => undefined);
+  const snapshot = {
+    remote: true, paired: true, termux: false, permission: false, computer: "Workstation", computers: [],
+    background: false, appBattery: true, termuxBattery: false, notifications: true,
+  };
+  vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({
+    connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute },
+  } as unknown as frontendShell.FrontendShell);
+  await mountSettings({ state: { activeTab: "general", loading: false } });
+
+  expect(pageText()).toContain("Stay notified");
+  expect(pageText()).not.toContain("Continue while locked");
+  await click("Task notifications");
+  expect(execute).toHaveBeenCalledWith({ action: "background", enabled: true });
+});
+
+it("asks only for this app's battery access while another computer does the work", async () => {
+  const snapshot = {
+    remote: true, paired: true, termux: false, permission: false, computer: "Workstation", computers: [],
+    background: true, appBattery: true, termuxBattery: false, notifications: true,
+  };
+  vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({
+    connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute: vi.fn(async () => undefined) },
+  } as unknown as frontendShell.FrontendShell);
+  await mountSettings({ state: { activeTab: "general", loading: false } });
+
+  expect(pageText()).not.toContain("Allow background activity");
+});
+
+it("names the setting for its work while the phone holds an SSH Computer", async () => {
+  const snapshot = {
+    remote: true, termux: false, permission: false, computer: "devbox", computers: [],
+    sshComputers: [{ id: "c".repeat(32), name: "devbox", destination: "me@devbox", current: true }],
+    background: true, appBattery: true, termuxBattery: false, notifications: true,
+  };
+  vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({
+    connectionSettings: { snapshot: () => snapshot, subscribe: () => () => undefined, execute: vi.fn(async () => undefined) },
+  } as unknown as frontendShell.FrontendShell);
+  await mountSettings({ state: { activeTab: "general", loading: false } });
+
+  expect(pageText()).toContain("Continue while locked");
+  expect(pageText()).not.toContain("Stay notified");
+});
+
 it("names each log by whose it is on a phone that works on another computer", async () => {
   const troubleshootingLabels = () => [...document.querySelectorAll('section[aria-label="Troubleshooting"] li strong')].map((label) => label.textContent);
   const shellFor = (snapshot: object) => vi.spyOn(frontendShell, "currentFrontendShell").mockReturnValue({

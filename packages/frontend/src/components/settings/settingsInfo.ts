@@ -19,6 +19,13 @@ export const settingsInfo = {
       "Unrestricted battery use for OpenAIDE and Termux keeps work running. A notification shows while it runs and can stop it.",
     ],
   },
+  notifications: {
+    title: "Stay notified",
+    body: [
+      "While OpenAIDE is hidden, it keeps one quiet connection to your computer, which answers when a task finishes or needs you. The phone is not kept awake.",
+      "Notifications stop if OpenAIDE is force-stopped. Some phones also need background activity allowed in their own battery settings.",
+    ],
+  },
   agents: {
     title: "Agents",
     body: [

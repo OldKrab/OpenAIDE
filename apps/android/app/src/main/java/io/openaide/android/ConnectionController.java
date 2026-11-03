@@ -162,6 +162,7 @@ final class ConnectionController extends ContextWrapper {
             case "background":
                 boolean enabled = message.optBoolean("enabled", true);
                 getSharedPreferences("connection", MODE_PRIVATE).edit().putBoolean("background", enabled).apply();
+                diagnostics.record("background_work", enabled ? "turned_on" : "turned_off", 0, 0);
                 if (!enabled) stopService(new Intent(this, BackgroundService.class));
                 else startForegroundService(new Intent(this, BackgroundService.class).putExtra("visible", true));
                 emit();
