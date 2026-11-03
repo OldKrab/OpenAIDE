@@ -38,6 +38,8 @@ type AnchoredPopupProps = {
   children: ReactNode;
   className?: string;
   label: string;
+  /** Set while the surface shows an inner view: the platform Back action returns from it instead of closing. */
+  onBack?: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   placement?: Placement;
@@ -73,7 +75,7 @@ export function anchoredPopupMaxHeight({
 export function PopupMenu({
   ...props
 }: AnchoredPopupProps) {
-  useBackNavigation(props.open, () => props.onOpenChange(false));
+  useBackNavigation(props.open, () => (props.onBack ? props.onBack() : props.onOpenChange(false)));
   const browser = typeof document !== "undefined"
     && Boolean(document.body)
     && typeof Element !== "undefined";
@@ -84,7 +86,7 @@ export function PopupMenu({
 
 /** Anchored composite surface for forms or controls that cannot use menu semantics. */
 export function PopupPanel({ ...props }: AnchoredPopupProps) {
-  useBackNavigation(props.open, () => props.onOpenChange(false));
+  useBackNavigation(props.open, () => (props.onBack ? props.onBack() : props.onOpenChange(false)));
   const browser = typeof document !== "undefined"
     && Boolean(document.body)
     && typeof Element !== "undefined";

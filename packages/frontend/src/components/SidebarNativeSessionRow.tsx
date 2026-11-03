@@ -201,6 +201,7 @@ export function SidebarNativeSessionRow({
             <PopupMenu
               className="task-row-menu"
               label={`Task actions for ${title}`}
+              onBack={archiveOlder.state.kind !== "idle" ? archiveOlder.reset : detailsOpen ? () => setDetailsOpen(false) : undefined}
               onOpenChange={changeMenuOpen}
               open={menuOpen}
               trigger={(triggerProps) => (
