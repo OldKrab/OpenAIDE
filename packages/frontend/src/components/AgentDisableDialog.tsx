@@ -1,5 +1,6 @@
 import { PowerOff, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useBackNavigation } from "./useBackNavigation";
 
 /**
  * Confirms disabling an Agent that has running Tasks. Disabling stops the Agent
@@ -21,6 +22,8 @@ export function AgentDisableDialog({
   onConfirm: () => void;
   runningTaskCount: number;
 }) {
+  // Mounted only while open. Back cancels it before the surface that offered it closes.
+  useBackNavigation(true, onCancel);
   const dialog = (
     <div className="project-remove-backdrop">
       <section
