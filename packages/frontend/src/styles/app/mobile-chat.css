@@ -98,7 +98,7 @@
   }
 
   body[data-shell="web"] .chat-column {
-    padding-bottom: 4px;
+    padding-bottom: 8px;
   }
 
   body[data-shell="web"] .chat-column > .composer-context-host {
@@ -110,11 +110,11 @@
     flex-shrink: 0;
   }
 
+  /* The Web Shell docks this Composer instead; see mobile-composer-dock.css. */
   .task-surface:not(.new-task-surface) .composer {
-    min-height: 68px;
+    min-height: 72px;
     border-radius: 14px;
-    /* The footer's 36px controls already leave space around their icons. */
-    padding: 6px 10px 0;
+    padding: 6px 10px;
     gap: 2px;
   }
 

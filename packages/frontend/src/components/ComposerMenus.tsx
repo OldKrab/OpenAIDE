@@ -251,6 +251,7 @@ export function ComposerControls({
           trigger={(popupTrigger) => (
             <IconButton
               ariaLabel="Add context"
+              className="composer-add-button"
               disabled={disabled || (!fileBrowser?.attachFiles && (!imageAttachmentsAllowed || !fileBrowser?.attachImage))}
               icon={<Plus size={14} />}
               popupTrigger={popupTrigger}

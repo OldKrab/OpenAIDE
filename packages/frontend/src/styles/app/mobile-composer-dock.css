@@ -1,0 +1,161 @@
+/*
+ * Phone Task Composer, docked. On a phone the Task Composer is a sheet resting on the bottom edge
+ * (the software keyboard when it is open), so no gap below it needs tuning against the controls.
+ * The two end controls, Add context and the primary action (Send or Stop), share one shape, size,
+ * and 12px inset from the sheet's edges. The values between them (Options, context usage) stay inline
+ * text on the same row. Only the Web Shell's phone layout docks: other shells keep the floating card.
+ */
+@media (max-width: 760px) {
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column {
+    padding-bottom: 0;
+    gap: 18px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column > .composer-context-host {
+    width: 100%;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer {
+    min-height: 0;
+    max-height: 55dvh;
+    gap: 6px;
+    border: 0;
+    border-top: 1px solid color-mix(in oklch, var(--oa-border) 46%, transparent);
+    border-radius: 22px 22px 0 0;
+    background: var(--oa-panel);
+    padding: 14px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Light has no tonal step to lift the sheet off Chat, so a soft upward shadow replaces the hairline. */
+  body[data-shell="web"][data-theme="light"] .task-surface:not(.new-task-surface) .composer {
+    border-top-color: transparent;
+    box-shadow: 0 -6px 20px -10px color-mix(in oklch, var(--oa-text) 22%, transparent);
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
+    min-height: 26px;
+    padding: 0 6px;
+    font-size: 16px;
+    line-height: 1.55;
+    caret-color: var(--oa-focus);
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor ::selection {
+    background: color-mix(in oklch, var(--oa-focus) 30%, transparent);
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-footer {
+    min-height: 40px;
+    gap: 4px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-controls {
+    gap: 2px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions {
+    gap: 6px;
+  }
+
+  /* End controls: one shape, one size, one inset. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-controls .composer-icon-button.composer-add-button,
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button:is(.composer-send-button, .composer-stop-button) {
+    position: relative;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    border-radius: 999px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    transition: background-color 160ms ease-out, color 160ms ease-out, transform 120ms ease-out;
+  }
+
+  /* 48px touch targets around the 40px shapes; the sheet's 12px inset leaves room for them. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:is(.composer-add-button, .composer-send-button, .composer-stop-button)::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:is(.composer-add-button, .composer-send-button, .composer-stop-button) svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-controls .composer-icon-button.composer-add-button:not(:disabled) {
+    background: var(--oa-raised);
+    color: var(--oa-text);
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-send-button:not(:disabled) {
+    background: var(--vscode-button-background, var(--oa-focus));
+    color: var(--vscode-button-foreground, oklch(0.98 0.006 250));
+  }
+
+  /* Without a draft Send keeps its shape, so the row never changes outline while typing. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-send-button:disabled {
+    opacity: 1;
+    background: var(--oa-raised);
+    color: color-mix(in oklch, var(--oa-muted) 70%, transparent);
+  }
+
+  /* sRGB keeps the tint red; an oklch mix drifts to lavender on the light panel. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-stop-button:not(:disabled) {
+    background: color-mix(in srgb, var(--oa-danger) 14%, var(--oa-panel));
+    color: color-mix(in srgb, var(--oa-danger) 88%, var(--oa-text));
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:active:not(:disabled) {
+    transform: scale(0.94);
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:focus-visible {
+    outline: 2px solid var(--oa-focus);
+    outline-offset: 2px;
+  }
+
+  /* Values between the ends read as inline text, not buttons. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-pill {
+    min-height: 40px;
+    padding-inline: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    color: color-mix(in oklch, var(--oa-text) 78%, var(--oa-muted));
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .context-usage-compact {
+    min-height: 40px;
+    padding-inline: 8px 6px;
+    font-size: 13px;
+  }
+
+  /*
+   * A draft during a running turn adds Queue and Send later, which leave no room for the meter's
+   * percentage on a phone. The ring still shows the level, and the button's label carries the value.
+   */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) .context-usage-compact {
+    min-width: 40px;
+    padding-inline: 0;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) .context-usage-compact > span {
+    display: none;
+  }
+
+  /* Limits sit on the sheet's top edge, clear of its rounded corner. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .account-limits-edge {
+    right: 22px;
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button {
+    transition: none;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:active:not(:disabled) {
+    transform: none;
+  }
+}
