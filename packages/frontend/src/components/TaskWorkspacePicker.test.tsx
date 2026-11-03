@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeRepositorySnapshot, WorktreeSummary } from "@openaide/app-server-client";
@@ -152,6 +154,20 @@ describe("TaskWorkspacePicker", () => {
       label: "Primary checkout",
       path: "/workspace/OpenAIDE-primary",
     });
+  });
+
+  it("returns from the new worktree form to the list on the platform Back action", () => {
+    const tree = render(testIntents());
+    act(() => tree.root.findAllByType("button").find((button) => hasText(button, "New worktree"))?.props.onClick());
+    expect(tree.root.findAllByProps({ "aria-label": "Back to task workspace" })).toHaveLength(1);
+
+    const back = new Event("openaide:back", { cancelable: true });
+    act(() => { window.dispatchEvent(back); });
+
+    expect(back.defaultPrevented).toBe(true);
+    expect(tree.root.findAllByProps({ "aria-label": "Back to task workspace" })).toHaveLength(0);
+    expect(tree.root.findAllByType("button").some((button) => hasText(button, "New worktree"))).toBe(true);
+    act(() => tree.unmount());
   });
 
   it("derives a branch from the name until the branch is edited manually", () => {

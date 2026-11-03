@@ -28,6 +28,7 @@ import type { NewTaskViewIntents } from "./NewTaskView";
 import type { ProjectOption } from "../state/composerOptions";
 import { relativeTime } from "./taskSurfaceHelpers";
 import { AgentIcon } from "./AgentIcon";
+import { useBackNavigation } from "./useBackNavigation";
 
 export function TaskWorkspacePicker({
   intents,
@@ -178,6 +179,8 @@ function CreateWorktreePanel({ intents, onBack, onCreated, project, recreate, re
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<WorktreeOperationSnapshot>();
   const [error, setError] = useState<string>();
+  // Mounted only as the picker's inner view: Back returns to the list, as the header button does.
+  useBackNavigation(true, onBack);
   const bases = repository?.bases ?? [];
   const branchCollision = createBranch && bases.some((item) => item.kind === "localBranch" && item.name === branch.trim());
   const showBranchCollision = branchCollision && !busy;
