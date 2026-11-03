@@ -1400,6 +1400,18 @@ test("applies Agent options and inserts prepared slash commands", async ({ page 
   await expect(editor).toHaveText("/permission ");
 });
 
+test("closes the slash-command list on the platform Back action without leaving the Task", async ({ page }) => {
+  await openPreparedNewTask(page);
+  const editor = page.getByRole("textbox", { name: "Message" });
+  await editor.fill("/");
+  const commands = page.getByRole("listbox", { name: "Slash commands" });
+  await expect(commands).toBeVisible();
+  const handled = await page.evaluate(() => !window.dispatchEvent(new Event("openaide:back", { cancelable: true })));
+  expect(handled).toBe(true);
+  await expect(commands).toHaveCount(0);
+  await expect(editor).toHaveText("/");
+});
+
 test("keeps text typed at a slash-command boundary outside the highlighted token", async ({ page }) => {
   await openPreparedNewTask(page);
   const editor = page.getByRole("textbox", { name: "Message" });
