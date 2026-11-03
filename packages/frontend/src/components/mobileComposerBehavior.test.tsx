@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keepTextEntryFocusOnBlankTap, keepTextEntryFocusOnTap } from "./mobileComposerBehavior";
+import { KEYBOARD_HIDDEN_EVENT, keepTextEntryFocusOnBlankTap, keepTextEntryFocusOnTap, releaseTextEntryWhenKeyboardHides } from "./mobileComposerBehavior";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,6 +74,30 @@ describe("keepTextEntryFocusOnBlankTap", () => {
     focusComposer();
 
     expect(pressCancelled("Blank space")).toBe(false);
+  });
+});
+
+describe("releaseTextEntryWhenKeyboardHides", () => {
+  it("releases a focused text field when the app shell reports the keyboard hidden", () => {
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    field.focus();
+    const release = releaseTextEntryWhenKeyboardHides(window);
+    window.dispatchEvent(new Event("resize"));
+    expect(document.activeElement).toBe(field);
+    window.dispatchEvent(new Event(KEYBOARD_HIDDEN_EVENT));
+    expect(document.activeElement).not.toBe(field);
+    release();
+  });
+
+  it("leaves a focused control alone", () => {
+    const button = document.createElement("button");
+    document.body.append(button);
+    button.focus();
+    const release = releaseTextEntryWhenKeyboardHides(window);
+    window.dispatchEvent(new Event(KEYBOARD_HIDDEN_EVENT));
+    expect(document.activeElement).toBe(button);
+    release();
   });
 });
 

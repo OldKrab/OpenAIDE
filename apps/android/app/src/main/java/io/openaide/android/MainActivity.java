@@ -514,6 +514,7 @@ public final class MainActivity extends Activity {
             return insets;
         });
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
+        SoftwareKeyboard.watch(frame, browser);
         setContentView(frame);
         // The gateway serves only this WebView: the cookie is its proof on every request.
         android.webkit.CookieManager.getInstance().setCookie(profile.endpoint,
