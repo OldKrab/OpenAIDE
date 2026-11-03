@@ -658,6 +658,7 @@ export function ProjectFilesPanel({
       aria-label="Project files"
       className="task-panel project-files-panel"
       inert={collapsed ? true : undefined}
+      data-no-navigation-swipe={collapsed ? undefined : true}
       data-phone-page={phonePage}
       data-view={shown}
     >

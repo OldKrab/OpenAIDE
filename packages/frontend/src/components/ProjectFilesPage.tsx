@@ -121,14 +121,14 @@ export function ProjectFilesPage({
 
   if (!workspace)
     return (
-      <div className="project-files-page">
+      <div className="project-files-page" data-no-navigation-swipe>
         <p className="project-files-note" role="status">
           This Project has no folder to browse.
         </p>
       </div>
     );
   return (
-    <div className="project-files-page">
+    <div className="project-files-page" data-no-navigation-swipe>
       <ProjectFilesPanel
         changes={changes}
         connection={connection}
