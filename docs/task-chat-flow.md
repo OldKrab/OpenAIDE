@@ -287,7 +287,7 @@ In the prompt fallback, the primary prompt and every steering prompt accepted du
 
 ### Software keyboard
 
-On touch surfaces, tapping Chat, the blank space around the Composer's controls, a disabled Composer control, or the Composer's Stop action keeps the Composer focused and the software keyboard open, and the tap still activates whatever it landed on. Scrolling Chat also leaves the keyboard open. A tap on a Question field moves focus to that field. Send and Add to queue freeze the Composer while the message is accepted, which closes the keyboard and gives the reply the screen. Composer menus and leaving the Task close it too, as do the platform's Back gesture and the keyboard's own hide key.
+On touch surfaces, tapping Chat, the blank space around the Composer's controls, a disabled Composer control, or the Composer's Stop action keeps the Composer focused and the software keyboard open, and the tap still activates whatever it landed on. Scrolling Chat also leaves the keyboard open. A tap on a Question field moves focus to that field. Send and Add to queue freeze the Composer while the message is accepted, which closes the keyboard and gives the reply the screen. Composer menus and leaving the Task close it too, as do the platform's Back gesture and the keyboard's own hide key. Closing the keyboard also releases the Composer's focus, so a later tap on Chat leaves the keyboard closed.
 
 ### Selected-text Quotes
 

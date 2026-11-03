@@ -32,7 +32,7 @@ import { attachEveryImage } from "./imageAttachmentBatch";
 import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
-import { keepTextEntryFocusOnTap, usesMobileComposerBehavior } from "./mobileComposerBehavior";
+import { keepTextEntryFocusOnTap, releaseTextEntryWhenKeyboardCloses, usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 import {
   FileMentionPicker,
@@ -194,6 +194,7 @@ export function Composer({
   });
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
+  useEffect(() => releaseTextEntryWhenKeyboardCloses(), []);
 
   useEffect(() => {
     if (!configMutationId) {
