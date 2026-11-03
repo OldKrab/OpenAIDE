@@ -717,6 +717,11 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   const mobileFooter = await page.locator(".composer-footer").boundingBox();
   const sendButton = await page.locator(".composer-send-button").boundingBox();
   expect(mobileFooter.height).toBe(sendButton.height);
+  // The controls' own hit areas separate them from the Composer's edge, so only its border sits
+  // below them, and the Composer stays close to the bottom of the viewport.
+  const mobileComposerBottom = mobileComposer.y + mobileComposer.height;
+  expect(mobileComposerBottom - (mobileFooter.y + mobileFooter.height)).toBeLessThanOrEqual(1);
+  expect(640 - mobileComposerBottom).toBeLessThanOrEqual(4);
   const meterTouchTarget = await mobileMeter.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const middle = bounds.y + bounds.height / 2;
