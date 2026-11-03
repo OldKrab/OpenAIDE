@@ -3,13 +3,16 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keepTextEntryFocusOnBlankTap, keepTextEntryFocusOnTap } from "./mobileComposerBehavior";
+import { keepTextEntryFocusOnBlankTap, keepTextEntryFocusOnTap, releaseTextEntryWhenKeyboardCloses } from "./mobileComposerBehavior";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | undefined;
+let releaseCleanup: (() => void) | undefined;
 
 afterEach(async () => {
+  releaseCleanup?.();
+  releaseCleanup = undefined;
   if (root) await act(async () => root?.unmount());
   root = undefined;
   document.body.replaceChildren();
@@ -76,6 +79,46 @@ describe("keepTextEntryFocusOnBlankTap", () => {
     expect(pressCancelled("Blank space")).toBe(false);
   });
 });
+
+describe("releaseTextEntryWhenKeyboardCloses", () => {
+  it("releases a focused text field once the viewport grows by a keyboard's height", () => {
+    const { field, resize } = keyboardViewport(true);
+    resize(500);
+    resize(560);
+    expect(document.activeElement).toBe(field);
+    resize(800);
+    expect(document.activeElement).not.toBe(field);
+  });
+
+  it("leaves focus alone when a browser toolbar collapses", () => {
+    const { field, resize } = keyboardViewport(true);
+    resize(856);
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("leaves focus alone on desktop", () => {
+    const { field, resize } = keyboardViewport(false);
+    resize(500);
+    resize(800);
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+function keyboardViewport(touch: boolean) {
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: touch })));
+  const field = document.createElement("textarea");
+  document.body.append(field);
+  field.focus();
+  const viewport = Object.assign(new EventTarget(), { height: 800 });
+  releaseCleanup = releaseTextEntryWhenKeyboardCloses({ document, visualViewport: viewport } as unknown as Window);
+  return {
+    field,
+    resize(height: number) {
+      viewport.height = height;
+      viewport.dispatchEvent(new Event("resize"));
+    },
+  };
+}
 
 async function renderComposerSurroundings({ touch }: { touch: boolean }) {
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: touch })));
