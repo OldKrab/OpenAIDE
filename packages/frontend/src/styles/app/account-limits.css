@@ -17,12 +17,15 @@
 }
 
 /*
- * Touch layouts have no hover, so the target grows to 44px tall. It is centred on the border and
- * reaches as far over the Chat gutter as over the first draft line.
+ * Touch layouts have no hover, so the target grows to 44px tall. It grows upward over the Chat
+ * gutter only: the meters stay centred on the border at its bottom, and it ends 4.5px below the
+ * border, above the Composer's top padding, so a tap on the draft's first line reaches the draft.
  */
 .account-limits-edge[data-compact="true"] {
   height: 44px;
-  top: -21.5px;
+  top: -39.5px;
+  align-items: flex-end;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .account-limits-edge:focus-visible {
