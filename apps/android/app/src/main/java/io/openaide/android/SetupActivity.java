@@ -99,6 +99,8 @@ public final class SetupActivity extends Activity {
         controller.resume();
     }
     @Override protected void onPause() { RemoteNode.INSTANCE.hidden(); page.onPause(); super.onPause(); }
+    // TODO: move to OnBackPressedDispatcher or OnBackInvokedCallback before targeting SDK 36, where
+    // predictive back stops calling onBackPressed and Back would close setup mid-step.
     @Override public void onBackPressed() { page.evaluateJavascript("window.back()", null); }
     @Override protected void onDestroy() {
         loaded = false;

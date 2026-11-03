@@ -90,6 +90,7 @@ input[type=checkbox]:checked { background: var(--text); }
 input[type=checkbox]:checked::after { transform: translateX(20px); }
 
 #notice { display: flex; align-items: center; justify-content: center; padding: 14px 16px; margin-top: 16px; border-radius: 18px; background: var(--surface); color: var(--text); font-size: 15px; overflow-wrap: anywhere; }
+#blocked-back { margin: 8px 16px 0; color: var(--muted); font-size: 14px; text-align: center; }
 .spinner { width: 16px; height: 16px; border: 1.5px solid var(--line); border-top-color: var(--text); border-radius: 50%; animation: spin .9s linear infinite; margin-right: 10px; flex: 0 0 auto; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .sheet { position: fixed; inset: 0; display: grid; align-items: end; background: rgb(0 0 0 / .4); animation: fade 180ms ease-out; z-index: 10; }

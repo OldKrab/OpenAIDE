@@ -102,9 +102,19 @@ function go(next) {
   window.scrollTo(0, 0);
   enter(next);
 }
+// A step in progress cannot be left, so a Back press says why it did nothing, under the notice.
+// The next render removes the line.
+function explainBlockedBack() {
+  if (document.getElementById('blocked-back')) return;
+  const line = document.createElement('p');
+  line.id = 'blocked-back';
+  line.setAttribute('role', 'status');
+  line.textContent = state.switching ? 'Tap Cancel to stop connecting.' : 'Back works again when this finishes.';
+  notice.after(line);
+}
 window.back = () => {
   if (closeSheet()) return;
-  if (state.busy) return;
+  if (state.busy) { explainBlockedBack(); return; }
   rememberCode();
   leave(screen);
   if (!history.length) { send('close'); return; }
@@ -227,6 +237,7 @@ function render() {
   }
   document.getElementById('about')?.addEventListener('click', openSheet);
   page.setAttribute('aria-busy', String(Boolean(state.busy)));
+  document.getElementById('blocked-back')?.remove();
   notice.hidden = !state.notice;
   notice.textContent = state.notice || '';
   if (state.busy) { const spinner = document.createElement('span'); spinner.className = 'spinner'; spinner.setAttribute('aria-hidden', 'true'); notice.prepend(spinner); }
