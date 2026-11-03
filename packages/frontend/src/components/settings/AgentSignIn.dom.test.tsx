@@ -1,21 +1,30 @@
 // @vitest-environment jsdom
 
 import { act, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { AgentSignIn } from "./AgentSignIn";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-afterEach(() => {
+// Unmounted after each test so one test's Back registrations cannot answer another's.
+const roots: Root[] = [];
+const mount = (container: HTMLElement) => {
+  const root = createRoot(container);
+  roots.push(root);
+  return root;
+};
+
+afterEach(async () => {
+  await act(async () => roots.splice(0).forEach((root) => root.unmount()));
   document.body.replaceChildren();
 });
 
 it("keeps the API key form usable after cancelling another sign-in method", async () => {
   const container = document.createElement("div");
   document.body.append(container);
-  const root = createRoot(container);
+  const root = mount(container);
   await act(async () => root.render(<AuthHarness />));
 
   await act(async () => button("Cancel sign-in").click());
@@ -37,7 +46,7 @@ it("keeps the API key form usable after cancelling another sign-in method", asyn
 it("submits a complete API key form when the user presses Enter", async () => {
   const container = document.createElement("div");
   document.body.append(container);
-  const root = createRoot(container);
+  const root = mount(container);
   const onAuthenticate = vi.fn();
   await act(async () => root.render(
     <AgentSignIn
@@ -61,7 +70,7 @@ it("submits a complete API key form when the user presses Enter", async () => {
 it("offers sign out only for a connected Agent that advertises logout", async () => {
   const container = document.createElement("div");
   document.body.append(container);
-  const root = createRoot(container);
+  const root = mount(container);
   const onLogout = vi.fn(async () => true);
   await act(async () => root.render(
     <AgentSignIn
@@ -79,7 +88,7 @@ it("offers sign out only for a connected Agent that advertises logout", async ()
 it("disables sign out while the Agent has a running Task", async () => {
   const container = document.createElement("div");
   document.body.append(container);
-  const root = createRoot(container);
+  const root = mount(container);
   await act(async () => root.render(
     <AgentSignIn
       agent={{
@@ -140,3 +149,26 @@ const agentRecord: AgentSettingsRecord = {
     url: "https://example.com/device",
   },
 };
+
+it("steps back through the method steps on the platform Back action, then leaves it to the page", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = mount(container);
+  const back = () => {
+    const event = new Event("openaide:back", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  await act(async () => root.render(
+    <AgentSignIn agent={{ ...agentRecord, status: "connected", sign_in: undefined }} onAuthenticate={() => undefined} />,
+  ));
+  await act(async () => button("Manage").click());
+  await act(async () => button("API key").click());
+  expect(container.textContent).toContain("Enter your API key");
+
+  await act(async () => expect(back()).toBe(true));
+  expect(container.textContent).toContain("Choose a method");
+  await act(async () => expect(back()).toBe(true));
+  expect(container.textContent).toContain("Signed in");
+  expect(back()).toBe(false);
+});
