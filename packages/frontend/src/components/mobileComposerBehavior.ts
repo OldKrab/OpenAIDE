@@ -43,7 +43,7 @@ export const KEYBOARD_HIDDEN_EVENT = "openaide:keyboardHidden";
  * some phones. Returns the cleanup.
  */
 export function releaseTextEntryWhenKeyboardHides(host: Window | undefined = globalThis.window) {
-  if (!host) return () => {};
+  if (typeof host?.addEventListener !== "function") return () => {};
   const hidden = () => {
     const active = host.document.activeElement as HTMLElement | null;
     if (active?.matches(TEXT_ENTRY_SELECTOR)) active.blur();
