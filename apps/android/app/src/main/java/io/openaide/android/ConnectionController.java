@@ -34,6 +34,7 @@ final class ConnectionController extends ContextWrapper {
     private boolean busy;
     private boolean disposed;
     private boolean recheckOnReturn;
+    private boolean verifyingInstall;
     private String notice = "";
     /** The outcome of the last Stop of an SSH Computer; the Remote section shows it. */
     private String sshNotice = "";
@@ -184,8 +185,20 @@ final class ConnectionController extends ContextWrapper {
             if (isDestroyed()) return;
             checks = null;
             if (success) try { checks = new JSONObject(output.trim()); } catch (Exception ignored) { success = false; }
+            boolean afterInstall = verifyingInstall;
+            verifyingInstall = false;
             end(success, success ? "" : "Termux needs permission to connect. Complete the one-time connection step below.");
+            if (afterInstall && success) reportUnmetInstall();
         });
+    }
+
+    /** An install can finish while a tool still cannot run; the page alone would just return to its step. */
+    private void reportUnmetInstall() {
+        var unmet = SetupPagePolicy.unmetAfterInstall(checks);
+        if (unmet.isEmpty()) return;
+        diagnostics.record("setup_install", "unmet", operationSequence, 0, java.util.Map.of("checks", String.join(",", unmet)));
+        notice = "The install finished, but some tools still can’t run in Termux. Run pkg upgrade in Termux, then try again.";
+        emit();
     }
 
     /** The runtime in Termux must be the app's own version; the check compares against it. */
@@ -213,7 +226,7 @@ final class ConnectionController extends ContextWrapper {
                 TermuxCommand.run(this, "install-termux.sh", environment, (success, output) -> {
                     if (isDestroyed()) return;
                     end(success, success ? "" : "Installation could not finish. Check your internet connection and available storage, then retry.");
-                    if (success) check();
+                    if (success) { verifyingInstall = true; check(); }
                 });
             });
         });

@@ -10,6 +10,16 @@ final class SetupPagePolicy {
         return null;
     }
 
+    /** What the page's install step stands for; each must hold once an install has finished. */
+    private static final String[] INSTALL_CHECKS = {"node", "nodeVersion", "npm", "git", "agent", "agentVersion", "runtime"};
+
+    /** The checks an install left unmet, as fixed names that are safe in diagnostics. */
+    static java.util.List<String> unmetAfterInstall(org.json.JSONObject checks) {
+        java.util.List<String> unmet = new java.util.ArrayList<>();
+        for (String check : INSTALL_CHECKS) if (!checks.optBoolean(check)) unmet.add(check);
+        return unmet;
+    }
+
     static boolean opensSettings(ConnectionProfile profile, String source, String destination, boolean mainFrame, boolean gesture) {
         return mainFrame && gesture && profile.owns(source) && "openaide://connection-settings".equals(destination);
     }

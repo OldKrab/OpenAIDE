@@ -4,6 +4,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class SetupPagePolicyTest {
+    @Test public void anInstallNamesWhatItLeftUnmet() throws Exception {
+        org.json.JSONObject checks = new org.json.JSONObject().put("node", true).put("nodeVersion", false).put("npm", true)
+            .put("git", true).put("agent", true).put("agentVersion", true).put("runtime", true);
+        assertEquals(java.util.List.of("nodeVersion"), SetupPagePolicy.unmetAfterInstall(checks));
+        assertEquals(java.util.List.of(), SetupPagePolicy.unmetAfterInstall(checks.put("nodeVersion", true)));
+    }
+
     @Test public void connectionCommandsRequireTheOwnedSettingsSubmenu() {
         ConnectionProfile profile = ConnectionProfile.local();
         assertTrue(SetupPagePolicy.isConnectionRoute(profile, profile.endpoint + "settings?tab=remote"));
