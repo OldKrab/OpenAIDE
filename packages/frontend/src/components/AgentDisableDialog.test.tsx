@@ -31,3 +31,22 @@ it("escapes a transformed, clipped surface so a narrow Sidebar cannot clip the c
     surface.remove();
   }
 });
+
+it("cancels on the platform Back action instead of leaving it to the surface behind", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const onCancel = vi.fn();
+  try {
+    await act(async () => root.render(
+      <AgentDisableDialog agentLabel="Codex" onCancel={onCancel} onConfirm={vi.fn()} runningTaskCount={1} />,
+    ));
+    const back = new Event("openaide:back", { cancelable: true });
+    window.dispatchEvent(back);
+    expect(back.defaultPrevented).toBe(true);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
