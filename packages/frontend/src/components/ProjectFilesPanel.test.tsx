@@ -216,6 +216,23 @@ it("sends a comment on diff lines with the compared sides, then offers it for ed
   expect(request.mock.calls.filter(([method]) => method === FILE_VIEWER_DIFF)).toHaveLength(diffReads);
 });
 
+it("cancels an open line comment on the platform Back action, as Escape does", async () => {
+  const onSaveNote = vi.fn();
+  await render({ request: server(), onSaveNote });
+  await click(shown(".file-code-reader .file-viewer-line"));
+  await type("draft");
+  const back = () => {
+    const event = new Event("openaide:back", { cancelable: true });
+    act(() => { window.dispatchEvent(event); });
+    return event.defaultPrevented;
+  };
+
+  expect(back()).toBe(true);
+  expect(container.querySelector('textarea[aria-label="Comment"]')).toBeNull();
+  expect(onSaveNote).not.toHaveBeenCalled();
+  expect(back()).toBe(false);
+});
+
 it("names the folder in a comment made outside the Task Workspace", async () => {
   const onSaveNote = vi.fn();
   const request = server();
