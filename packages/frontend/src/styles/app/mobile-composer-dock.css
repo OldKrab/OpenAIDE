@@ -143,11 +143,6 @@
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) .context-usage-compact > span {
     display: none;
   }
-
-  /* Limits sit on the sheet's top edge, clear of its rounded corner. */
-  body[data-shell="web"] .task-surface:not(.new-task-surface) .account-limits-edge {
-    right: 22px;
-  }
 }
 
 @media (max-width: 760px) and (prefers-reduced-motion: reduce) {

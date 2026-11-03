@@ -777,6 +777,18 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   // bottom and side edges.
   const mobileComposerBottom = mobileComposer.y + mobileComposer.height;
   expect(mobileComposerBottom).toBeCloseTo(640, 0);
+  // No control's touch area reaches over the draft: a tap anywhere along its edges lands in it.
+  const editorEdgesCovered = await editor.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const covered = [];
+    for (let x = bounds.left + 2; x < bounds.right - 1; x += 8) {
+      for (const y of [bounds.top + 2, bounds.bottom - 2]) {
+        if (!element.contains(document.elementFromPoint(x, y))) covered.push([Math.round(x), Math.round(y)]);
+      }
+    }
+    return covered;
+  });
+  expect(editorEdgesCovered).toEqual([]);
   const addButton = await page.locator(".composer-add-button").boundingBox();
   expect(addButton.height).toBe(40);
   expect(sendButton.height).toBe(40);
