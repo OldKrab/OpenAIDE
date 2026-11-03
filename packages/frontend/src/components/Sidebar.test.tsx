@@ -278,6 +278,39 @@ describe("SidebarTaskRow", () => {
     expect(details.findByType("em").children).toContain("fix/sidebar-scroll");
   });
 
+  it("cancels an inline rename on the platform Back action, as Escape does", () => {
+    // The row registers Back on `window`; this file runs without a DOM, so a bare event target stands in.
+    const host = new EventTarget();
+    vi.stubGlobal("window", host);
+    try {
+      const onSetTaskTitle = vi.fn();
+      const tree = render(
+        <SidebarTaskRow
+          onArchiveTask={vi.fn()}
+          onOpenTask={vi.fn()}
+          onRestoreTask={vi.fn()}
+          onSetTaskTitle={onSetTaskTitle}
+          showArchived={false}
+          task={task({ task_id: "task_rename", title: "Agent title", title_source: "user" })}
+        />,
+      );
+      act(() => tree.root.findByProps({ "aria-label": "Task actions for Agent title" }).props.onClick());
+      act(() => tree.root.findAllByProps({ role: "menuitem" })
+        .find((item) => item.children.includes("Rename task"))!.props.onClick());
+      act(() => tree.root.findByProps({ "aria-label": "Rename Agent title" }).props.onChange({ target: { value: "Draft" } }));
+
+      const back = new Event("openaide:back", { cancelable: true });
+      act(() => { host.dispatchEvent(back); });
+
+      expect(back.defaultPrevented).toBe(true);
+      expect(tree.root.findAllByProps({ className: "task-rename-form" })).toHaveLength(0);
+      expect(onSetTaskTitle).not.toHaveBeenCalled();
+      act(() => tree.unmount());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("renames and resets a user-owned Task title from the row menu", async () => {
     const onSetTaskTitle = vi.fn().mockResolvedValue(undefined);
     const tree = render(

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
+import { useBackNavigation } from "./useBackNavigation";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { TaskStateSpinner } from "./TaskStateSpinner";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
@@ -106,6 +107,8 @@ export function SidebarNativeSessionRow({
     setEditingTitle(false);
     setTitleError(undefined);
   };
+  // The platform Back action cancels an open rename, as Escape does, before the drawer closes.
+  useBackNavigation(editingTitle, cancelRename);
   const saveTitle = async () => {
     if (!onSetNativeSessionTitle || titleSaving) return;
     setTitleSaving(true);
