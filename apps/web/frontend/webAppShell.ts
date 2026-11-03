@@ -84,10 +84,13 @@ export function createWebAppShell(): FrontendShell {
     }
   };
   // `returnState` marks an entry that its close action leaves with Back, as Settings does.
-  const navigate = (path: string, returnState: Record<string, true> | null = null) => {
+  // `replace` takes the current entry's place. Moving between New Task routes (the start page
+  // included) always does, so Back never steps through New Task twice.
+  const navigate = (path: string, returnState: Record<string, true> | null = null, replace = false) => {
     if (window.location.pathname + window.location.search === path) return;
     const enteringSettings = path.startsWith("/settings") && window.location.pathname !== "/settings";
     if (path.startsWith("/settings") && isSettingsPath(window.location.pathname)) window.history.replaceState(window.history.state, "", path);
+    else if (replace || (isNewTaskPath(path) && isNewTaskLocation())) window.history.replaceState(returnState, "", path);
     else window.history.pushState(enteringSettings ? { openaideSettingsReturn: true } : returnState, "", path);
     publishRoute();
   };
@@ -157,7 +160,7 @@ export function createWebAppShell(): FrontendShell {
       openNativeSession: (agentId, nativeSessionId) => navigate(nativeSessionPath(agentId, nativeSessionId)),
       openSettings: (agentId, returnToNewTask, projectId, settingsTab, settingsIntent) =>
         navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab, settingsIntent)),
-      openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
+      openTask: (taskId, _title, _agentId, options) => navigate(`/task/${encodeURIComponent(taskId)}`, null, options?.replace),
       openProjectFiles: (projectId) => navigate(projectFilesPath(projectId), { openaideProjectFilesReturn: true }),
       closeProjectFiles(projectId) {
         if (window.history.state?.openaideProjectFilesReturn) window.history.back();
@@ -434,6 +437,17 @@ function replaceSettingsSearch(
 
 function settingsTabFromSearch() {
   return settingsTabFromValue(new URLSearchParams(window.location.search).get("tab"));
+}
+
+/** A New Task route: the start page or `/new-task`, but not the Project files page riding on it. */
+function isNewTaskPath(path: string) {
+  const url = new URL(path, "http://route.invalid");
+  if (url.pathname !== "/" && url.pathname !== "/new-task" && !url.pathname.startsWith("/new-task/")) return false;
+  return url.searchParams.get("view") !== "files";
+}
+
+function isNewTaskLocation() {
+  return isNewTaskPath(window.location.pathname + window.location.search);
 }
 
 function newTaskPath(projectId?: string) {

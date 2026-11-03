@@ -324,6 +324,15 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("puts the created Task in place of its New Task in browser history", async ({ page }) => {
+  await openPreparedNewTask(page);
+  const entries = await page.evaluate(() => history.length);
+  await send(page, "smoke:basic");
+  await expect(page).toHaveURL(/\/task\/task_/);
+  // Back from the new Task must not land on the spent, empty New Task.
+  expect(await page.evaluate(() => history.length)).toBe(entries);
+});
+
 test("navigates User messages with a desktop rail and mobile header picker", async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 760 });
   await openPreparedNewTask(page);
