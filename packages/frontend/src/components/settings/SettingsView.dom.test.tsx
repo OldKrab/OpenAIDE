@@ -200,6 +200,36 @@ it("opens on the section index on a phone and on the named section from a link",
   window.history.replaceState(null, "", pushed);
 });
 
+it("returns a phone to where a section link came from, and to the index once it was shown", async () => {
+  vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: query === "(max-width: 760px)", addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  const pushed = window.location.href;
+  const onBackToApp = vi.fn();
+  const back = () => {
+    const event = new Event("openaide:back", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const indexOpen = () => document.querySelector(".settings-view")?.classList.contains("settings-index-open");
+  try {
+    window.history.replaceState(null, "", "/settings?tab=general");
+    await mountSettings({ onBackToApp });
+    expect(back()).toBe(true);
+    await settle();
+    expect(onBackToApp).toHaveBeenCalledTimes(1);
+    expect(indexOpen()).toBe(false);
+
+    await click("All settings");
+    await click("General");
+    expect(indexOpen()).toBe(false);
+    back();
+    await settle();
+    expect(indexOpen()).toBe(true);
+    expect(onBackToApp).toHaveBeenCalledTimes(1);
+  } finally {
+    window.history.replaceState(null, "", pushed);
+  }
+});
+
 it("offers phone setup checks only while the phone does its own work", async () => {
   const execute = vi.fn(async () => undefined);
   const snapshot = { remote: false, termux: true, permission: false, computer: "", computers: [] };
