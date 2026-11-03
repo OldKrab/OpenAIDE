@@ -159,3 +159,32 @@ function SwappingTriggerMenu({ locked }: { locked: boolean }) {
     </PopupMenu>
   );
 }
+
+it("returns from an inner view on the platform Back action and closes only from the first view", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  onTestFinished(() => act(async () => root.unmount()));
+  function MenuWithDetails() {
+    const [open, setOpen] = useState(true);
+    const [details, setDetails] = useState(true);
+    return (
+      <PopupMenu
+        label="Task actions"
+        onBack={details ? () => setDetails(false) : undefined}
+        onOpenChange={setOpen}
+        open={open}
+        trigger={(props) => <button {...props} aria-label="Task actions" type="button" />}
+      >
+        {details ? <p>Details</p> : <button role="menuitem" type="button">Rename</button>}
+      </PopupMenu>
+    );
+  }
+  await act(async () => root.render(<MenuWithDetails />));
+  const back = () => act(async () => { window.dispatchEvent(new Event("openaide:back", { cancelable: true })); });
+
+  await back();
+  expect(document.querySelector('[role="menu"]')?.textContent).toBe("Rename");
+  await back();
+  expect(document.querySelector('button[aria-label="Task actions"]')?.getAttribute("aria-expanded")).toBe("false");
+});

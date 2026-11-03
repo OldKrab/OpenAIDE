@@ -127,6 +127,7 @@ export function ComposerRunOptions({
           <PopupMenu
             className="composer-popover composer-overflow-menu"
             label={hiddenMenuControl ? controlLabel(hiddenMenuControl) : visibleControls.length ? "More options" : "Options"}
+            onBack={hiddenMenuControl ? () => setOpenMenu("options") : undefined}
             onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "options" : undefined)}
             open={openMenu === "options" || hiddenMenuControl !== undefined}
             placement="top-start"
