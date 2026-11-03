@@ -241,3 +241,21 @@ test('a paired phone can check its connection step by step from Advanced', () =>
     assert.equal(local.document.querySelector('[data-action="remote_check"]'), null);
   } finally { local.close(); }
 });
+
+test('Back during a step in progress says why it stays, and the line goes when the step ends', () => {
+  const base = { initial: 'local', termux: true, permission: true, phoneAvailable: true, checks: { ...ready, runtime: false } };
+  const view = setup(base);
+  try {
+    view.document.querySelector('[data-action="install"]').click();
+    view.window.receive({ ...base, busy: true, notice: 'Installing' });
+    const title = view.document.querySelector('h1').textContent;
+    view.window.back();
+    view.window.back();
+    assert.equal(view.document.querySelector('h1').textContent, title);
+    assert.equal(view.document.querySelectorAll('#blocked-back').length, 1);
+    assert.equal(view.document.getElementById('blocked-back').textContent, 'Back works again when this finishes.');
+    assert.equal(view.document.getElementById('blocked-back').getAttribute('role'), 'status');
+    view.window.receive({ ...base, checks: ready });
+    assert.equal(view.document.getElementById('blocked-back'), null);
+  } finally { view.close(); }
+});
