@@ -36,6 +36,9 @@ public final class AppearanceChecks extends InstrumentationTestCase {
             waitFor(page, "Boolean(document.querySelector('.message-list'))");
             assertEquals("Chat must scroll directly up to the header", "true", run(page,
                 "(() => { const header=document.querySelector('.mobile-workbench-bar').getBoundingClientRect(); const chat=document.querySelector('.message-list').getBoundingClientRect(); return Math.abs(chat.top-header.bottom)<1; })()"));
+            // The frame pads for the system bars, so the page must not read them again as safe areas.
+            assertEquals("Safe areas must be zero inside the padded frame", "true", run(page,
+                "(() => { const probe=document.createElement('div'); probe.style.cssText='position:fixed;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)'; document.body.append(probe); const style=getComputedStyle(probe); const zero=['Top','Right','Bottom','Left'].every((side)=>style['padding'+side]==='0px'); probe.remove(); return zero; })()"));
             run(page, "window.appearanceCheckTheme=document.body.dataset.theme");
             checkTheme(activity, page, "dark");
             checkTheme(activity, page, "light");

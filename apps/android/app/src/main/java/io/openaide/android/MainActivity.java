@@ -508,11 +508,7 @@ public final class MainActivity extends Activity {
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL);
         frame.setBackgroundColor(ShellColors.background(this));
-        frame.setOnApplyWindowInsetsListener((view, insets) -> {
-            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets;
-        });
+        ShellInsets.padFrame(frame);
         frame.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1));
         SoftwareKeyboard.watch(frame, browser);
         setContentView(frame);
