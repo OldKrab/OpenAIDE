@@ -30,7 +30,8 @@
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
     min-height: 26px;
-    padding: 0 6px;
+    --composer-editor-pad-top: 0px;
+    --composer-editor-pad-inline: 6px;
     font-size: 16px;
     line-height: 1.55;
     caret-color: var(--oa-focus);
