@@ -19,14 +19,13 @@
     min-height: 0;
     max-height: 55dvh;
     gap: 6px;
-    /* The panel is only a small tonal step from Chat, so the border draws the sheet's edge: across
-       the top and round both corners, open only where the sheet meets the bottom edge. */
+    /* The panel is only a small tonal step from Chat, so a border on every side draws the sheet's
+       edge, including where it meets the keyboard or the navigation bar. */
     border: 1px solid var(--oa-border);
-    border-bottom: 0;
     border-radius: 22px 22px 0 0;
     background: var(--oa-panel);
-    /* 11px plus the 1px side border keeps the end controls 12px inside the sheet's outer edge. */
-    padding: 14px 11px calc(12px + env(safe-area-inset-bottom, 0px));
+    /* 11px plus the 1px border keeps the end controls 12px inside the sheet's outer edges. */
+    padding: 14px 11px calc(11px + env(safe-area-inset-bottom, 0px));
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
