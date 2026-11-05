@@ -19,17 +19,14 @@
     min-height: 0;
     max-height: 55dvh;
     gap: 6px;
-    border: 0;
-    border-top: 1px solid color-mix(in oklch, var(--oa-border) 46%, transparent);
+    /* The panel is only a small tonal step from Chat, so the border draws the sheet's edge: across
+       the top and round both corners, open only where the sheet meets the bottom edge. */
+    border: 1px solid var(--oa-border);
+    border-bottom: 0;
     border-radius: 22px 22px 0 0;
     background: var(--oa-panel);
-    padding: 14px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* Light has no tonal step to lift the sheet off Chat, so a soft upward shadow replaces the hairline. */
-  body[data-shell="web"][data-theme="light"] .task-surface:not(.new-task-surface) .composer {
-    border-top-color: transparent;
-    box-shadow: 0 -6px 20px -10px color-mix(in oklch, var(--oa-text) 22%, transparent);
+    /* 11px plus the 1px side border keeps the end controls 12px inside the sheet's outer edge. */
+    padding: 14px 11px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
