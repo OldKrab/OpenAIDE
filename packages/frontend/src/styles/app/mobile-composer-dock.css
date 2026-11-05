@@ -1,40 +1,37 @@
 /*
- * Phone Task Composer, docked. On a phone the Task Composer is a sheet resting on the bottom edge
- * (the software keyboard when it is open), so no gap below it needs tuning against the controls.
- * The two end controls, Add context and the primary action (Send or Stop), share one shape, size,
- * and 12px inset from the sheet's edges. The values between them (Options, context usage) stay inline
- * text on the same row. Only the Web Shell's phone layout docks: other shells keep the floating card.
+ * Phone Task Composer. On a phone the Task Composer is a card held the same 8px from the screen's
+ * sides and from the bottom edge (the software keyboard when it is open). Its two end controls, Add
+ * context and the primary action (Send or Stop), share one shape, size, and 12px inset from the
+ * card's edges, so the space below them matches the space beside them. The values between them
+ * (Options, context usage) stay inline text on the same row. Only the Web Shell's phone layout uses
+ * this card; other shells keep their own.
  */
 @media (max-width: 760px) {
   body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column {
-    padding-bottom: 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     gap: 18px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column > .composer-context-host {
-    width: 100%;
+    width: calc(100% - 16px);
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer {
     min-height: 0;
     max-height: 55dvh;
     gap: 6px;
-    border: 0;
-    border-top: 1px solid color-mix(in oklch, var(--oa-border) 46%, transparent);
-    border-radius: 22px 22px 0 0;
+    /* The panel is only a small tonal step from Chat, so the border draws the card's edge. */
+    border: 1px solid var(--oa-border);
+    border-radius: 22px;
     background: var(--oa-panel);
-    padding: 14px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* Light has no tonal step to lift the sheet off Chat, so a soft upward shadow replaces the hairline. */
-  body[data-shell="web"][data-theme="light"] .task-surface:not(.new-task-surface) .composer {
-    border-top-color: transparent;
-    box-shadow: 0 -6px 20px -10px color-mix(in oklch, var(--oa-text) 22%, transparent);
+    /* 11px plus the 1px border keeps the end controls 12px inside the card's outer edges. */
+    padding: 14px 11px 11px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
     min-height: 26px;
-    padding: 0 6px;
+    --composer-editor-pad-top: 0px;
+    --composer-editor-pad-inline: 6px;
     font-size: 16px;
     line-height: 1.55;
     caret-color: var(--oa-focus);
@@ -101,10 +98,35 @@
     color: color-mix(in oklch, var(--oa-muted) 70%, transparent);
   }
 
-  /* sRGB keeps the tint red; an oklch mix drifts to lavender on the light panel. */
+  /*
+   * Stop is a solid red circle with a white square. The dark theme's danger red is a light salmon
+   * that a white square barely shows on, so the fill clamps its lightness and chroma to the light
+   * theme's red; the plain token is the fallback where relative colours are unsupported.
+   */
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-stop-button:not(:disabled) {
-    background: color-mix(in srgb, var(--oa-danger) 14%, var(--oa-panel));
-    color: color-mix(in srgb, var(--oa-danger) 88%, var(--oa-text));
+    background: var(--oa-danger);
+    background: oklch(from var(--oa-danger) min(l, 0.58) max(c, 0.16) h);
+    color: oklch(0.98 0.006 250);
+  }
+
+  /* CircleStop's ring inside a round button reads as a circle in a circle; the square alone says halt. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-stop-button svg circle {
+    display: none;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-stop-button svg rect {
+    x: 7.5px;
+    y: 7.5px;
+    width: 9px;
+    height: 9px;
+    rx: 2px;
+    fill: currentColor;
+    stroke: none;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-stop-button svg {
+    width: 22px;
+    height: 22px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:active:not(:disabled) {
@@ -142,6 +164,15 @@
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) .context-usage-compact > span {
     display: none;
+  }
+
+  /* The same busy row also packs its pieces closer, so Options keeps its full label at 360px. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) {
+    gap: 2px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-footer:has(.composer-queue-button) .composer-pill {
+    padding-inline: 6px;
   }
 }
 

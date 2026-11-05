@@ -49,7 +49,10 @@
   background: transparent;
   color: var(--oa-text);
   line-height: 1.5;
-  padding: 3px 2px 0;
+  /* The empty-draft placeholder reads the same offsets, so the caret starts exactly where it does. */
+  --composer-editor-pad-top: 3px;
+  --composer-editor-pad-inline: 2px;
+  padding: var(--composer-editor-pad-top) var(--composer-editor-pad-inline) 0;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -76,9 +79,9 @@
 .composer-editor[data-empty]::before {
   color: var(--oa-muted);
   content: attr(data-placeholder);
-  left: 2px;
+  left: var(--composer-editor-pad-inline);
   position: absolute;
-  top: 3px;
+  top: var(--composer-editor-pad-top);
   pointer-events: none;
 }
 
