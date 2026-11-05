@@ -98,10 +98,35 @@
     color: color-mix(in oklch, var(--oa-muted) 70%, transparent);
   }
 
-  /* sRGB keeps the tint red; an oklch mix drifts to lavender on the light panel. */
+  /*
+   * Stop is a solid red circle with a white square. The dark theme's danger red is a light salmon
+   * that a white square barely shows on, so the fill clamps its lightness and chroma to the light
+   * theme's red; the plain token is the fallback where relative colours are unsupported.
+   */
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-stop-button:not(:disabled) {
-    background: color-mix(in srgb, var(--oa-danger) 14%, var(--oa-panel));
-    color: color-mix(in srgb, var(--oa-danger) 88%, var(--oa-text));
+    background: var(--oa-danger);
+    background: oklch(from var(--oa-danger) min(l, 0.58) max(c, 0.16) h);
+    color: oklch(0.98 0.006 250);
+  }
+
+  /* CircleStop's ring inside a round button reads as a circle in a circle; the square alone says halt. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-stop-button svg circle {
+    display: none;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-stop-button svg rect {
+    x: 7.5px;
+    y: 7.5px;
+    width: 9px;
+    height: 9px;
+    rx: 2px;
+    fill: currentColor;
+    stroke: none;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions .composer-icon-button.composer-stop-button svg {
+    width: 22px;
+    height: 22px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-icon-button:active:not(:disabled) {
