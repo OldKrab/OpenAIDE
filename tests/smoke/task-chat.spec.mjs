@@ -773,10 +773,12 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   const mobileFooter = await page.locator(".composer-footer").boundingBox();
   const sendButton = await page.locator(".composer-send-button").boundingBox();
   expect(mobileFooter.height).toBe(sendButton.height);
-  // The Composer docks to the bottom edge, and the shaped end controls sit the same 12px inside its
-  // bottom and side edges.
+  // The Composer card sits 8px from the screen's sides and bottom edge, and the shaped end controls
+  // sit the same 12px inside its bottom and side edges.
   const mobileComposerBottom = mobileComposer.y + mobileComposer.height;
-  expect(mobileComposerBottom).toBeCloseTo(640, 0);
+  expect(mobileComposerBottom).toBeCloseTo(632, 0);
+  expect(mobileComposer.x).toBeCloseTo(8, 0);
+  expect(360 - (mobileComposer.x + mobileComposer.width)).toBeCloseTo(8, 0);
   // No control's touch area reaches over the draft: a tap anywhere along its edges lands in it.
   const editorEdgesCovered = await editor.evaluate((element) => {
     const bounds = element.getBoundingClientRect();

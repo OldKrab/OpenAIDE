@@ -1,31 +1,31 @@
 /*
- * Phone Task Composer, docked. On a phone the Task Composer is a sheet resting on the bottom edge
- * (the software keyboard when it is open), so no gap below it needs tuning against the controls.
- * The two end controls, Add context and the primary action (Send or Stop), share one shape, size,
- * and 12px inset from the sheet's edges. The values between them (Options, context usage) stay inline
- * text on the same row. Only the Web Shell's phone layout docks: other shells keep the floating card.
+ * Phone Task Composer. On a phone the Task Composer is a card held the same 8px from the screen's
+ * sides and from the bottom edge (the software keyboard when it is open). Its two end controls, Add
+ * context and the primary action (Send or Stop), share one shape, size, and 12px inset from the
+ * card's edges, so the space below them matches the space beside them. The values between them
+ * (Options, context usage) stay inline text on the same row. Only the Web Shell's phone layout uses
+ * this card; other shells keep their own.
  */
 @media (max-width: 760px) {
   body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column {
-    padding-bottom: 0;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     gap: 18px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .chat-column > .composer-context-host {
-    width: 100%;
+    width: calc(100% - 16px);
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer {
     min-height: 0;
     max-height: 55dvh;
     gap: 6px;
-    /* The panel is only a small tonal step from Chat, so a border on every side draws the sheet's
-       edge, including where it meets the keyboard or the navigation bar. */
+    /* The panel is only a small tonal step from Chat, so the border draws the card's edge. */
     border: 1px solid var(--oa-border);
-    border-radius: 22px 22px 0 0;
+    border-radius: 22px;
     background: var(--oa-panel);
-    /* 11px plus the 1px border keeps the end controls 12px inside the sheet's outer edges. */
-    padding: 14px 11px calc(11px + env(safe-area-inset-bottom, 0px));
+    /* 11px plus the 1px border keeps the end controls 12px inside the card's outer edges. */
+    padding: 14px 11px 11px;
   }
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-editor {
@@ -138,6 +138,15 @@
 
   body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) .context-usage-compact > span {
     display: none;
+  }
+
+  /* The same busy row also packs its pieces closer, so Options keeps its full label at 360px. */
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-actions:has(.composer-queue-button) {
+    gap: 2px;
+  }
+
+  body[data-shell="web"] .task-surface:not(.new-task-surface) .composer-footer:has(.composer-queue-button) .composer-pill {
+    padding-inline: 6px;
   }
 }
 
