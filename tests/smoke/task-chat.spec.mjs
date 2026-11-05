@@ -760,6 +760,13 @@ test("uses a mobile context button and keeps the desktop meter on the rounded ed
   const editor = page.getByRole("textbox", { name: "Message" });
   const composer = page.locator(".composer");
   const initialHeight = await composer.evaluate((element) => element.getBoundingClientRect().height);
+  // The empty-draft placeholder starts where the caret does, so the caret never cuts its first letter.
+  const placeholderOffset = await editor.evaluate((element) => {
+    const box = getComputedStyle(element);
+    const placeholder = getComputedStyle(element, "::before");
+    return [placeholder.left === box.paddingLeft, placeholder.top === box.paddingTop, placeholder.content !== "none"];
+  });
+  expect(placeholderOffset).toEqual([true, true, true]);
   await editor.fill(Array.from({ length: 80 }, (_, index) => `line ${index + 1}`).join("\n"));
 
   const mobileMeter = page.locator(".context-usage-compact");
