@@ -10,6 +10,7 @@ mod catalog;
 pub(crate) mod frame;
 mod images;
 mod model;
+mod newer_chat;
 mod projection;
 mod scheduler;
 mod split;

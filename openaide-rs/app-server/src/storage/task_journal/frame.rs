@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::protocol::errors::RuntimeError;
 
 const MAGIC: &[u8; 8] = b"OAIDETJ\0";
-const FORMAT_VERSION: u16 = 1;
+pub(super) const FORMAT_VERSION: u16 = 1;
 pub(crate) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
 const FRAME_LENGTH_LEN: usize = size_of::<u64>();
 const FRAME_CHECKSUM_LEN: usize = size_of::<u32>();
@@ -531,6 +531,59 @@ pub(super) fn truncate_after_with_faults<T>(
         }),
     );
     Ok(())
+}
+
+/// The highest versions one journal records.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct RecordedVersions {
+    pub(super) file_format: u16,
+    pub(super) frame_format: u16,
+    pub(super) schema: u16,
+}
+
+/// Reads the versions a journal records without verifying or repairing it, so
+/// an App Server can tell a newer writer's journal from a damaged one
+/// (ADR-0078). A torn tail or an undecodable payload contributes nothing.
+pub(super) fn recorded_versions(path: &Path) -> Result<RecordedVersions, RuntimeError> {
+    #[derive(serde::Deserialize)]
+    struct FrameVersions {
+        #[serde(default)]
+        format_version: u16,
+        #[serde(default)]
+        schema_version: u16,
+    }
+    let bytes = fs::read(path).map_err(|error| io_error("versions_read", error))?;
+    if bytes.len() < FILE_HEADER_LEN || &bytes[..MAGIC.len()] != MAGIC {
+        return Err(RuntimeError::Storage(
+            "Invalid Task journal header".to_string(),
+        ));
+    }
+    let mut versions = RecordedVersions {
+        file_format: u16::from_le_bytes([bytes[MAGIC.len()], bytes[MAGIC.len() + 1]]),
+        ..RecordedVersions::default()
+    };
+    if versions.file_format != FORMAT_VERSION {
+        // Another file format may frame its payloads differently.
+        return Ok(versions);
+    }
+    let mut cursor = FILE_HEADER_LEN;
+    while let Some(length) = bytes.get(cursor..cursor + FRAME_LENGTH_LEN) {
+        let length = u64::from_le_bytes(length.try_into().expect("frame length slice"));
+        let start = cursor + FRAME_LENGTH_LEN;
+        let Some(payload) = usize::try_from(length)
+            .ok()
+            .and_then(|length| start.checked_add(length))
+            .and_then(|end| bytes.get(start..end))
+        else {
+            break;
+        };
+        if let Ok(frame) = serde_json::from_slice::<FrameVersions>(payload) {
+            versions.frame_format = versions.frame_format.max(frame.format_version);
+            versions.schema = versions.schema.max(frame.schema_version);
+        }
+        cursor = start + payload.len() + FRAME_CHECKSUM_LEN;
+    }
+    Ok(versions)
 }
 
 fn validate_header(bytes: &[u8]) -> Result<(), RuntimeError> {

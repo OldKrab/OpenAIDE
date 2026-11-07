@@ -1,5 +1,7 @@
 # Desktop Update edges must be storage-compatible
 
+Status: superseded by [ADR-0078](0078-older-app-servers-rebuild-a-newer-chat-from-its-native-session.md); an older App Server rebuilds a Chat it cannot read, so an Update Edge needs no compatibility evidence or state-root snapshot
+
 Desktop Update v1 offers only Update Edges proven read/write-compatible with their source release's durable state. A release requiring irreversible migration is not eligible for in-app update until OpenAIDE has a separately designed state-root snapshot, migration validation, and recovery system; installing an older binary alone is not rollback because current App Server migrations can rewrite or delete older representations lazily across native and WSL state roots.
 
 An installation may jump directly to a target only when that exact source-to-target Update Edge passed; otherwise the version-aware feed routes it through proven bridge releases. CI constructs durable state with the exact source App Server, exercises every durable store with the exact target, proves no irreversible transition, and reopens the result with the source before updater signing. The platform-specific updater signature therefore authorizes both artifact authenticity and in-app eligibility; releases that fail the compatibility gate receive no updater signature and never enter the feed, even when they remain usable for fresh installation.

@@ -25,6 +25,6 @@ A sent Image and an Agent-returned image are stored once as a file in their Task
 
 ## Consequences
 
-- A release with this migration is not an eligible in-app Desktop update edge under [ADR-0057](0057-desktop-update-edges-must-be-storage-compatible.md), because an older App Server cannot read a migrated Chat.
+- An older App Server cannot read a migrated Chat. [ADR-0078](0078-older-app-servers-rebuild-a-newer-chat-from-its-native-session.md) replaces the ADR-0057 update-edge rule with a rebuild from the Native Session, so this release may still be an in-app Desktop update.
 - The Composer draft is unchanged: unsent Images stay in Frontend, and Send still carries them inline. App Server writes their files when it accepts the message. **Edit in Composer** on a Queued Message still returns the bytes.
 - Image loads log their outcome, size, duration, and classified error on both sides, keyed by Task id and image id, so a missing image can be traced from the Frontend request to the file read.

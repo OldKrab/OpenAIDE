@@ -192,14 +192,24 @@ pub(super) fn load_catalog_task(task_dir: &Path) -> Result<Option<TaskMetadata>,
                 serde_json::json!({ "task_id": metadata.task.task_id, "chat_sequence": metadata.chat_sequence }),
             );
             let recovery = load_projection(task_dir);
+            // A newer App Server's Chat is rebuilt when its Task loads (ADR-0078),
+            // so it stays listed instead of becoming unavailable at startup.
+            let newer = recovery.is_err() && super::newer_chat::detect(task_dir).is_some();
             crate::logging::info(
                 "task_metadata_recovery_finished",
                 serde_json::json!({
                     "task_id": metadata.task.task_id,
-                    "outcome": if recovery.is_ok() { "recovered" } else { "unavailable" },
+                    "outcome": match (&recovery, newer) {
+                        (Ok(_), _) => "recovered",
+                        (Err(_), true) => "newer_chat",
+                        (Err(_), false) => "unavailable",
+                    },
                     "duration_ms": started.elapsed().as_millis(),
                 }),
             );
+            if newer {
+                return Ok(Some(metadata));
+            }
             recovery?;
             return load_task(task_dir);
         }
@@ -436,6 +446,32 @@ pub(super) fn compact(
     storage_sequence: u64,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
+    let replaced = publish_generation(task_dir, projection, storage_sequence, faults)?;
+    remove_if_present(&task_dir.join(replaced.chat_journal))?;
+    remove_if_present(&task_dir.join(replaced.chat_snapshot))?;
+    faults.check(
+        JournalKind::Compaction,
+        super::frame::FaultPoint::CompactionPublishParentSync,
+    )?;
+    sync_directory(task_dir)?;
+    super::images::sweep_unreferenced(task_dir, projection);
+    Ok(())
+}
+
+/// The Chat files a published generation no longer references.
+pub(super) struct ReplacedGeneration {
+    pub(super) chat_snapshot: String,
+    pub(super) chat_journal: String,
+}
+
+/// Publishes `projection` as a new Chat generation and leaves the files of the
+/// generation it replaces to the caller. `task.json` is the commit point.
+pub(super) fn publish_generation(
+    task_dir: &Path,
+    projection: &TaskProjection,
+    storage_sequence: u64,
+    faults: &FaultInjector,
+) -> Result<ReplacedGeneration, RuntimeError> {
     let metadata = load_task(task_dir)?
         .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
     let generation = uuid::Uuid::new_v4();
@@ -469,17 +505,10 @@ pub(super) fn compact(
         &new_journal,
         faults,
     )?;
-    remove_if_present(&task_dir.join(metadata.chat_journal))?;
-    if metadata.chat_snapshot != new_snapshot {
-        remove_if_present(&task_dir.join(metadata.chat_snapshot))?;
-    }
-    faults.check(
-        JournalKind::Compaction,
-        super::frame::FaultPoint::CompactionPublishParentSync,
-    )?;
-    sync_directory(task_dir)?;
-    super::images::sweep_unreferenced(task_dir, projection);
-    Ok(())
+    Ok(ReplacedGeneration {
+        chat_snapshot: metadata.chat_snapshot,
+        chat_journal: metadata.chat_journal,
+    })
 }
 
 pub(super) fn compaction_is_worthwhile(task_dir: &Path) -> Result<bool, RuntimeError> {
@@ -645,6 +674,19 @@ fn remove_if_present(path: &Path) -> Result<(), RuntimeError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
+}
+
+/// The schema version a Chat snapshot records, read without loading it.
+pub(super) fn snapshot_schema_version(path: &Path) -> Option<u16> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SnapshotVersion {
+        schema_version: u16,
+    }
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice::<SnapshotVersion>(&bytes)
+        .ok()
+        .map(|snapshot| snapshot.schema_version)
 }
 
 fn load_chat_snapshot(path: &Path) -> Result<(ChatSnapshotFile, bool), RuntimeError> {

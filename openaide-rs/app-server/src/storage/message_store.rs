@@ -124,7 +124,14 @@ impl Store {
     }
 
     /// Checks measured Chat and Tool-artifact reclaim thresholds at an idle boundary.
+    /// A Task this process has not loaded is skipped: it gained no reclaimable
+    /// bytes here, and loading it would migrate its Chat beyond the reach of an
+    /// older App Server, so startup and periodic maintenance migrate nothing
+    /// (ADR-0078).
     pub(crate) fn maintain_task_storage(&self, task_id: &str) -> Result<(), RuntimeError> {
+        if !self.task_journal().is_loaded(task_id) {
+            return Ok(());
+        }
         self.task_journal()
             .submit(TaskWrite::compaction_if_worthwhile_barrier(
                 task_id.to_string(),

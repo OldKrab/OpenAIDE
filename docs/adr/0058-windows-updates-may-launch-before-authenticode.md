@@ -1,5 +1,7 @@
 # Windows updates may launch before Authenticode
 
+Status: accepted; the alpha storage assumption in the third paragraph is superseded by [ADR-0078](0078-older-app-servers-rebuild-a-newer-chat-from-its-native-session.md)
+
 Windows Desktop releases may use production in-app updates before SignPath
 Foundation Authenticode signing is available. The Tauri updater Release Key
 still authenticates the complete updater artifact, and the native updater still

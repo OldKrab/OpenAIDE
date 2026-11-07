@@ -185,6 +185,25 @@ impl SubagentState {
         Ok(open_history(task, root, subagent_id)?.chat)
     }
 
+    /// Moves one Task's Subagent directory to `destination` and drops its state.
+    /// It holds the lock every Subagent write and read holds, so no batch writes
+    /// into a directory that is moving (ADR-0078).
+    pub(crate) fn move_task_root(
+        &self,
+        task_id: &str,
+        task_dir: &Path,
+        destination: &Path,
+    ) -> Result<(), RuntimeError> {
+        let mut tasks = self.tasks.lock().expect("Subagent state poisoned");
+        match std::fs::rename(task_dir.join(SUBAGENTS_DIR), destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        tasks.remove(task_id);
+        Ok(())
+    }
+
     /// Drops one Task's state after its files were removed.
     pub(crate) fn forget_task(&self, task_id: &str) {
         self.tasks

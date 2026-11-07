@@ -17,7 +17,7 @@ mod compaction;
 
 pub(super) use compaction::{compact_artifacts, ArtifactsWrittenSinceCheck};
 
-const ARTIFACTS_DIR: &str = "artifacts";
+pub(super) const ARTIFACTS_DIR: &str = "artifacts";
 pub(super) type ReconciledArtifactHeads = HashMap<(String, String), u64>;
 
 /// Writes and syncs an artifact frame before its visibility head is referenced

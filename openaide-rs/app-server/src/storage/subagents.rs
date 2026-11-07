@@ -24,11 +24,11 @@ pub use state::{CommittedSubagentBatch, CommittedSubagentRevision};
 use stream::{HistoryChange, SubagentChat, STREAM_HEAD_FILE};
 pub(crate) use writes::{SubagentOperation, SubagentWrite};
 
-const SUBAGENTS_DIR: &str = "subagents";
+pub(crate) const SUBAGENTS_DIR: &str = "subagents";
 const CATALOG_FILE: &str = "catalog.json";
 /// Version 2 marks a Task whose histories may be Chat streams, so an App Server
 /// that reads only ADR-0046 histories rejects the catalog without changing it.
-const CATALOG_SCHEMA_VERSION: u16 = 2;
+pub(crate) const CATALOG_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -481,6 +481,21 @@ fn validate_schema(version: u16) -> Result<(), RuntimeError> {
             "Unsupported Subagent history schema".to_string(),
         ))
     }
+}
+
+/// The catalog's version when a newer App Server wrote it, read without loading
+/// the catalog. Any Subagent format change raises it (ADR-0078).
+pub(crate) fn newer_catalog_version(task_dir: &Path) -> Option<u16> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CatalogVersion {
+        schema_version: u16,
+    }
+    let bytes = fs::read(task_dir.join(SUBAGENTS_DIR).join(CATALOG_FILE)).ok()?;
+    let version = serde_json::from_slice::<CatalogVersion>(&bytes)
+        .ok()?
+        .schema_version;
+    (version > CATALOG_SCHEMA_VERSION).then_some(version)
 }
 
 fn validate_subagent_id(value: &str) -> Result<(), RuntimeError> {

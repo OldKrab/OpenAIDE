@@ -584,9 +584,11 @@ While the Task remains open, Frontend presents a persistent inline notice direct
 
 Reload marks controls recovering, detaches the current attachment, sends ACP `session/close` when supported, and creates one replacement attachment through `session/load`. The Agent-returned Chat replay, Configuration Options, commands, title, capabilities, and other session metadata are authoritative and become visible in one Task update. While load runs, Frontend keeps stored Chat visible, hides unconfirmed option controls, locks session controls, and shows **Reloading session**. A successful load clears only the deferred requirement captured when it began and briefly shows `History updated`. A failed load preserves stored Chat and the requirement, marks controls stale when needed, and leaves an explicit retry available.
 
+A Chat written by a newer App Server, which this one cannot read, is set aside and replaced by an empty Chat with a deferred reload requirement ([ADR-0078](adr/0078-older-app-servers-rebuild-a-newer-chat-from-its-native-session.md)).
+
 On a later Task open with a deferred reload requirement, App Server uses `session/load` before exposing editable controls. That recovery attempt does not resume first, so it still performs exactly one restore operation. A failed or unsupported load preserves the requirement and never silently falls through to a misleading resume.
 
-After a successful replay replacement, App Server checks measured Chat and Tool-artifact reclaim just as it does after a completed turn. Periodic storage maintenance provides the same check for idle Tasks, so repeated passive Native Session refreshes cannot leave lifetime-sized replacement journals.
+After a successful replay replacement, App Server checks measured Chat and Tool-artifact reclaim just as it does after a completed turn. Periodic storage maintenance provides the same check for idle Tasks this App Server process has loaded, so repeated passive Native Session refreshes cannot leave lifetime-sized replacement journals. It skips a Task the process has not loaded, which gained no reclaimable bytes, so startup migrates no stored Chat ([ADR-0078](adr/0078-older-app-servers-rebuild-a-newer-chat-from-its-native-session.md)).
 
 ## Task Titles
 
