@@ -335,6 +335,7 @@ fn commit_batch(
         context.epoch_task_overlays.as_ref(),
         projections,
         projection_load_lock,
+        context.subagents.as_ref(),
         task_id,
     )?;
     // The sole writer drafts one Task without holding the root projection lock,

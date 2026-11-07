@@ -5,9 +5,10 @@ use std::sync::{Mutex, RwLock};
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
+use crate::storage::subagents::SubagentState;
 use crate::storage::task_journal::catalog;
 use crate::storage::task_journal::projection::replay_task;
-use crate::storage::task_journal::split;
+use crate::storage::task_journal::{newer_chat, split};
 
 use super::{failure, RecoveredTask};
 
@@ -119,6 +120,7 @@ pub(super) fn ensure_task_loaded(
     epoch_task_overlays: &RwLock<HashMap<String, TaskRecord>>,
     projections: &RwLock<HashMap<String, RecoveredTask>>,
     load_lock: &Mutex<()>,
+    subagents: &SubagentState,
     task_id: &str,
 ) -> Result<bool, RuntimeError> {
     if projections
@@ -146,7 +148,24 @@ pub(super) fn ensure_task_loaded(
         return Ok(true);
     }
     let task_dir = tasks_root.join(task_id);
-    let split_projection = split::load_projection(&task_dir)?;
+    // A Chat this App Server cannot read because a newer one wrote it is set
+    // aside and rebuilt from its Native Session (ADR-0078). Anything else that
+    // fails to load keeps failing closed.
+    let split_projection = if let Some(newer) = newer_chat::interrupted(&task_dir, task_id) {
+        Some(newer_chat::rebuild(&task_dir, &newer, subagents)?)
+    } else {
+        match split::load_projection(&task_dir) {
+            Ok(Some(loaded)) => match newer_chat::detect_subagents(&task_dir) {
+                Some(newer) => Some(newer_chat::rebuild(&task_dir, &newer, subagents)?),
+                None => Some(loaded),
+            },
+            Ok(None) => None,
+            Err(error) => match newer_chat::detect(&task_dir) {
+                Some(newer) => Some(newer_chat::rebuild(&task_dir, &newer, subagents)?),
+                None => return Err(error),
+            },
+        }
+    };
     let (replayed_id, mut task) = if let Some((projection, sequence)) = split_projection {
         (
             projection.task.task_id.clone(),

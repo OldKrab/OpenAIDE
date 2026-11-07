@@ -20,6 +20,7 @@ impl TaskJournalStore {
             &self.inner.epoch_task_overlays,
             &self.inner.projections,
             &self.inner.projection_load_lock,
+            &self.inner.subagents,
             task_id,
         )?;
         self.inner
@@ -33,6 +34,16 @@ impl TaskJournalStore {
             })
             .transpose()?
             .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
+    }
+
+    /// Whether this process has hydrated the Task's Chat. Listing Tasks at
+    /// startup reads only their metadata.
+    pub(crate) fn is_loaded(&self, task_id: &str) -> bool {
+        self.inner
+            .projections
+            .read()
+            .expect("Task journal projections poisoned")
+            .contains_key(task_id)
     }
 
     /// Projects metadata without cloning Chat or queued attachment payloads. The
@@ -60,6 +71,7 @@ impl TaskJournalStore {
             &self.inner.epoch_task_overlays,
             &self.inner.projections,
             &self.inner.projection_load_lock,
+            &self.inner.subagents,
             task_id,
         )?;
         self.inner
