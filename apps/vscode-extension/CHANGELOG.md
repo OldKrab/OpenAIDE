@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.11.0 - 2026-11-08
+
+### Computers
+- Switch between this device, paired computers, and SSH Computers from the switcher in Task navigation. A switch connects before it leaves and can be cancelled, keeps this device's Tasks running, keeps draft text, and returns to each computer's last Task.
+- Run OpenAIDE on a Linux computer you reach over SSH, without an App Shell there: Desktop and the Android app install, start, and update its App Server. Add one in Settings → Remote.
+- Get notifications for this device's Tasks while another computer is in use, and for a paired computer's Tasks while the Android app is hidden. Turn them on or off in Settings → General.
+- Say which computer can't be used and why: it can't be reached, it needs an update, or this app does. The page offers Try again and Switch computer. On Android it tells an offline phone from a computer that doesn't answer, shows when the computer last connected, and offers the other computers.
+- Fix a paired computer that devices could not reach through the relay for hours, and stop a brief reconnect from moving the Composer.
+
+### Project files
+- Open Project files beside Chat, with Changes and Files views, added and removed line counts, a chip for choosing a worktree, and a comparison with uncommitted work or the default branch. On a narrow window the panel covers Chat.
+- Browse a Project's files without a Task from Browse files in its menu, and send the comments made there with Ask in a new Task.
+- Quote or comment on selected lines of a diff or file; the comment goes into the draft.
+- Find a file by name with Ctrl/Cmd+P, best matches first, and search file contents with Ctrl/Cmd+Shift+F.
+
+### Task and Chat
+- Copy inline code with one tap. Inline code links to a file only when the Task's workspace has that file.
+- Load Chat images as they are shown, with space reserved at their size so Chat no longer shifts.
+- Restore the Subagents of a session loaded from history, group a Subagent's history like Chat, and name Subagents by their delegated task.
+- Keep a Task in progress while a Workflow runs.
+- Show a tool the Agent has announced as being prepared, not running; reapply a Task's chosen options after its session is restored; and keep the message rail on the message you jumped to.
+- Render JPEG 2000 images and CJK text in PDFs.
+- Resume an open Task after a reconnect without reloading it, and stop Project list refreshes from delaying Task updates.
+
+### Phone
+- Keep the Task bar to Project files and the Plan, with everything else in one ⋯ menu.
+- Back steps out of what is open before it leaves the screen: dialogs, menus, the Composer's command and file lists, the New worktree form, Agent sign-in steps, line comments, and inline renames.
+- Float the Composer as a card on the keyboard. Taps around it keep the keyboard open, and closing the keyboard releases it.
+- Attach images through the system photo picker, and reorder attachments with a long press.
+- Setup repairs a Termux Node.js that cannot start, can open while another computer is in use, and says why Back waits during a step.
+- Share diagnostics as a named file.
+
+### Agents
+- Say when an Agent's command is missing or it needs Node.js, and name the Agent that needs setup in the Tasks list.
+- Wait longer between restarts of an Agent that keeps exiting at startup, and refuse a Codex runtime installed without its native package.
+- Update Claude Code's ACP adapter to 1.10.1 and the managed Codex ACP runtime to 2.2.4.
+
+### Upgrading
+- Update every paired phone and computer: 0.11.0 uses App Server Protocol 3.0 and cannot connect to 0.10 or earlier. The connection page says which side needs the update.
+- Opening a Task moves its Chat images into the Task's own files. After that, 0.10 and earlier cannot open the Task; Tasks not opened in 0.11.0 stay readable.
+- From 0.11.0, a version that finds a Task saved by a newer one rebuilds its Chat from the Agent's session instead of failing to open it.
+
 ## 0.10.1 - 2026-10-20
 
 ### Agents
