@@ -48,7 +48,7 @@
     "app-server:test": "cargo test -p openaide-app-server"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "@vscode/vsce": "4.1.0",
     "jsdom": "^30.1.3",
     "ovsx": "1.2.0",
