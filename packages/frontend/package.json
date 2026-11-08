@@ -23,7 +23,7 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^1.52.0",
     "mermaid": "12.2.0",
-    "pdfjs-dist": "6.4.299",
+    "pdfjs-dist": "6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
