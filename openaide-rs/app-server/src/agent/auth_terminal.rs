@@ -93,10 +93,10 @@ impl ClientAuthTerminal {
         config: AcpAgentConfig,
         cancellation: &TurnCancellation,
         terminal_id: &str,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<u32, TerminalEnd> {
         let pair = native_pty_system()
             .openpty(size(80, 24))
-            .map_err(|_| terminal_error())?;
+            .map_err(|_| TerminalEnd::new("pty_open_failed"))?;
         let mut command = CommandBuilder::new(&config.command);
         command.args(&config.args);
         command.env("TERM", "xterm-256color");
@@ -108,17 +108,22 @@ impl ClientAuthTerminal {
         let mut child = PtyChild::new(
             pair.slave
                 .spawn_command(command)
-                .map_err(|_| terminal_error())?,
+                .map_err(|_| TerminalEnd::new("spawn_failed"))?,
         );
         drop(pair.slave);
         let mut reader = pair
             .master
             .try_clone_reader()
-            .map_err(|_| terminal_error())?;
-        let mut writer = pair.master.take_writer().map_err(|_| terminal_error())?;
+            .map_err(|_| TerminalEnd::new("pty_open_failed"))?;
+        let mut writer = pair
+            .master
+            .take_writer()
+            .map_err(|_| TerminalEnd::new("pty_open_failed"))?;
         // PTY writes can block when an Agent stops reading input. Keep those writes off the
         // lifecycle worker so cancellation can always kill the owned process and unblock I/O.
-        let (input_send, input_receive) = mpsc::sync_channel::<Vec<u8>>(1);
+        // The queue holds several batches so a paste arriving while a write is still in flight
+        // waits instead of ending sign-in; at most 32 KiB per batch bounds its memory.
+        let (input_send, input_receive) = mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE_BATCHES);
         std::thread::spawn(move || {
             while let Ok(bytes) = input_receive.recv() {
                 if writer
@@ -144,55 +149,93 @@ impl ClientAuthTerminal {
         let mut dimensions = (80, 24);
         loop {
             if cancellation.is_cancelled() {
-                return Err(terminal_error());
+                return Err(TerminalEnd::new("cancelled"));
             }
             // Once exited, the child is never signalled again, even after awaiting another
             // browser exchange: its PID has been reaped and the OS may reuse it.
-            let exited = child.try_exit().map_err(|_| terminal_error())?;
+            let exited = child
+                .try_exit()
+                .map_err(|_| TerminalEnd::new("wait_failed"))?;
             let mut output = Vec::new();
             while output.len() < 32768 {
                 let Ok(bytes) = receive.try_recv() else { break };
                 output.extend(bytes);
             }
-            let response = self.exchange(
-                ShellAuthTerminalParams {
-                    agent_id: config.agent_id.clone(),
-                    terminal_id: terminal_id.to_string(),
-                    output: STANDARD.encode(output),
-                    exited: exited.is_some(),
-                },
-                cancellation,
-            )?;
+            let response = self
+                .exchange(
+                    ShellAuthTerminalParams {
+                        agent_id: config.agent_id.clone(),
+                        terminal_id: terminal_id.to_string(),
+                        output: STANDARD.encode(output),
+                        exited: exited.is_some(),
+                    },
+                    cancellation,
+                )
+                .map_err(|error| TerminalEnd::from_error("client_exchange_failed", error))?;
             if response.cancel {
-                return Err(terminal_error());
+                return Err(TerminalEnd::new("client_cancelled"));
             }
             if let Some(status) = exited {
                 return if status.success() {
-                    Ok(())
+                    Ok(status.exit_code())
                 } else {
-                    Err(terminal_error())
+                    Err(TerminalEnd {
+                        exit_code: Some(status.exit_code()),
+                        ..TerminalEnd::new("login_exited_unsuccessfully")
+                    })
                 };
             }
             if response.input.len() > 32768
                 || !(2..=500).contains(&response.cols)
                 || !(2..=200).contains(&response.rows)
             {
-                return Err(RuntimeError::InvalidParams(
-                    "authentication terminal input".into(),
+                return Err(TerminalEnd::from_error(
+                    "invalid_client_response",
+                    RuntimeError::InvalidParams("authentication terminal input".into()),
                 ));
             }
             if dimensions != (response.cols, response.rows) {
                 pair.master
                     .resize(size(response.cols, response.rows))
-                    .map_err(|_| terminal_error())?;
+                    .map_err(|_| TerminalEnd::new("resize_failed"))?;
                 dimensions = (response.cols, response.rows);
             }
             let input = STANDARD
                 .decode(response.input)
-                .map_err(|_| terminal_error())?;
+                .map_err(|_| TerminalEnd::new("invalid_client_response"))?;
             if !input.is_empty() {
-                input_send.try_send(input).map_err(|_| terminal_error())?;
+                input_send.try_send(input).map_err(|error| {
+                    TerminalEnd::new(match error {
+                        mpsc::TrySendError::Full(_) => "input_backlog_full",
+                        mpsc::TrySendError::Disconnected(_) => "input_closed",
+                    })
+                })?;
             }
+        }
+    }
+}
+
+/// Input batches waiting for the PTY writer; each is at most 32 KiB.
+const INPUT_QUEUE_BATCHES: usize = 64;
+
+/// Why a sign-in terminal ended without signing in. The reason and exit code are diagnostics
+/// only; the user sees one sign-in failure for all of them.
+struct TerminalEnd {
+    reason: &'static str,
+    exit_code: Option<u32>,
+    error: RuntimeError,
+}
+
+impl TerminalEnd {
+    fn new(reason: &'static str) -> Self {
+        Self::from_error(reason, terminal_error())
+    }
+
+    fn from_error(reason: &'static str, error: RuntimeError) -> Self {
+        Self {
+            reason,
+            exit_code: None,
+            error,
         }
     }
 }
@@ -212,15 +255,20 @@ impl AuthTerminalRunner for ClientAuthTerminal {
             }),
         );
         let result = self.run_inner(config, &cancellation, &terminal_id);
+        let (end_reason, exit_code, error_kind) = match &result {
+            Ok(code) => ("login_exited", Some(*code), None),
+            Err(end) => (end.reason, end.exit_code, Some(end.error.reason())),
+        };
         logging::info(
             "agent_auth_terminal_completed",
             serde_json::json!({
                 "operation_id": terminal_id, "duration_ms": started.elapsed().as_millis(),
                 "outcome": if cancellation.is_cancelled() { "cancelled" } else if result.is_ok() { "success" } else { "failure" },
-                "error_kind": result.as_ref().err().map(RuntimeError::reason), "attempt": 1,
+                "end_reason": end_reason, "exit_code": exit_code,
+                "error_kind": error_kind, "attempt": 1,
             }),
         );
-        result
+        result.map(|_| ()).map_err(|end| end.error)
     }
 }
 

@@ -448,6 +448,7 @@ config_response_delay = float(os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_RESPON
 fixture_title = os.environ.get("OPENAIDE_ACP_FIXTURE_TITLE", "")
 log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
 auth_method = os.environ.get("OPENAIDE_ACP_FIXTURE_AUTH_METHOD", "agent")
+auth_status_kind = os.environ.get("OPENAIDE_ACP_FIXTURE_AUTH_STATUS", "")
 with_resume_commands = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME_COMMANDS", "") == "1"
 pending_prompt_ids = []
 pending_config_messages = []
@@ -561,6 +562,8 @@ for line in sys.stdin:
         log("terminal/create.response")
     elif method == "initialize":
         respond(message, initialize_result())
+        if auth_status_kind:
+            notify("_auth/status_update", {"authStatus": {"kind": auth_status_kind}})
     elif method == "session/new":
         for server in message.get("params", {}).get("mcpServers", []):
             env = {item["name"]: item["value"] for item in server.get("env", [])}
@@ -1468,6 +1471,7 @@ fn authentication_reuses_the_active_agent_process() {
             terminal_confirmed: false,
             terminal_runner: None,
             secret_resolver: None,
+            recheck_sign_in: false,
         })
         .expect("authenticate agent");
 
@@ -1607,6 +1611,7 @@ fn env_var_authentication_relaunches_with_secure_host_values() {
             terminal_confirmed: false,
             terminal_runner: None,
             secret_resolver: None,
+            recheck_sign_in: false,
         })
         .expect("authenticate with env var");
     host.join().expect("secret host");
@@ -1661,6 +1666,7 @@ fn env_var_authentication_relaunches_with_typed_client_secret_resolver() {
                     "typed-secure-token".to_string(),
                 )]),
             })),
+            recheck_sign_in: false,
         })
         .expect("authenticate with typed secret resolver");
 
@@ -1730,6 +1736,7 @@ fn terminal_authentication_reconnects_without_sending_acp_authenticate() {
             terminal_confirmed: false,
             terminal_runner: None,
             secret_resolver: None,
+            recheck_sign_in: false,
         })
         .expect("open terminal auth");
     assert!(matches!(
@@ -1741,6 +1748,181 @@ fn terminal_authentication_reconnects_without_sending_acp_authenticate() {
         ["initialize", "initialize"]
     );
     host.join().expect("visible terminal host");
+}
+
+/// A login terminal that stays open until the test releases it or sign-in cancels it.
+struct GatedLoginTerminal {
+    release: Mutex<mpsc::Receiver<()>>,
+    started: mpsc::SyncSender<()>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl crate::agent::auth_terminal::AuthTerminalRunner for GatedLoginTerminal {
+    fn run(
+        &self,
+        _config: AcpAgentConfig,
+        cancellation: TurnCancellation,
+    ) -> Result<(), RuntimeError> {
+        let _ = self.started.try_send(());
+        let release = self.release.lock().unwrap();
+        loop {
+            if cancellation.is_cancelled() {
+                self.cancelled
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(RuntimeError::NotReady("login cancelled".into()));
+            }
+            // timing: poll — re-reads the release gate and the cancellation token.
+            if release.recv_timeout(Duration::from_millis(10)).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+}
+
+fn terminal_auth_runtime_reporting(
+    temp: &tempfile::TempDir,
+    auth_status: &str,
+) -> Option<(
+    AcpAgentRuntime,
+    crate::agent::status_cache::AgentStatusCache,
+    PathBuf,
+)> {
+    if !python3_available() {
+        return None;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let mut runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_AUTH_METHOD".to_string(),
+                "terminal".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_AUTH_STATUS".to_string(),
+                auth_status.to_string(),
+            ),
+        ],
+        secret_env: Vec::new(),
+    });
+    let statuses = crate::agent::status_cache::AgentStatusCache::default();
+    runtime.kernel.with_account_limits(statuses.clone());
+    Some((runtime, statuses, log_path))
+}
+
+fn gated_login_terminal() -> (
+    Arc<GatedLoginTerminal>,
+    mpsc::SyncSender<()>,
+    mpsc::Receiver<()>,
+) {
+    let (release_tx, release_rx) = mpsc::sync_channel(1);
+    let (started_tx, started_rx) = mpsc::sync_channel(1);
+    let terminal = Arc::new(GatedLoginTerminal {
+        release: Mutex::new(release_rx),
+        started: started_tx,
+        cancelled: Arc::default(),
+    });
+    (terminal, release_tx, started_rx)
+}
+
+fn terminal_sign_in(
+    terminal: Arc<GatedLoginTerminal>,
+    recheck_sign_in: bool,
+) -> crate::agent::AgentAuthenticateRequest {
+    crate::agent::AgentAuthenticateRequest {
+        agent_id: "codex".to_string(),
+        method_id: "test-auth".to_string(),
+        env: HashMap::new(),
+        secret_env: Vec::new(),
+        secret_storage_agent_id: None,
+        terminal_confirmed: false,
+        terminal_runner: Some(terminal),
+        secret_resolver: None,
+        recheck_sign_in,
+    }
+}
+
+#[test]
+fn sign_in_recheck_relaunches_and_ends_the_login_when_credentials_already_exist() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _statuses, log_path)) = terminal_auth_runtime_reporting(&temp, "claude.ai")
+    else {
+        return;
+    };
+    // The process that is running predates the login the user made in another terminal.
+    runtime
+        .probe(AgentProbeRequest {
+            agent_id: "codex".to_string(),
+        })
+        .expect("probe the running process");
+    let (terminal, release, _started) = gated_login_terminal();
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker_terminal = terminal.clone();
+    let sign_in = std::thread::spawn(move || {
+        let _ = done_tx.send(runtime.authenticate(terminal_sign_in(worker_terminal, true)));
+    });
+    let outcome = done_rx.recv_timeout(crate::test_sync::WATCHDOG);
+    // Unblocks a login the fix failed to end so the failure is reported, not a hang.
+    let _ = release.try_send(());
+    sign_in.join().expect("sign-in thread");
+    let authenticated = outcome
+        .expect("sign-in ended without the login terminal")
+        .expect("sign in with existing credentials");
+
+    assert!(matches!(
+        authenticated.status,
+        AgentAuthenticateStatus::Authenticated
+    ));
+    assert!(terminal.cancelled.load(std::sync::atomic::Ordering::SeqCst));
+    // Relaunched once to reread credentials, and not again: the new process already has them.
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "initialize"]
+    );
+}
+
+#[test]
+fn sign_in_without_recheck_keeps_the_login_open_after_a_signed_in_report() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, statuses, log_path)) = terminal_auth_runtime_reporting(&temp, "claude.ai")
+    else {
+        return;
+    };
+    // Observable gate: the process's signed-in report clears this earlier signed-out one.
+    statuses.record_reported_sign_in("codex", false);
+    let (terminal, release, started) = gated_login_terminal();
+    let worker_terminal = terminal.clone();
+    let sign_in = std::thread::spawn(move || {
+        let result = runtime.authenticate(terminal_sign_in(worker_terminal, false));
+        (runtime, result)
+    });
+    started
+        .recv_timeout(crate::test_sync::WATCHDOG)
+        .expect("login terminal started");
+    crate::test_sync::wait_until("the process to report credentials", || {
+        !statuses.reported_signed_out("codex")
+    });
+    // An Agent switching accounts is already signed in; only the login decides.
+    release.send(()).expect("release the login");
+    let (_runtime, result) = sign_in.join().expect("sign-in thread");
+
+    assert!(matches!(
+        result.expect("terminal sign-in").status,
+        AgentAuthenticateStatus::Authenticated
+    ));
+    assert!(!terminal.cancelled.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "initialize"]
+    );
 }
 
 #[test]
@@ -2278,6 +2460,7 @@ fn authentication_wait_does_not_block_another_agents_session_start() {
                 terminal_confirmed: false,
                 terminal_runner: None,
                 secret_resolver: None,
+                recheck_sign_in: false,
             })
         }
     });

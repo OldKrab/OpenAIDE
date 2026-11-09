@@ -46,6 +46,7 @@ pub(super) enum ProcessStopReason {
     SessionStartTimeout,
     SessionStartProcessEnded,
     AuthEnvironmentChanged,
+    SignInRecheck,
     AuthFailed,
     AuthReconnect,
     AuthCancelled,
@@ -60,6 +61,7 @@ impl ProcessStopReason {
             Self::SessionStartTimeout => "session_start_timeout",
             Self::SessionStartProcessEnded => "session_start_process_ended",
             Self::AuthEnvironmentChanged => "auth_environment_changed",
+            Self::SignInRecheck => "sign_in_recheck",
             Self::AuthFailed => "auth_failed",
             Self::AuthReconnect => "auth_reconnect",
             Self::AuthCancelled => "auth_cancelled",
@@ -450,6 +452,11 @@ impl AcpAgentProcessPool {
         } else {
             None
         };
+        if request.recheck_sign_in && !has_auth_environment {
+            if let Some(process) = self.existing_process(&agent_id) {
+                self.stop_process(&agent_id, &process, ProcessStopReason::SignInRecheck);
+            }
+        }
         let (process, _operation) = match self.get_or_launch_process(&request.agent_id) {
             Ok(process) => process,
             Err(error) => {

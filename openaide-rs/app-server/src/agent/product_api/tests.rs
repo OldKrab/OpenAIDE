@@ -1000,3 +1000,64 @@ impl AgentRuntime for InternalFailingAgent {
         Err(RuntimeError::CapabilityMissing("test".to_string()))
     }
 }
+
+#[test]
+fn sign_in_rechecks_credentials_only_after_the_agent_reported_none() {
+    let statuses = AgentStatusCache::default();
+    statuses.record_reported_sign_in("codex", false);
+    let agent = Arc::new(RecheckRecordingAgent::default());
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        agent.clone(),
+        statuses.clone(),
+    );
+    let sign_in = |terminal_confirmed| AgentAuthenticateParams {
+        agent_id: AgentId::from("codex"),
+        method_id: "terminal-login".to_string(),
+        env: BTreeMap::new(),
+        secret_env: Vec::new(),
+        secret_storage_agent_id: None,
+        terminal_confirmed,
+    };
+
+    api.authenticate(sign_in(false)).unwrap();
+    // The sign-in succeeded, so the signed-out report is gone and nothing needs rechecking.
+    api.authenticate(sign_in(false)).unwrap();
+    statuses.record_reported_sign_in("codex", false);
+    // A confirmation continues a running flow and never relaunches its process.
+    let _ = api.authenticate(sign_in(true));
+
+    assert_eq!(*agent.rechecks.lock().unwrap(), [true, false, false]);
+}
+
+#[derive(Default)]
+struct RecheckRecordingAgent {
+    rechecks: Mutex<Vec<bool>>,
+}
+
+impl AgentRuntime for RecheckRecordingAgent {
+    fn authenticate(
+        &self,
+        request: AgentAuthenticateRequest,
+    ) -> Result<AgentAuthenticateResult, RuntimeError> {
+        self.rechecks.lock().unwrap().push(request.recheck_sign_in);
+        Ok(AgentAuthenticateResult {
+            agent_id: request.agent_id,
+            method_id: request.method_id,
+            status: crate::protocol::model::AgentAuthenticateStatus::Authenticated,
+        })
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("authentication must not start a session")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("authentication must not prompt")
+    }
+}

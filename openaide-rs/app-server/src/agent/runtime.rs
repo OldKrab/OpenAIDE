@@ -238,6 +238,10 @@ pub struct AgentAuthenticateRequest {
     pub terminal_runner: Option<Arc<dyn super::auth_terminal::AuthTerminalRunner>>,
     /// Reads shell-owned values during process launch without moving them into protocol state.
     pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
+    /// The Agent last reported no credentials. Its process only reads its credentials at
+    /// launch, so it is relaunched first, and a terminal sign-in ends as soon as the fresh
+    /// process reports credentials that a login outside OpenAIDE already saved.
+    pub recheck_sign_in: bool,
 }
 
 #[derive(Clone)]

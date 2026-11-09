@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalAttach } from "@openaide/app-server-client";
 import { connectTerminalStream, type TerminalStreamState } from "../../services/terminalSockets";
+import { pasteWithCtrlV } from "./terminalPaste";
 
 /** Ctrl with a letter or one of `@[\]^_` is that character's control code. */
 export function withCtrl(data: string): string | undefined {
@@ -65,6 +66,7 @@ export function TerminalScreen({
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    pasteWithCtrlV(terminal);
     terminal.open(host);
     const fitSafely = () => {
       try { fit.fit(); } catch { /* A hidden screen has no size yet. */ }

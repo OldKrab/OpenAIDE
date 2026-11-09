@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use agent_client_protocol::{Agent, ConnectionTo};
+use tokio::sync::watch;
 
 use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_schema::{AuthMethod, AuthenticateRequest, InitializeResponse};
 use crate::agent::acp_session_capabilities::validate_auth_method;
-use crate::agent::AgentAuthenticateRequest;
+use crate::agent::{AgentAuthenticateRequest, TurnCancellation};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -21,6 +22,7 @@ pub(super) async fn authenticate_on_shared_process(
     config: &AcpAgentConfig,
     host_bridge: &HostBridge,
     request: AgentAuthenticateRequest,
+    sign_in_reports: Option<watch::Receiver<Option<bool>>>,
 ) -> Result<(AgentAuthenticateResult, bool), RuntimeError> {
     // Authentication on the shared process has no session trace, so this is the only record of
     // the ACP `authenticate` exchange. Method ids are agent-advertised identifiers, not secrets.
@@ -33,7 +35,15 @@ pub(super) async fn authenticate_on_shared_process(
             "terminal_confirmed": request.terminal_confirmed,
         }),
     );
-    let result = authenticate_inner(connection, initialize, config, host_bridge, request).await;
+    let result = authenticate_inner(
+        connection,
+        initialize,
+        config,
+        host_bridge,
+        request,
+        sign_in_reports,
+    )
+    .await;
     match &result {
         Ok((result, _)) => logging::info(
             "acp_authenticate_completed",
@@ -61,6 +71,7 @@ async fn authenticate_inner(
     config: &AcpAgentConfig,
     host_bridge: &HostBridge,
     request: AgentAuthenticateRequest,
+    sign_in_reports: Option<watch::Receiver<Option<bool>>>,
 ) -> Result<(AgentAuthenticateResult, bool), RuntimeError> {
     validate_auth_method(initialize, &request.method_id)?;
     let method = initialize
@@ -88,24 +99,43 @@ async fn authenticate_inner(
         env.extend(method.env.clone());
         launch.env = env.into_iter().collect();
         launch.secret_env.clear();
-        if let Some(runner) = request.terminal_runner {
-            let cancel = super::auth_terminal::CancelOnDrop::new();
-            let token = cancel.token.clone();
-            tokio::task::spawn_blocking(move || runner.run(launch, token))
-                .await
-                .map_err(|_| {
-                    RuntimeError::Internal("authentication terminal worker ended".into())
-                })??;
-        } else {
-            open_visible_auth_terminal(&launch, host_bridge).await?;
-        }
+        // Dropping this ends the login terminal on every early return.
+        let cancel = super::auth_terminal::CancelOnDrop::new();
+        let token = cancel.token.clone();
+        let terminal_runner = request.terminal_runner.clone();
+        let terminal = async move {
+            if let Some(runner) = terminal_runner {
+                tokio::task::spawn_blocking(move || runner.run(launch, token))
+                    .await
+                    .map_err(|_| {
+                        RuntimeError::Internal("authentication terminal worker ended".into())
+                    })?
+            } else {
+                open_visible_auth_terminal(&launch, host_bridge, token).await
+            }
+        };
+        let reports = sign_in_reports.filter(|_| request.recheck_sign_in);
+        let reconnect = match login_or_existing_sign_in(terminal, &cancel.token, reports).await? {
+            TerminalSignIn::LoginExited => true,
+            TerminalSignIn::AlreadySignedIn => {
+                logging::info(
+                    "acp_authenticate_existing_sign_in",
+                    serde_json::json!({
+                        "agent_id": request.agent_id,
+                        "method_id": request.method_id,
+                    }),
+                );
+                // The process already holds the credentials, so it needs no relaunch.
+                false
+            }
+        };
         return Ok((
             AgentAuthenticateResult {
                 agent_id: request.agent_id,
                 method_id: request.method_id,
                 status: AgentAuthenticateStatus::Authenticated,
             },
-            true,
+            reconnect,
         ));
     }
     logging::info(
@@ -130,16 +160,56 @@ async fn authenticate_inner(
     ))
 }
 
+enum TerminalSignIn {
+    /// The login process exited successfully; the Agent process must reread credentials.
+    LoginExited,
+    /// The relaunched Agent process reported credentials before the login finished.
+    AlreadySignedIn,
+}
+
+/// Runs the login terminal until it exits. With `reports`, a signed-in report from the
+/// freshly launched Agent process ends the terminal instead: a login made outside OpenAIDE
+/// already saved credentials, so the user is not asked to sign in again. The Agent pushes the
+/// report once after launch, so no deadline applies; without one the terminal decides.
+async fn login_or_existing_sign_in(
+    terminal: impl std::future::Future<Output = Result<(), RuntimeError>>,
+    cancel: &TurnCancellation,
+    reports: Option<watch::Receiver<Option<bool>>>,
+) -> Result<TerminalSignIn, RuntimeError> {
+    let signed_in = async move {
+        let signed_in = match reports {
+            Some(mut reports) => reports
+                .wait_for(|report| *report == Some(true))
+                .await
+                .is_ok(),
+            None => false,
+        };
+        if !signed_in {
+            // Unreported or a process that ended: only the terminal can finish sign-in.
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::pin!(terminal);
+    tokio::select! {
+        result = &mut terminal => result.map(|()| TerminalSignIn::LoginExited),
+        () = signed_in => {
+            cancel.cancel();
+            // Cancellation ends the terminal promptly; waiting releases its process first.
+            let _ = terminal.await;
+            Ok(TerminalSignIn::AlreadySignedIn)
+        }
+    }
+}
+
 async fn open_visible_auth_terminal(
     config: &AcpAgentConfig,
     host_bridge: &HostBridge,
+    token: TurnCancellation,
 ) -> Result<(), RuntimeError> {
     let command = config.command.clone();
     let args = config.args.clone();
     let env = config.env.iter().cloned().collect::<HashMap<_, _>>();
     let host_bridge = host_bridge.clone();
-    let cancel = super::auth_terminal::CancelOnDrop::new();
-    let token = cancel.token.clone();
     let response = tokio::task::spawn_blocking(move || {
         host_bridge.request_until(
             "agent/auth_terminal",
