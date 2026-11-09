@@ -58,6 +58,7 @@ impl AgentService {
             terminal_confirmed: false,
             terminal_runner: None,
             secret_resolver: None,
+            recheck_sign_in: false,
         })
     }
 

@@ -215,6 +215,10 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
             )));
         }
         let agent_id = params.agent_id.as_str().to_string();
+        // A login made outside OpenAIDE leaves the Agent's earlier signed-out report standing.
+        // A confirmation continues a running flow, whose process must not be relaunched.
+        let recheck_sign_in =
+            !params.terminal_confirmed && self.statuses.reported_signed_out(&agent_id);
         self.statuses
             .begin_authentication(&agent_id, &params.method_id, params.terminal_confirmed)
             .map_err(protocol_error_from_runtime)?;
@@ -227,6 +231,7 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
                 "method_id": params.method_id,
                 "terminal_confirmed": params.terminal_confirmed,
                 "has_env": !params.env.is_empty() || !params.secret_env.is_empty(),
+                "recheck_sign_in": recheck_sign_in,
             }),
         );
         let result = self.gateway.authenticate(AgentAuthenticateRequest {
@@ -238,6 +243,7 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
             terminal_confirmed: params.terminal_confirmed,
             terminal_runner,
             secret_resolver,
+            recheck_sign_in,
         });
         let result = match result {
             Ok(result) => {

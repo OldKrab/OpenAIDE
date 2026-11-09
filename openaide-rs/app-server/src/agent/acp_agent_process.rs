@@ -185,6 +185,10 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         lifetime,
         agent_reports,
     } = input;
+    // Sign-in reports from this process only, which a sign-in recheck waits on.
+    let sign_in_reports = agent_reports
+        .as_ref()
+        .map(crate::agent::status_cache::AgentReportRecorder::sign_in_reports);
 
     let current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>> = Arc::default();
     let load_replay: Arc<Mutex<HashMap<String, LoadReplayCapture>>> = Arc::default();
@@ -411,6 +415,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                     &config,
                                     &host_bridge,
                                     request,
+                                    sign_in_reports.clone(),
                                 ).await;
                                 let _ = reply_tx.send(result);
                             }

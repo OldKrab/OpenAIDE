@@ -79,6 +79,9 @@ struct AccountLimitReads {
 pub(crate) struct AgentReportRecorder {
     statuses: AgentStatusCache,
     agent_id: String,
+    /// This process's latest sign-in report. Scoped to one process, unlike the cache entry, so
+    /// a sign-in that relaunched the process waits for the new process's own report.
+    sign_in: Arc<tokio::sync::watch::Sender<Option<bool>>>,
 }
 
 impl AgentReportRecorder {
@@ -89,6 +92,12 @@ impl AgentReportRecorder {
     pub(crate) fn record_signed_in(&self, signed_in: bool) {
         self.statuses
             .record_reported_sign_in(&self.agent_id, signed_in);
+        self.sign_in.send_replace(Some(signed_in));
+    }
+
+    /// Follows this process's sign-in reports; `None` until the process reports.
+    pub(crate) fn sign_in_reports(&self) -> tokio::sync::watch::Receiver<Option<bool>> {
+        self.sign_in.subscribe()
     }
 }
 
@@ -175,7 +184,7 @@ impl AgentStatusCache {
             .remove(agent_id);
     }
 
-    fn reported_signed_out(&self, agent_id: &str) -> bool {
+    pub(crate) fn reported_signed_out(&self, agent_id: &str) -> bool {
         self.reported_signed_out
             .lock()
             .expect("agent sign-in reports poisoned")
@@ -344,6 +353,7 @@ impl AgentStatusCache {
         AgentReportRecorder {
             statuses: self.clone(),
             agent_id: agent_id.to_string(),
+            sign_in: Arc::new(tokio::sync::watch::channel(None).0),
         }
     }
 
