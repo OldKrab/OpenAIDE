@@ -192,6 +192,8 @@ export type WorkspaceBrowserCallbacks = {
   ownerKey: string;
   listDirectory: (path: string) => Promise<WorkspaceListDirectoryResult>;
   listRoots: () => Promise<WorkspaceBrowserRoot[]>;
+  /** Creates one empty folder inside `parentPath` and resolves with its listing. */
+  createDirectory?: (parentPath: string, name: string) => Promise<WorkspaceListDirectoryResult>;
 };
 
 export type SnapshotRequestIdFactory = (taskId?: string, intent?: SnapshotIntent) => number;

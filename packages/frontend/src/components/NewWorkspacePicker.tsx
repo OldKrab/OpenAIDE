@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronRight, Folder, HardDrive, Pencil, RotateCw } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, Folder, FolderPlus, HardDrive, Pencil, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceBrowserEntry, WorkspaceBrowserRoot, WorkspaceListDirectoryResult } from "@openaide/app-server-client";
 import type { WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -10,13 +10,20 @@ type Listing =
   | { kind: "roots"; roots: WorkspaceBrowserRoot[] }
   | { kind: "directory"; directory: Directory; entries: WorkspaceBrowserEntry[] };
 
+/** The inline name row for a folder about to be created in the current directory. */
+type NewFolderDraft = { name: string; creating: boolean };
+
 type ExplorerState = {
   listing?: Listing;
   pending: boolean;
   error?: string;
 };
 
-/** Web Add Project explorer: path chrome, navigate-only rows, footer commit. */
+/**
+ * Web Add Project explorer: path chrome, navigate-only rows, footer commit.
+ * New folder creates an empty folder in the current directory and opens it, so
+ * a new Project can start from a folder that did not exist yet.
+ */
 export function NewWorkspacePicker({
   browser,
   onSelect,
@@ -29,9 +36,11 @@ export function NewWorkspacePicker({
   const [editingPath, setEditingPath] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [editingName, setEditingName] = useState(false);
+  const [newFolder, setNewFolder] = useState<NewFolderDraft>();
   const folderLabelRef = useRef<string | undefined>(undefined);
   const nameInput = useRef<HTMLInputElement>(null);
   const pathInput = useRef<HTMLInputElement>(null);
+  const newFolderInput = useRef<HTMLInputElement>(null);
   const browserRef = useRef(browser);
   browserRef.current = browser;
   const requestOwnership = useBrowserRequestOwnership(browser.ownerKey);
@@ -45,6 +54,7 @@ export function NewWorkspacePicker({
     });
     setPathDraft(listing.directory.path);
     setEditingPath(false);
+    setNewFolder(undefined);
     setProjectName((current) => {
       if (!previousFolder || current.trim() === previousFolder) return nextLabel;
       return current;
@@ -92,6 +102,11 @@ export function NewWorkspacePicker({
     if (editingName) nameInput.current?.select();
   }, [editingName]);
 
+  const newFolderOpen = Boolean(newFolder);
+  useEffect(() => {
+    if (newFolderOpen) newFolderInput.current?.focus();
+  }, [newFolderOpen]);
+
   const openDirectory = (path: string) => {
     const acceptsResult = requestOwnership.beginLatestRead();
     setState((current) => ({ listing: current.listing, pending: true }));
@@ -109,6 +124,28 @@ export function NewWorkspacePicker({
   const currentDirectory = listing?.kind === "directory" ? listing.directory : undefined;
   const canGoUp = Boolean(currentDirectory?.parentPath);
   const canAdd = listing?.kind === "directory" && !state.pending && Boolean(projectName.trim());
+
+  const createFolder = () => {
+    const createDirectory = browser.createDirectory;
+    if (!createDirectory || !currentDirectory || !newFolder || newFolder.creating) return;
+    const name = newFolder.name.trim();
+    if (!name) return;
+    // A creation is the latest read: navigating away while it runs keeps the
+    // folder on disk but leaves the explorer where the user went.
+    const acceptsResult = requestOwnership.beginLatestRead();
+    setNewFolder({ name: newFolder.name, creating: true });
+    setState((current) => ({ listing: current.listing, pending: true }));
+    void createDirectory(currentDirectory.path, name).then(
+      (listing) => {
+        if (acceptsResult()) showDirectory(listing);
+      },
+      (error: unknown) => {
+        if (!acceptsResult()) return;
+        setNewFolder((current) => current && { ...current, creating: false });
+        setState((current) => ({ listing: current.listing, pending: false, error: errorMessage(error) }));
+      },
+    );
+  };
 
   const commitPath = () => {
     const next = pathDraft.trim() || "/";
@@ -166,17 +203,31 @@ export function NewWorkspacePicker({
               ))}
             </nav>
           )}
-          <button
-            aria-label="Edit path"
-            aria-pressed={editingPath}
-            onClick={() => {
-              setEditingPath(true);
-              setPathDraft(currentDirectory?.path ?? (listing?.kind === "roots" ? "/" : pathDraft));
-            }}
-            type="button"
-          >
-            <Pencil size={14} />
-          </button>
+          <span className="project-folder-explorer-actions">
+            {browser.createDirectory ? (
+              <button
+                aria-label="New folder"
+                aria-pressed={newFolderOpen}
+                disabled={!currentDirectory || state.pending}
+                onClick={() => setNewFolder((current) => current ?? { name: "", creating: false })}
+                title="New folder"
+                type="button"
+              >
+                <FolderPlus size={15} />
+              </button>
+            ) : null}
+            <button
+              aria-label="Edit path"
+              aria-pressed={editingPath}
+              onClick={() => {
+                setEditingPath(true);
+                setPathDraft(currentDirectory?.path ?? (listing?.kind === "roots" ? "/" : pathDraft));
+              }}
+              type="button"
+            >
+              <Pencil size={14} />
+            </button>
+          </span>
         </div>
         {state.pending ? <div aria-hidden="true" className="project-folder-explorer-progress" /> : <div className="project-folder-explorer-progress-slot" />}
         <div className="project-folder-explorer-list">
@@ -193,6 +244,38 @@ export function NewWorkspacePicker({
               <ChevronRight size={14} />
             </button>
           )) : null}
+          {newFolder && currentDirectory ? (
+            <form
+              className="project-folder-explorer-row project-folder-explorer-new"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createFolder();
+              }}
+            >
+              <FolderPlus size={15} />
+              <input
+                aria-label="New folder name"
+                disabled={newFolder.creating}
+                onBlur={() => {
+                  if (!newFolder.name.trim() && !newFolder.creating) setNewFolder(undefined);
+                }}
+                onChange={(event) => setNewFolder({ name: event.target.value, creating: false })}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape" && !newFolder.creating) {
+                    event.stopPropagation();
+                    setNewFolder(undefined);
+                  }
+                }}
+                placeholder="Folder name"
+                ref={newFolderInput}
+                spellCheck={false}
+                value={newFolder.name}
+              />
+              <button aria-label="Create folder" disabled={newFolder.creating || !newFolder.name.trim()} type="submit">
+                <Check size={14} />
+              </button>
+            </form>
+          ) : null}
           {listing?.kind === "directory" ? listing.entries.map((entry) => (
             <button className="project-folder-explorer-row" key={entry.path} onClick={() => openDirectory(entry.path)} type="button">
               <Folder size={15} />
@@ -200,7 +283,7 @@ export function NewWorkspacePicker({
               <ChevronRight size={14} />
             </button>
           )) : null}
-          {listing?.kind === "directory" && !listing.entries.length ? (
+          {listing?.kind === "directory" && !listing.entries.length && !newFolder ? (
             <p className="project-folder-explorer-status">No folders in this directory.</p>
           ) : null}
         </div>

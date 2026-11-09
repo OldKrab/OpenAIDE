@@ -14,14 +14,16 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
-    WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
-    WorkspaceListRootsResult,
+    WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
+    WorkspaceListRootsParams, WorkspaceListRootsResult,
 };
+use serde_json::json;
 use std::path::{Path, PathBuf};
 
 use crate::attachment_runtime::{
     AttachmentOwner, AttachmentRuntimeError, ResolvedRevealAttachment,
 };
+use crate::logging;
 use crate::protocol::model::NormalizedMessage;
 
 use super::{validation_error, TaskProductApi};
@@ -142,6 +144,12 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
     fn workspace_directory(
         &self,
         params: WorkspaceListDirectoryParams,
+    ) -> Result<WorkspaceListDirectoryResult, ProtocolError>;
+
+    /// Creates one empty folder for the Add Project explorer and lists it.
+    fn create_workspace_directory(
+        &self,
+        params: WorkspaceCreateDirectoryParams,
     ) -> Result<WorkspaceListDirectoryResult, ProtocolError>;
 }
 
@@ -366,6 +374,77 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         params: WorkspaceListDirectoryParams,
     ) -> Result<WorkspaceListDirectoryResult, ProtocolError> {
         workspace_directory_listing(PathBuf::from(params.path))
+    }
+
+    fn create_workspace_directory(
+        &self,
+        params: WorkspaceCreateDirectoryParams,
+    ) -> Result<WorkspaceListDirectoryResult, ProtocolError> {
+        let name = params.name.trim();
+        if let Some(message) = invalid_workspace_folder_name(name) {
+            return Err(validation_error("name", message));
+        }
+        let parent = PathBuf::from(&params.parent_path);
+        if !parent.is_absolute() {
+            return Err(validation_error(
+                "parentPath",
+                "The parent folder must be an absolute path.",
+            ));
+        }
+        let created = parent.join(name);
+        // `create_dir`, not `create_dir_all`: the parent the user is looking at must
+        // still exist, and an existing folder is reported instead of being reused.
+        if let Err(error) = std::fs::create_dir(&created) {
+            // The RPC completion line carries only the protocol code; the io kind
+            // separates a missing parent, a name clash, and a permission problem.
+            logging::warn(
+                "workspace_directory_create_failed",
+                json!({ "io_error_kind": format!("{:?}", error.kind()) }),
+            );
+            return Err(workspace_directory_create_error(error));
+        }
+        workspace_directory_listing(created)
+    }
+}
+
+/// Accepts exactly one path segment so a name cannot address another folder.
+fn invalid_workspace_folder_name(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        return Some("Enter a folder name.");
+    }
+    if name == "." || name == ".." {
+        return Some("Choose a different folder name.");
+    }
+    if name.contains(['/', '\\', '\0']) {
+        return Some("A folder name cannot contain slashes.");
+    }
+    None
+}
+
+fn workspace_directory_create_error(error: std::io::Error) -> ProtocolError {
+    let (code, message) = match error.kind() {
+        std::io::ErrorKind::AlreadyExists => (
+            ProtocolErrorCode::Conflict,
+            "A folder with that name already exists.".to_string(),
+        ),
+        std::io::ErrorKind::NotFound => (
+            ProtocolErrorCode::NotFound,
+            "The parent folder no longer exists.".to_string(),
+        ),
+        std::io::ErrorKind::PermissionDenied => (
+            ProtocolErrorCode::InvalidRequest,
+            "You do not have permission to create a folder here.".to_string(),
+        ),
+        _ => (
+            ProtocolErrorCode::Internal,
+            format!("Unable to create folder: {error}"),
+        ),
+    };
+    ProtocolError {
+        code,
+        message,
+        recoverable: true,
+        target: None,
     }
 }
 

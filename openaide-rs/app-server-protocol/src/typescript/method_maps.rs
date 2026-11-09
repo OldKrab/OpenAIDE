@@ -19,6 +19,10 @@ pub(super) fn push_method_maps(output: &mut String) {
         output.len() - ";\n".len(),
         " | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE",
     );
+    output.insert_str(
+        output.len() - ";\n".len(),
+        " | typeof WORKSPACE_CREATE_DIRECTORY",
+    );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;\n");
     output.push_str("  [FILE_VIEWER_SEARCH]: ProjectFilesParams;\n");
@@ -97,6 +101,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;\n");
+    output.push_str("  [WORKSPACE_CREATE_DIRECTORY]: WorkspaceCreateDirectoryParams;\n");
     output.push_str("  [PROJECT_ADD]: ProjectAddParams;\n");
     output.push_str("  [PROJECT_RENAME]: ProjectRenameParams;\n");
     output.push_str("  [PROJECT_REMOVE]: ProjectRemoveParams;\n");
@@ -228,6 +233,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;\n");
+    output.push_str("  [WORKSPACE_CREATE_DIRECTORY]: WorkspaceListDirectoryResult;\n");
     output.push_str("  [PROJECT_ADD]: ProjectAddResult;\n");
     output.push_str("  [PROJECT_RENAME]: ProjectRenameResult;\n");
     output.push_str("  [PROJECT_REMOVE]: ProjectRemoveResult;\n");
@@ -449,6 +455,9 @@ pub(super) fn push_method_maps(output: &mut String) {
         .push_str("export type ProjectRefreshResponse = ResponseEnvelope<ProjectRefreshResult>;\n");
     output.push_str(
         "export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;\n",
+    );
+    output.push_str(
+        "export type WorkspaceCreateDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;\n",
     );
     output.push_str("export type TaskAcquireResponse = ResponseEnvelope<TaskAcquireResult>;\n");
     output.push_str(

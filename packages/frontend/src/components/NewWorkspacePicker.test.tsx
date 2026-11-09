@@ -122,6 +122,74 @@ describe("NewWorkspacePicker", () => {
     expect(textContent(tree!)).toContain("other");
     expect(textContent(tree!)).not.toContain("Desktop");
   });
+
+  it("creates a folder in the current directory, opens it, and names the Project after it", async () => {
+    const onSelect = vi.fn();
+    const browser = workspaceBrowser("new-task:1");
+    browser.createDirectory = vi.fn(async (parentPath: string, name: string) => directoryListing(`${parentPath}/${name}`));
+    let tree: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      tree = create(<NewWorkspacePicker browser={browser} onSelect={onSelect} />);
+      await Promise.resolve();
+    });
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "New folder" }).props.onClick();
+    });
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "New folder name" }).props.onChange({ target: { value: " my-app " } });
+    });
+    await act(async () => {
+      tree!.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+      await Promise.resolve();
+    });
+    act(() => {
+      tree!.root.findByProps({ children: "Add this folder" }).props.onClick();
+    });
+
+    expect(browser.createDirectory).toHaveBeenCalledWith("/home/user", "my-app");
+    expect(tree!.root.findAllByProps({ "aria-label": "New folder name" })).toHaveLength(0);
+    expect(onSelect).toHaveBeenCalledWith({ path: "/home/user/my-app", label: "my-app" });
+  });
+
+  it("keeps the folder name and shows the reason when creation fails", async () => {
+    const browser = workspaceBrowser("new-task:1");
+    browser.createDirectory = vi.fn(async () => {
+      throw new Error("A folder with that name already exists.");
+    });
+    let tree: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      tree = create(<NewWorkspacePicker browser={browser} onSelect={vi.fn()} />);
+      await Promise.resolve();
+    });
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "New folder" }).props.onClick();
+    });
+    act(() => {
+      tree!.root.findByProps({ "aria-label": "New folder name" }).props.onChange({ target: { value: "src" } });
+    });
+    await act(async () => {
+      tree!.root.findByType("form").props.onSubmit({ preventDefault: vi.fn() });
+      await Promise.resolve();
+    });
+
+    expect(textContent(tree!)).toContain("A folder with that name already exists.");
+    expect(tree!.root.findByProps({ "aria-label": "New folder name" }).props.value).toBe("src");
+    expect(tree!.root.findByProps({ "aria-label": "Create folder" }).props.disabled).toBe(false);
+  });
+
+  it("offers New folder only when the shell can create folders", async () => {
+    const browser = workspaceBrowser("new-task:1");
+    let tree: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      tree = create(<NewWorkspacePicker browser={browser} onSelect={vi.fn()} />);
+      await Promise.resolve();
+    });
+
+    expect(tree!.root.findAllByProps({ "aria-label": "New folder" })).toHaveLength(0);
+  });
 });
 
 describe("preferredWorkspaceStart", () => {

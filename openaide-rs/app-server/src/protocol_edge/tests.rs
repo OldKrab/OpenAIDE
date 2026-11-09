@@ -4028,6 +4028,18 @@ impl AttachmentFileBrowserWorkflow for RejectingAttachments {
             "workspace directory unavailable in test gateway",
         ))
     }
+
+    fn create_workspace_directory(
+        &self,
+        _params: openaide_app_server_protocol::workspace::WorkspaceCreateDirectoryParams,
+    ) -> Result<
+        openaide_app_server_protocol::workspace::WorkspaceListDirectoryResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(test_unavailable(
+            "workspace directory creation unavailable in test gateway",
+        ))
+    }
 }
 
 struct RevealAttachments;
@@ -4171,6 +4183,16 @@ impl AttachmentFileBrowserWorkflow for RevealAttachments {
         openaide_app_server_protocol::errors::ProtocolError,
     > {
         RejectingAttachments.workspace_directory(params)
+    }
+
+    fn create_workspace_directory(
+        &self,
+        params: openaide_app_server_protocol::workspace::WorkspaceCreateDirectoryParams,
+    ) -> Result<
+        openaide_app_server_protocol::workspace::WorkspaceListDirectoryResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        RejectingAttachments.create_workspace_directory(params)
     }
 }
 
