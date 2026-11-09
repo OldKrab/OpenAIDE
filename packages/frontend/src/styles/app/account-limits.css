@@ -82,7 +82,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.account-limits-edge:not([aria-expanded="true"]):is(:hover, :focus-visible) .account-limits-segment-name {
+.account-limits-edge:not([aria-expanded="true"]):focus-visible .account-limits-segment-name {
   opacity: 1;
   filter: none;
   transform: none;
@@ -92,18 +92,28 @@
     transform 320ms cubic-bezier(.16, 1, .3, 1);
 }
 
+/* A touch leaves hover stuck on the meters after the panel closes, so only a real pointer asks. */
+@media (hover: hover) {
+  .account-limits-edge:not([aria-expanded="true"]):hover .account-limits-segment-name {
+    opacity: 1;
+    filter: none;
+    transform: none;
+    transition:
+      opacity 220ms ease,
+      filter 260ms ease,
+      transform 320ms cubic-bezier(.16, 1, .3, 1);
+  }
+}
+
 /*
- * Touch has no hover to ask with, so the readout stays up there, quiet until a window needs
- * attention.
+ * Touch has no hover to ask with, so a window that needs attention keeps its readout up there. A
+ * window that is ok rests as its line alone: its percentage beside the context meter's is one more
+ * bare number with nothing to act on, and a tap opens the panel that names every amount.
  */
-.account-limits-edge[data-compact="true"]:not([aria-expanded="true"]) .account-limits-segment-name {
+.account-limits-edge[data-compact="true"]:not([aria-expanded="true"]) .account-limits-segment:not(.account-limits-ok) .account-limits-segment-name {
   opacity: 1;
   filter: none;
   transform: none;
-}
-
-.account-limits-edge[data-compact="true"] .account-limits-ok .account-limits-segment-name b {
-  color: var(--oa-muted);
 }
 
 .account-limits-edge:is(:hover, :focus-visible) .account-limits-segment + .account-limits-segment .account-limits-segment-name {

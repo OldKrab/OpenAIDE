@@ -16,6 +16,12 @@
   flex: 0 0 auto;
 }
 
+/* The grouped trigger is the row's last resort and may name values wider than the row, so it alone
+   yields and truncates instead of covering the controls beside it. */
+.composer-adaptive-options > .composer-overflow-options-anchor {
+  flex: 0 1 auto;
+}
+
 /* Replace unconfirmed Agent-owned controls in place so recovery does not add a
    second toolbar item or present cached values as current. */
 .composer-adaptive-options.is-unavailable {
