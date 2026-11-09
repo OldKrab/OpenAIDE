@@ -5,10 +5,12 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { AuthTerminalSession } from "../../services/authTerminals";
 import { frontendShell } from "../../services/frontendShell";
+import { pasteWithCtrlV } from "../terminals/terminalPaste";
 import { SettingsButton } from "./settingsKit";
 
 /** A real terminal, not a provider-specific parser: escape sequences, prompts and input stay
- * Agent-owned. Links require an explicit click and never invoke host commands or clipboard APIs. */
+ * Agent-owned. Links require an explicit click and never invoke host commands or clipboard APIs; paste is
+ * the browser's own. */
 export function AgentAuthTerminal({ session, onCancel }: {
   session: AuthTerminalSession;
   onCancel?: () => void;
@@ -26,6 +28,8 @@ export function AgentAuthTerminal({ session, onCancel }: {
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)));
+    // Sign-in codes are pasted from the browser that showed them.
+    pasteWithCtrlV(terminal);
     terminal.open(element.current);
     const detach = session.attach((bytes) => terminal.write(bytes));
     const input = terminal.onData((data) => session.send(data));
