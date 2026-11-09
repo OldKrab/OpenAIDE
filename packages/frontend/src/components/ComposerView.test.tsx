@@ -676,7 +676,7 @@ describe("Composer view behavior", () => {
       selection: selection({ isolation: "git_worktree" }),
     });
 
-    click(buttonByText(renderer.root, "Options · 3"));
+    click(buttonByText(renderer.root, "GPT-5.6 · Balanced"));
     expect(text(menuByLabel(renderer.root, "Options"))).toContain("Current: Balanced");
 
     click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
@@ -685,6 +685,37 @@ describe("Composer view behavior", () => {
 
     expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
     expect(text(menuByLabel(renderer.root, "Options"))).toContain("Reasoning");
+  });
+
+  it("names the fully grouped trigger after the model and reasoning in use", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const model = {
+      category: "model" as const,
+      kind: "select" as const, current_value: { type: "id" as const, value: "gpt-5.6" },
+      id: "model",
+      label: "Model",
+      values: [{ id: "gpt-5.6", label: "GPT-5.6" }, { id: "gpt-5.6-mini", label: "GPT-5.6 mini" }],
+    };
+    const trigger = (catalog: ConfigOptionsCatalog) => {
+      const renderer = renderComposer({ configOptions: catalog, showIsolationSelector: false });
+      return text(renderer.root.findByProps({ className: "composer-pill composer-overflow-options-control" }));
+    };
+
+    // The model leads whatever its place in the Agent's catalog order.
+    expect(trigger({ ...configOptions(), options: [...configOptions().options, model] })).toBe("GPT-5.6 · Balanced");
+    expect(trigger({ ...configOptions(), options: [model, ...booleanConfigOptions().options] })).toBe("GPT-5.6");
+    // A pending model change keeps the confirmed value; the trigger shows the change as busy.
+    expect(trigger({
+      ...configOptions(),
+      options: [model],
+      pending_change: { mutation_id: "mutation-1", option_id: "model", requested_value: { type: "id", value: "gpt-5.6-mini" } },
+    })).toBe("GPT-5.6");
+    // Without a model there is no value that names the set, so the trigger counts it.
+    expect(trigger(configOptions())).toBe("Options · 1");
   });
 
   it("closes a grouped option submenu when Options is pressed again", () => {
@@ -710,11 +741,11 @@ describe("Composer view behavior", () => {
       },
     });
 
-    click(buttonByText(renderer.root, "Options · 3"));
+    click(buttonByText(renderer.root, "GPT-5.6 · Balanced"));
     click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
     expect(menuByLabel(renderer.root, "Reasoning")).toBeTruthy();
 
-    click(buttonByText(renderer.root, "Options · 3"));
+    click(buttonByText(renderer.root, "GPT-5.6 · Balanced"));
 
     expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(0);
     expect(menusByLabel(renderer.root, "Options")).toHaveLength(0);

@@ -136,7 +136,7 @@ export function ComposerRunOptions({
                 className="composer-overflow-options-control"
                 disabled={disabled || overflowLocked}
                 icon={<SlidersHorizontal size={12} />}
-                label={`${visibleControls.length ? "More" : "Options"} · ${hiddenControls.length}`}
+                label={overflowTriggerLabel(controls, hiddenControls.length)}
                 locked={overflowLocked}
                 menuOpen={openMenu === "options" || hiddenMenuControl !== undefined}
                 pending={hiddenControls.some((control) =>
@@ -508,7 +508,7 @@ function MeasurementSurface({
             <Selector
               disabled={false}
               icon={<SlidersHorizontal size={12} />}
-              label={`${hiddenCount < controls.length ? "More" : "Options"} · ${hiddenCount}`}
+              label={overflowTriggerLabel(controls, hiddenCount)}
               locked={false}
               menuOpen={false}
               onClick={() => {}}
@@ -553,6 +553,26 @@ function controlDirectLabel(control: RunControl, displayedValue: ConfigOptionCur
       ? `${configOptionLabel(control.option)} → ${configOptionLabel(control.option, displayedValue)}`
       : configOptionLabel(control.option)
     : isolationLabel(selection.isolation);
+}
+
+/**
+ * Names the grouped trigger. Beside direct controls it counts the rest. With every control grouped
+ * it states the values in use instead, the model and then the reasoning level, because a count
+ * tells the user nothing about the next message; a catalog without a model keeps the count. It
+ * reads confirmed values only: a pending change shows as busy on the trigger and in its row.
+ */
+function overflowTriggerLabel(controls: RunControl[], hiddenCount: number) {
+  if (hiddenCount < controls.length) return `More · ${hiddenCount}`;
+  const model = selectedValueLabel(controls, "model");
+  if (!model) return `Options · ${hiddenCount}`;
+  const reasoning = selectedValueLabel(controls, "thought_level");
+  return reasoning ? `${model} · ${reasoning}` : model;
+}
+
+function selectedValueLabel(controls: RunControl[], category: ConfigOption["category"]) {
+  const control = controls.find((candidate) =>
+    candidate.kind === "config" && candidate.option.category === category && candidate.option.kind !== "boolean");
+  return control?.kind === "config" ? configOptionLabel(control.option) : undefined;
 }
 
 function controlIcon(control: RunControl, size = 12) {
