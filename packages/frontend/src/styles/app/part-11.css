@@ -113,9 +113,11 @@ body[data-input-modality="pointer"] button:focus-visible {
     font-size: 12px;
   }
 
+  /* The drawer covers the whole height, top bar included: the current Task's title and
+     actions are unusable while it is open. It closes from the scrim, a swipe, or Back. */
   body[data-shell="web"] .web-workbench-shell .sidebar {
     position: fixed;
-    z-index: 30;
+    z-index: 45;
     top: 0;
     bottom: 0;
     left: 0;
@@ -127,7 +129,7 @@ body[data-input-modality="pointer"] button:focus-visible {
     background: var(--oa-panel);
     display: grid;
     grid-template-rows: auto auto minmax(0, 1fr) auto;
-    padding: 56px 8px 10px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 8px 10px;
     overflow: hidden;
     pointer-events: none;
     transform: translateX(calc((var(--mobile-navigation-progress) - 1) * 100%));
@@ -175,7 +177,7 @@ body[data-input-modality="pointer"] button:focus-visible {
   body[data-shell="web"] .mobile-navigation-backdrop {
     display: block;
     position: fixed;
-    z-index: 20;
+    z-index: 42;
     inset: 0;
     width: 100%;
     min-height: 100%;
@@ -383,11 +385,18 @@ body[data-input-modality="pointer"] button:focus-visible {
     height: 44px;
   }
 
+  /* The folder icon shares the column and size of the New task, Search and Settings icons. */
   body[data-shell="web"] .project-task-group-toggle {
     min-height: 44px;
     height: 44px;
     gap: 8px;
-    padding-inline: 8px;
+    padding-inline: 6px;
+  }
+
+  body[data-shell="web"] .project-task-group-toggle > svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
   }
 
   /* One line per Project: the name leads at title weight, the count trails in muted

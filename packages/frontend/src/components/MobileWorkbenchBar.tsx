@@ -55,7 +55,10 @@ export function MobileWorkbenchBar({
 
   return (
     <header
+      // The open drawer covers this bar, so its controls leave the focus and reading order.
+      aria-hidden={navigationOpen || undefined}
       className="mobile-workbench-bar"
+      inert={navigationOpen || undefined}
       data-has-permission-policy={taskControls || undefined}
       data-has-plan={plan && !coverTitle ? true : undefined}
       data-more-open={showMore || undefined}

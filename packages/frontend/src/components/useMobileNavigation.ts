@@ -142,7 +142,7 @@ export function isMobileWebViewport() {
 export function mobileNavigationFocusableElements(root: HTMLElement) {
   return Array.from(
     root.querySelectorAll<HTMLElement>(
-      ".mobile-workbench-bar button, .sidebar button:not(:disabled), .sidebar input:not(:disabled)",
+      ".sidebar button:not(:disabled), .sidebar input:not(:disabled)",
     ),
   ).filter((element) => element.offsetParent !== null);
 }

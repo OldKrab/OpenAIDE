@@ -3,7 +3,7 @@
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, onTestFinished } from "vitest";
-import { anchoredPopupMaxHeight, PopupDialog, PopupMenu } from "./Popup";
+import { anchoredPopupMaxHeight, PopupDialog, PopupMenu, swallowTouchDismissClick } from "./Popup";
 
 it("limits an upward popup to the space above its trigger", () => {
   expect(anchoredPopupMaxHeight({
@@ -187,4 +187,21 @@ it("returns from an inner view on the platform Back action and closes only from 
   expect(document.querySelector('[role="menu"]')?.textContent).toBe("Rename");
   await back();
   expect(document.querySelector('button[aria-label="Task actions"]')?.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("lets a touch outside a menu only close it, without also clicking what lies under it", () => {
+  const button = document.createElement("button");
+  let clicks = 0;
+  button.addEventListener("click", () => { clicks += 1; });
+  document.body.append(button);
+
+  swallowTouchDismissClick(new PointerEvent("pointerdown", { pointerType: "touch" }));
+  button.click();
+  expect(clicks).toBe(0);
+  button.click();
+  expect(clicks).toBe(1);
+
+  swallowTouchDismissClick(new PointerEvent("pointerdown", { pointerType: "mouse" }));
+  button.click();
+  expect(clicks).toBe(2);
 });

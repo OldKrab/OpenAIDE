@@ -2062,7 +2062,9 @@ describe("Sidebar", () => {
 
     const group = tree.root.findByProps({ className: "project-task-group" });
     expect(group.props["aria-label"]).toBe("OpenAIDE");
-    expect(group.findByProps({ className: "project-task-group-counts" }).children.join("")).toBe("1 task");
+    const counts = group.findByProps({ className: "project-task-group-counts" });
+    expect(counts.children[0]).toBe("1");
+    expect(counts.findByProps({ className: "project-task-group-counts-unit" }).children.join("")).toBe(" task");
     expect(group.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
 

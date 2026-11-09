@@ -137,6 +137,11 @@ export function SidebarProjectTaskGroup({
   const countSummary = loading
     ? "Loading…"
     : projectGroupCountSummary(taskRows.length, nativeSessions.length, searching && nativeSessionsHaveMore);
+  const totalCount = taskRows.length + nativeSessions.length;
+  // A settled count renders its unit separately so phones can show the bare number.
+  const countLabel = !loading && countSummary === plainCountSummary(totalCount)
+    ? <>{totalCount}<span className="project-task-group-counts-unit">{` ${totalCount === 1 ? "task" : "tasks"}`}</span></>
+    : countSummary;
   const projectPreview = {
     kind: "project" as const,
     state: countSummary || "No tasks",
@@ -227,7 +232,7 @@ export function SidebarProjectTaskGroup({
           {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
           <span>
             <strong>{group.label}</strong>
-            {countSummary ? <small className="project-task-group-counts">{countSummary}</small> : null}
+            {countSummary ? <small className="project-task-group-counts">{countLabel}</small> : null}
           </span>
         </button>}
         <div className="project-task-group-actions">
@@ -313,5 +318,9 @@ function projectGroupCountSummary(taskCount: number, sessionCount: number, parti
   // An unfinished search has matched only the pages read so far; a bare count reads as final.
   return partialSearch
     ? `${totalCount} found so far`
-    : `${totalCount} ${totalCount === 1 ? "task" : "tasks"}`;
+    : plainCountSummary(totalCount);
+}
+
+function plainCountSummary(totalCount: number) {
+  return `${totalCount} ${totalCount === 1 ? "task" : "tasks"}`;
 }

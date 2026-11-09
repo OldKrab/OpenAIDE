@@ -294,6 +294,32 @@ function BrowserHoverSurface({
   );
 }
 
+/** Longest wait for the click that follows a dismissing touch before giving up on it. */
+const TOUCH_DISMISS_CLICK_WINDOW_MS = 800;
+
+/**
+ * A touch outside an open menu only closes it, as Android's own popups do: the click
+ * that the same tap fires afterwards is swallowed so it does not also open the row
+ * or press the button underneath. Mouse and pen presses keep their ordinary meaning.
+ */
+export function swallowTouchDismissClick(event: Event) {
+  if (!(event instanceof PointerEvent) || event.pointerType !== "touch") return;
+  const owner = (event.target instanceof Node ? event.target.ownerDocument : null) ?? document;
+  const view = owner.defaultView ?? window;
+  const swallow = (click: Event) => {
+    click.preventDefault();
+    click.stopPropagation();
+    stop();
+  };
+  const stop = () => {
+    view.clearTimeout(timeout);
+    owner.removeEventListener("click", swallow, true);
+  };
+  owner.addEventListener("click", swallow, true);
+  // A tap that becomes a scroll fires no click; release the guard so a later tap works.
+  const timeout = view.setTimeout(stop, TOUCH_DISMISS_CLICK_WINDOW_MS);
+}
+
 function BrowserAnchoredPopup({
   anchorRef,
   children,
@@ -339,7 +365,13 @@ function BrowserAnchoredPopup({
     if (anchorRef) refs.setPositionReference(anchorRef.current);
   }, [anchorRef, open, refs]);
   const click = useClick(context);
-  const dismiss = useDismiss(context, { outsidePressEvent: "pointerdown" });
+  const dismiss = useDismiss(context, {
+    outsidePress: (event) => {
+      swallowTouchDismissClick(event);
+      return true;
+    },
+    outsidePressEvent: "pointerdown",
+  });
   const role = useRole(context, { role: surfaceRole });
   const { getFloatingProps, getReferenceProps } = useInteractions([click, dismiss, role]);
   const transition = useTransitionStyles(context, {
