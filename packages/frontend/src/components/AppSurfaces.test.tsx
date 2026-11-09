@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
+import { mobileDrawerWidth } from "./useMobileNavigation";
 import { createInitialState, type AppState } from "../state/store";
 import type { FrontendShell } from "../services/frontendShell";
 import { TerminalPageHost } from "./terminals/TerminalPageHost";
@@ -749,7 +750,7 @@ describe("AppSurfaces callback wiring", () => {
 
     shell = tree.root.findByType("main");
     expect(shell.props.className).toContain("mobile-navigation-dragging");
-    expect(shell.props.style["--mobile-navigation-progress"]).toBeCloseTo(0.25, 2);
+    expect(shell.props.style["--mobile-navigation-progress"]).toBeCloseTo(72 / mobileDrawerWidth(window.innerWidth), 2);
     expect(latestMockProps<{ hiddenFromAccessibility?: boolean }>(surfaceMocks.sidebar)?.hiddenFromAccessibility).toBe(false);
   });
 
@@ -900,7 +901,7 @@ describe("AppSurfaces callback wiring", () => {
     });
     const shell = tree.root.findByType("main");
     act(() => {
-      shell.props.onPointerDownCapture(pointerEvent({ clientX: 240, clientY: 120, pointerId: 1 }));
+      shell.props.onPointerDownCapture(pointerEvent({ clientX: 300, clientY: 120, pointerId: 1 }));
       shell.props.onPointerMoveCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
       shell.props.onPointerUpCapture(pointerEvent({ clientX: 50, clientY: 124, pointerId: 1 }));
     });

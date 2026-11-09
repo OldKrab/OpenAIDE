@@ -387,7 +387,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     if (mobileNavigationOpen) {
       mainSurface.setAttribute("inert", "");
       mainSurface.setAttribute("aria-hidden", "true");
-      mobileNavigationButtonRef.current?.focus();
+      // The drawer covers the top bar, so focus starts on the drawer's first control.
+      const shell = mainSurface.closest<HTMLElement>(".web-workbench-shell");
+      (shell ? mobileNavigationFocusableElements(shell)[0] : undefined)?.focus();
       return () => {
         mainSurface.removeAttribute("aria-hidden");
         mainSurface.removeAttribute("inert");

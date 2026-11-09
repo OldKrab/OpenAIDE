@@ -67,7 +67,7 @@ test("narrow navigation requires the extra active-work confirmation", async ({ p
   await send(page, "smoke:hold");
   await expect(page.getByText("Waiting for steering", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open task navigation", exact: true }).click();
-  await openMenu(page, "smoke:hold");
+  await longPressMenu(page, "smoke:hold");
   await page.getByRole("menuitem", { name: "Delete session…" }).click();
   const ordinary = page.getByRole("dialog", { name: "Delete session?" });
   await ordinary.getByRole("button", { name: "Continue", exact: true }).click();
@@ -96,6 +96,15 @@ async function send(page, text) {
   await page.getByRole("textbox", { name: "Message" }).fill(text);
   await page.getByLabel("Send message").click();
   await expect(page).toHaveURL(/\/task\/task_/);
+}
+// On a phone the row's `…` is hidden; a held touch opens the same actions menu.
+async function longPressMenu(page, title) {
+  const row = page.getByRole("listitem").filter({ hasText: title }).first();
+  const box = await row.boundingBox();
+  const touch = { pointerType: "touch", isPrimary: true, pointerId: 1, clientX: box.x + 40, clientY: box.y + box.height / 2 };
+  await row.dispatchEvent("pointerdown", touch);
+  await expect(row.getByRole("button", { name: `Task actions for ${title}`, exact: true })).toHaveAttribute("aria-expanded", "true");
+  await row.dispatchEvent("pointerup", touch);
 }
 async function openMenu(page, title) {
   const row = page.getByRole("listitem").filter({ hasText: title }).first();

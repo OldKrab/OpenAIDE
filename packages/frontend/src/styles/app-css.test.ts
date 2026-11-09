@@ -603,17 +603,20 @@ describe("task list row styles", () => {
 
   it("keeps mobile sidebar rows visually clear of the footer action", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*grid-template-rows:\s*auto auto minmax\(0,\s*1fr\) auto;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*width:\s*min\(288px,\s*calc\(100vw - 96px\)\);/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 56px\)\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.sidebar-actions > button\s*{[^}]*width:\s*100%;[^}]*white-space:\s*nowrap;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar \.task-list\s*{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable;[^}]*margin-right:\s*-8px;[^}]*padding-right:\s*4px;[^}]*padding-bottom:\s*12px;[^}]*scroll-padding-bottom:\s*12px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar \.sidebar-footer\s*{[^}]*position:\s*relative;[^}]*z-index:\s*1;[^}]*background:\s*var\(--oa-panel\);[^}]*box-shadow:\s*0 -12px 18px var\(--oa-panel\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.project-task-more,[^{]+\.web-workbench-shell \.session-more\s*{[^}]*position:\s*static;[^}]*z-index:\s*auto;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.project-task-more\s*{\s*bottom:/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.session-more\s*{\s*bottom:/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) 44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action-slot\s*{[^}]*position:\s*relative;[^}]*width:\s*44px;[^}]*min-width:\s*44px;[^}]*pointer-events:\s*auto;/);
+    // Phone row actions open with a long press; the button stays reachable but takes no width.
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*user-select:\s*none;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action-slot\s*{[^}]*position:\s*absolute;[^}]*width:\s*1px;[^}]*clip-path:\s*inset\(50%\);[^}]*pointer-events:\s*none;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action-slot:has\(:focus-visible\)\s*{[^}]*width:\s*44px;[^}]*clip-path:\s*none;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.mobile-navigation-backdrop\s*{[^}]*background:\s*oklch\(0 0 0 \/ 0\.42\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row-action\s*{[^}]*min-width:\s*44px;[^}]*width:\s*44px;[^}]*opacity:\s*1;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,[^{]+body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta\s*{[^}]*opacity:\s*1;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):hover \.task-trailing-meta,[^{]+body\[data-shell="web"\] \.task-row:has\(\.task-row-action:not\(:disabled\)\):has\(:focus-visible\) \.task-trailing-meta,[^{]+body\[data-shell="web"\] \.task-row\[data-menu-open="true"\] \.task-trailing-meta\s*{[^}]*opacity:\s*1;/);
   });
 
   it("uses count-aware image layouts with overlaid composer removal controls", () => {
