@@ -119,7 +119,8 @@ body[data-input-modality="pointer"] button:focus-visible {
     top: 0;
     bottom: 0;
     left: 0;
-    width: min(288px, calc(100vw - 96px));
+    /* Keep in step with `mobileDrawerWidth` in useMobileNavigation.ts, which maps a swipe to progress. */
+    width: min(360px, calc(100vw - 56px));
     height: 100dvh;
     border-right: 1px solid var(--oa-border);
     border-bottom: 0;
@@ -179,7 +180,8 @@ body[data-input-modality="pointer"] button:focus-visible {
     width: 100%;
     min-height: 100%;
     border: 0;
-    background: color-mix(in oklch, var(--oa-text) 18%, transparent);
+    /* Black in both themes: a text-coloured scrim lightens dark Chat and makes the drawer look recessed. */
+    background: oklch(0 0 0 / 0.42);
     padding: 0;
     opacity: var(--mobile-navigation-progress, 0);
     pointer-events: none;
@@ -272,15 +274,30 @@ body[data-input-modality="pointer"] button:focus-visible {
     background: transparent;
   }
 
+  /* A phone opens row actions with a long press, so titles get the width a per-row
+     button would take. The button stays in the accessibility tree and keyboard order,
+     visually hidden until it has keyboard focus. */
   body[data-shell="web"] .task-row {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: minmax(0, 1fr);
+    -webkit-touch-callout: none;
+    user-select: none;
   }
 
   body[data-shell="web"] .task-row-action-slot {
-    position: relative;
-    inset: auto;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    pointer-events: none;
+  }
+
+  body[data-shell="web"] .task-row-action-slot:has(:focus-visible) {
     width: 44px;
-    min-width: 44px;
+    overflow: visible;
+    clip-path: none;
     pointer-events: auto;
   }
 
@@ -291,13 +308,19 @@ body[data-input-modality="pointer"] button:focus-visible {
     opacity: 1;
   }
 
-  body[data-shell="web"] .external-session-row .task-row-action:disabled {
-    opacity: 0;
+  body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):hover .task-trailing-meta,
+  body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):has(:focus-visible) .task-trailing-meta,
+  body[data-shell="web"] .task-row[data-menu-open="true"] .task-trailing-meta {
+    opacity: 1;
   }
 
-  body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):hover .task-trailing-meta,
-  body[data-shell="web"] .task-row:has(.task-row-action:not(:disabled)):has(:focus-visible) .task-trailing-meta {
-    opacity: 1;
+  /* Outranks the touch hover reset so the pressed row stays marked while its menu is open. */
+  body[data-shell="web"] .sidebar .task-row[data-menu-open="true"]:not(.selected) {
+    background: var(--oa-raised);
+  }
+
+  body[data-shell="web"] .task-trailing-meta {
+    padding-right: 6px;
   }
 
   body[data-shell="web"] .task-row-menu {
@@ -315,6 +338,7 @@ body[data-input-modality="pointer"] button:focus-visible {
   body[data-shell="web"] .task-open {
     min-height: 36px;
     padding-block: 4px;
+    font-weight: 400;
   }
 
   /* Typed text stays 16px so iOS Safari does not zoom on focus; the empty
@@ -362,10 +386,46 @@ body[data-input-modality="pointer"] button:focus-visible {
   body[data-shell="web"] .project-task-group-toggle {
     min-height: 44px;
     height: 44px;
+    gap: 8px;
+    padding-inline: 8px;
   }
 
-  body[data-shell="web"] .project-task-group-toggle {
-    padding-inline: 8px;
+  /* One line per Project: the name leads at title weight, the count trails in muted
+     text, so a Project reads as the parent of the lighter Task rows under it. */
+  body[data-shell="web"] .project-task-group-toggle span {
+    flex: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  body[data-shell="web"] .project-task-group-toggle strong {
+    flex: 0 1 auto;
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  body[data-shell="web"] .project-task-group-counts {
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Task icons line up under the Project name rather than under its folder icon. */
+  body[data-shell="web"] .project-task-group-rows,
+  body[data-shell="web"] .project-task-group-live {
+    padding-left: 16px;
+  }
+
+  body[data-shell="web"] .project-task-more {
+    margin-left: 0;
+    padding-left: 29px;
+  }
+
+  /* Pull the list down to refresh it; the heading button is the pointer path. */
+  body[data-shell="web"] .task-section-refresh {
+    display: none;
   }
 
   body[data-shell="web"] .composer-popover button {
@@ -404,8 +464,9 @@ body[data-input-modality="pointer"] button:focus-visible {
     box-sizing: border-box;
     padding: 0 4px;
     border-radius: 8px;
-    background: var(--oa-focus);
-    color: var(--oa-bg);
+    /* Neutral: a count of changed files is information, not a state that needs the accent. */
+    background: color-mix(in oklch, var(--oa-text) 18%, var(--oa-panel));
+    color: var(--oa-text);
     font: 600 10px/16px var(--oa-ui-font);
     text-align: center;
   }

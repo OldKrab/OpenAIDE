@@ -5,6 +5,7 @@ import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { PopupMenu } from "./Popup";
 import { useBackNavigation } from "./useBackNavigation";
+import { useTouchLongPress } from "./useTouchLongPress";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { TaskStateSpinner } from "./TaskStateSpinner";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
@@ -148,12 +149,15 @@ export function SidebarNativeSessionRow({
     }
     setMenuOpen(open);
   };
+  // Touch opens the same menu with a long press; phones hide the per-row button.
+  const longPress = useTouchLongPress(() => changeMenuOpen(true), !editingTitle && !adopting && !lifecyclePending);
 
   return (
     <div
       className="task-row external-session-row"
       data-archived-native-session={archived || undefined}
       data-menu-open={menuOpen || undefined}
+      {...longPress}
       onPointerEnter={() => rowRef.current && preview?.enter(previewContent(), rowRef.current)}
       onPointerLeave={(event) => preview?.leave(event.relatedTarget)}
       ref={rowRef}
@@ -202,6 +206,7 @@ export function SidebarNativeSessionRow({
       <SidebarRowActionSlot>
         {<span className="external-session-details-actions">
             <PopupMenu
+              anchorRef={rowRef}
               className="task-row-menu"
               label={`Task actions for ${title}`}
               onBack={archiveOlder.state.kind !== "idle" ? archiveOlder.reset : detailsOpen ? () => setDetailsOpen(false) : undefined}

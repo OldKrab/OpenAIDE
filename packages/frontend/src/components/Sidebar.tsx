@@ -15,6 +15,7 @@ import { groupedTasks, projectGroupRows } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
+import { usePullToRefresh } from "./usePullToRefresh";
 import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
 import { AgentDisableDialog } from "./AgentDisableDialog";
 import { useAgentDisableConfirmation } from "./useAgentDisableConfirmation";
@@ -211,6 +212,12 @@ export const Sidebar = memo(function Sidebar({
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
   const noProjects = groupByProject && projects.length === 0;
+  const refreshBusy = nativeSessions.loading || nativeSessions.adoptingSessionId !== undefined;
+  // Touch refreshes by pulling the list down; the heading button stays for pointers and is hidden on phones.
+  const pullToRefresh = usePullToRefresh(taskListRef, () => onLoadNativeSessions(), {
+    busy: refreshBusy,
+    enabled: showSessionRefresh,
+  });
 
   return (
     <aside
@@ -271,7 +278,7 @@ export const Sidebar = memo(function Sidebar({
             <button
               aria-label="Refresh tasks"
               className="task-section-refresh"
-              disabled={nativeSessions.loading || nativeSessions.adoptingSessionId !== undefined}
+              disabled={refreshBusy}
               onClick={() => onLoadNativeSessions()}
               title={nativeSessions.loading ? "Refreshing tasks" : "Refresh tasks"}
               type="button"
@@ -286,13 +293,24 @@ export const Sidebar = memo(function Sidebar({
         className="task-list-shell"
         data-more-above={String(taskListOverflow.moreAbove)}
         data-more-below={String(taskListOverflow.moreBelow)}
-      ><div
+      >{showSessionRefresh && (pullToRefresh.pull > 0 || pullToRefresh.refreshing) ? (
+        <div
+          aria-hidden="true"
+          className="task-pull-refresh"
+          data-armed={pullToRefresh.armed || undefined}
+          data-loading={(pullToRefresh.refreshing && pullToRefresh.pull === 0) || undefined}
+          style={{ "--task-pull-distance": `${pullToRefresh.pull}px` } as import("react").CSSProperties}
+        >
+          <RefreshCcw size={15} />
+        </div>
+      ) : null}<div
         className="task-list"
         role="list"
         aria-label={hasSearchQuery
           ? showArchived ? "Archive search results" : "Task search results"
           : showArchived ? "Archived tasks" : "Tasks"}
         onScroll={taskListOverflow.onScroll}
+        {...pullToRefresh.handlers}
         ref={taskListRef}
       >
         {!showWorkspaceSetup && taskListError ? <p className="empty-list">{taskListError}</p> : null}

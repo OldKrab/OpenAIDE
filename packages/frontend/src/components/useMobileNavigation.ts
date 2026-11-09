@@ -77,7 +77,7 @@ export function useMobileNavigation(enabled: boolean) {
     if (elapsed > 0) gesture.velocityX = (event.clientX - gesture.previousX) / elapsed;
     gesture.previousX = event.clientX;
     gesture.previousTime = event.timeStamp;
-    const drawerWidth = Math.max(1, Math.min(288, window.innerWidth - 96));
+    const drawerWidth = mobileDrawerWidth(window.innerWidth);
     const rawProgress = (gesture.startingOpen ? 1 : 0) + deltaX / drawerWidth;
     gesture.progress = resistedProgress(rawProgress);
     setDragProgress(gesture.progress);
@@ -124,6 +124,11 @@ function resistedProgress(progress: number) {
   if (progress < 0) return -Math.min(0.025, Math.abs(progress) * 0.08);
   if (progress > 1) return 1 + Math.min(0.025, (progress - 1) * 0.08);
   return progress;
+}
+
+/** The drawer's rendered width; mirrors the `.sidebar` width rule in part-11.css. */
+export function mobileDrawerWidth(viewportWidth: number) {
+  return Math.max(1, Math.min(360, viewportWidth - 56));
 }
 
 /** True at phone widths, where navigation becomes a drawer. */

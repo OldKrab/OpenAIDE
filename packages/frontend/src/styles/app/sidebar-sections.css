@@ -106,6 +106,50 @@
   position: relative;
 }
 
+/* Pull-to-refresh indicator: follows the finger, turns with it, and spins while the
+   refresh the pull started is running. */
+.task-pull-refresh {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+  opacity: min(1, calc(var(--task-pull-distance, 0px) / 64px));
+  pointer-events: none;
+  transform: translate(-50%, calc(var(--task-pull-distance, 0px) - 24px));
+}
+
+.task-pull-refresh > svg {
+  transform: rotate(calc(var(--task-pull-distance, 0px) / 64px * 270deg));
+}
+
+.task-pull-refresh[data-armed="true"] {
+  color: var(--oa-text);
+}
+
+.task-pull-refresh[data-loading="true"] {
+  opacity: 1;
+  transform: translate(-50%, 8px);
+}
+
+.task-pull-refresh[data-loading="true"] > svg {
+  animation: task-pull-refresh-spin 800ms linear infinite;
+}
+
+@keyframes task-pull-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-pull-refresh[data-loading="true"] > svg { animation: none; }
+}
+
 .task-list-shell > .task-list {
   height: 100%;
 }

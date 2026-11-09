@@ -291,13 +291,18 @@ export function SidebarProjectTaskGroup({
               }}
               type="button"
             >
-              {searching ? "Search more tasks" : "Load more"}
+              {searching ? "Search more tasks" : loadMoreLabel(hiddenCount, pageSize)}
             </button>
           ) : null}
         </div>
       </div>
     </section>
   );
+}
+
+/** Names the rows a press reveals when they are already loaded; further Agent pages have no known count. */
+function loadMoreLabel(hiddenCount: number, pageSize: number) {
+  return hiddenCount > 0 ? `Show ${Math.min(pageSize, hiddenCount)} more` : "Show more";
 }
 
 function projectGroupCountSummary(taskCount: number, sessionCount: number, partialSearch: boolean) {
