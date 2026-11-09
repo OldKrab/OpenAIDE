@@ -76,9 +76,10 @@ The start screen keeps the centered question **What are we working on?** followe
 
 Adding a Project chooses a folder and creates or selects the canonical Project record.
 
-- Web opens the framed folder explorer. It starts in the home folder when that root is available, keeps the current directory as the selection, prefills the Project name from that folder, and supports Up, breadcrumbs, editable path, folder traversal, and **Add this folder**.
+- Web opens the framed folder explorer. It starts in the home folder when that root is available, keeps the current directory as the selection, prefills the Project name from that folder, and supports Up, breadcrumbs, editable path, folder traversal, **New folder**, and **Add this folder**.
+- **New folder** asks for one folder name inline, creates that empty folder in the current directory through App Server, and opens it. It never creates intermediate folders or reuses an existing folder; a name clash, missing parent, or permission problem is reported and the typed name is kept.
 - The Project name follows the current folder until the user edits it.
-- Desktop uses the operating system's native folder picker.
+- Desktop uses the operating system's native folder picker, which offers its own new-folder control.
 - VS Code uses the appropriate VS Code workspace or folder capability.
 - Shell-specific folder selection stays behind the shell boundary; the shared Frontend receives a selected-folder result.
 - If the canonical folder is already a Project, OpenAIDE selects that Project instead of creating a duplicate.

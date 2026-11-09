@@ -85,8 +85,8 @@ use crate::task::{
     TaskToolImagePreviewResult,
 };
 use crate::workspace::{
-    WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
-    WorkspaceListRootsResult,
+    WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
+    WorkspaceListRootsParams, WorkspaceListRootsResult,
 };
 use crate::worktree::{
     WorktreeCreateParams, WorktreeCreateResult, WorktreeLinkedTasksParams,
@@ -380,6 +380,12 @@ protocol_method!(
     WorkspaceListDirectory,
     WORKSPACE_LIST_DIRECTORY,
     WorkspaceListDirectoryParams,
+    WorkspaceListDirectoryResult
+);
+protocol_method!(
+    WorkspaceCreateDirectory,
+    WORKSPACE_CREATE_DIRECTORY,
+    WorkspaceCreateDirectoryParams,
     WorkspaceListDirectoryResult
 );
 protocol_method!(ProjectAdd, PROJECT_ADD, ProjectAddParams, ProjectAddResult);

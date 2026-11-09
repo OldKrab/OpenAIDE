@@ -8,7 +8,7 @@ use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion
 ///
 /// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
 /// `minor` for any change an older client cannot ignore.
-pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 3, minor: 0 };
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 3, minor: 1 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

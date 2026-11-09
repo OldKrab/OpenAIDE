@@ -182,8 +182,8 @@ use crate::terminals::{
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
-    WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
-    WorkspaceListRootsResult,
+    WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
+    WorkspaceListRootsParams, WorkspaceListRootsResult,
 };
 use crate::worktree::{
     WorktreeAvailability, WorktreeBaseSelection, WorktreeBaseSnapshot, WorktreeCreateParams,
@@ -414,6 +414,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<WorkspaceBrowserRoot>(output, config);
     push_decl::<WorkspaceListDirectoryParams>(output, config);
     push_decl::<WorkspaceListDirectoryResult>(output, config);
+    push_decl::<WorkspaceCreateDirectoryParams>(output, config);
     push_decl::<ProjectAddParams>(output, config);
     push_decl::<ProjectAddResult>(output, config);
     push_decl::<ProjectRenameParams>(output, config);

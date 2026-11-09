@@ -46,3 +46,15 @@ pub struct WorkspaceBrowserEntry {
     pub label: String,
     pub path: String,
 }
+
+/// Creates one new, empty folder inside `parent_path` for the Add Project explorer.
+///
+/// `name` is a single path segment. The App Server never creates intermediate
+/// folders and never reuses an existing one, so a typo cannot silently select a
+/// different folder. The result lists the created folder, so the explorer opens it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCreateDirectoryParams {
+    pub parent_path: String,
+    pub name: String,
+}

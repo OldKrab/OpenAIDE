@@ -15,8 +15,8 @@ use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::server_requests::{ShellRevealFileParams, SHELL_REVEAL_FILE};
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::workspace::{
-    WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
-    WorkspaceListRootsResult,
+    WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
+    WorkspaceListRootsParams, WorkspaceListRootsResult,
 };
 use serde_json::Value;
 
@@ -467,6 +467,26 @@ impl RpcGateway {
             }
         };
         let result = match self.attachments.workspace_directory(params) {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<WorkspaceListDirectoryResult>(connection_id, id, meta, result)
+    }
+
+    pub(super) fn handle_workspace_create_directory(
+        &self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<WorkspaceCreateDirectoryParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let result = match self.attachments.create_workspace_directory(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };

@@ -4,6 +4,7 @@ import {
   ATTACHMENT_LIST_ROOTS,
   CLIENT_HEARTBEAT,
   TASK_SEARCH_FILES,
+  WORKSPACE_CREATE_DIRECTORY,
   WORKSPACE_LIST_DIRECTORY,
   WORKSPACE_LIST_ROOTS,
   type AttachmentHandleId,
@@ -74,6 +75,10 @@ function createWorkspaceBrowserCallbacks({
     ownerKey: `new-task-workspace:${operation.id}`,
     listRoots: async () => settle((await request(WORKSPACE_LIST_ROOTS, {})).roots, WORKSPACE_LIST_ROOTS),
     listDirectory: async (path: string) => settle(await request(WORKSPACE_LIST_DIRECTORY, { path }), WORKSPACE_LIST_DIRECTORY),
+    createDirectory: async (parentPath: string, name: string) => settle(
+      await request(WORKSPACE_CREATE_DIRECTORY, { parentPath, name }),
+      WORKSPACE_CREATE_DIRECTORY,
+    ),
   };
 }
 

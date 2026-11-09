@@ -565,11 +565,16 @@ body[data-shell="web"] .sidebar {
 
 .project-folder-explorer-toolbar {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px;
   padding: 4px 6px;
   border-bottom: 1px solid var(--oa-border-subtle);
+}
+
+.project-folder-explorer-actions {
+  display: flex;
+  gap: 2px;
 }
 
 .project-folder-explorer-toolbar button {
@@ -691,6 +696,46 @@ body[data-shell="web"] .sidebar {
 .project-folder-explorer-row:hover,
 .project-folder-explorer-row:focus-visible {
   background: var(--oa-raised);
+}
+
+.project-folder-explorer-new {
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  padding-block: 4px;
+  background: var(--oa-raised);
+}
+
+.project-folder-explorer-new > svg:first-child {
+  color: var(--oa-muted);
+}
+
+.project-folder-explorer-new input {
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.project-folder-explorer-new button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  place-items: center;
+}
+
+.project-folder-explorer-new button:hover:not(:disabled) {
+  background: var(--oa-panel);
+}
+
+.project-folder-explorer-new button:disabled {
+  opacity: 0.35;
 }
 
 .project-folder-explorer-status {

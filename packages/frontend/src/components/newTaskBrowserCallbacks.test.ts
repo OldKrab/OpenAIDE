@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WORKSPACE_LIST_ROOTS } from "@openaide/app-server-client";
+import { WORKSPACE_CREATE_DIRECTORY, WORKSPACE_LIST_ROOTS } from "@openaide/app-server-client";
 import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { createInitialState } from "../state/store";
 import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
@@ -29,6 +29,16 @@ describe("workspace folder browser", () => {
 
     await expect(roots).resolves.toEqual([{ path: "/" }]);
     expect(request).toHaveBeenCalledWith(WORKSPACE_LIST_ROOTS, {});
+  });
+
+  it("creates a folder through the App Server and returns its listing", async () => {
+    const { answer, browser: folders, request } = browser();
+    const listing = { directory: { label: "app", path: "/home/user/app", parentPath: "/home/user" }, entries: [] };
+    const created = folders.createDirectory!("/home/user", "app");
+    answer(listing);
+
+    await expect(created).resolves.toEqual(listing);
+    expect(request).toHaveBeenCalledWith(WORKSPACE_CREATE_DIRECTORY, { parentPath: "/home/user", name: "app" });
   });
 
   it("drops a folder listing from a replaced App Server replica", async () => {

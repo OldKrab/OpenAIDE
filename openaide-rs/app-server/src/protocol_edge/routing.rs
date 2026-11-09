@@ -27,10 +27,10 @@ use openaide_app_server_protocol::methods::{
     TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
     TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE, TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION,
     TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PERMISSION_POLICY,
-    TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_LIST_DIRECTORY,
-    WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS, WORKTREE_RECREATE,
-    WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE, WORKTREE_RENAME,
-    WORKTREE_RESOLVE_FOLDER,
+    TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_CREATE_DIRECTORY,
+    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
+    WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
+    WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 use openaide_app_server_protocol::state::SubscriptionScope;
 
@@ -354,6 +354,9 @@ impl RpcGateway {
             }
             WORKSPACE_LIST_DIRECTORY => {
                 self.handle_workspace_list_directory(connection_id, id, params, meta)
+            }
+            WORKSPACE_CREATE_DIRECTORY => {
+                self.handle_workspace_create_directory(connection_id, id, params, meta)
             }
             PROJECT_ADD => self.handle_project_add(connection_id, id, params, meta, now),
             PROJECT_RENAME => self.handle_project_rename(connection_id, id, params, meta, now),

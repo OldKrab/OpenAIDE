@@ -32,7 +32,7 @@ use crate::storage::Store;
 use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier};
 use crate::tasks::mutation::TaskMutationResult;
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
-use openaide_app_server_protocol::errors::ProtocolErrorCode;
+use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentConfigOptionCurrentValue, LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot,
@@ -50,7 +50,9 @@ use openaide_app_server_protocol::task::{
     TaskSetConfigOptionParams, TaskSetPermissionPolicyParams, TaskSetPinnedParams,
     TaskSetTitleParams, TaskTitleSelection,
 };
-use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
+use openaide_app_server_protocol::workspace::{
+    WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
+};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -2560,6 +2562,85 @@ fn workspace_directory_lists_child_directories_for_picker() {
     assert_eq!(result.entries.len(), 1);
     assert_eq!(result.entries[0].label, "app");
     assert!(result.entries[0].path.ends_with("/app"));
+}
+
+fn workspace_browser_api(state: &std::path::Path) -> TaskProductApi {
+    let store = Store::open(state.to_path_buf()).unwrap();
+    TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap()
+}
+
+fn create_folder(
+    api: &TaskProductApi,
+    parent: &std::path::Path,
+    name: &str,
+) -> Result<WorkspaceListDirectoryResult, ProtocolError> {
+    api.create_workspace_directory(WorkspaceCreateDirectoryParams {
+        parent_path: parent.to_string_lossy().to_string(),
+        name: name.to_string(),
+    })
+}
+
+#[test]
+fn workspace_create_directory_creates_and_lists_the_new_folder() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let api = workspace_browser_api(state.path());
+
+    let result = create_folder(&api, temp.path(), "  new-app  ").unwrap();
+
+    assert!(temp.path().join("new-app").is_dir());
+    assert_eq!(result.directory.label, "new-app");
+    assert_eq!(
+        result.directory.parent_path.as_deref(),
+        Some(temp.path().to_string_lossy().as_ref())
+    );
+    assert!(result.entries.is_empty());
+}
+
+#[test]
+fn workspace_create_directory_reports_an_existing_folder_instead_of_reusing_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let api = workspace_browser_api(state.path());
+    std::fs::create_dir(temp.path().join("app")).unwrap();
+
+    let error = create_folder(&api, temp.path(), "app").unwrap_err();
+
+    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+}
+
+#[test]
+fn workspace_create_directory_accepts_only_one_path_segment() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let api = workspace_browser_api(state.path());
+
+    for name in ["", "   ", ".", "..", "a/b", "a\\b", "../escape"] {
+        let error = create_folder(&api, temp.path(), name).unwrap_err();
+        assert_eq!(error.code, ProtocolErrorCode::ValidationFailed, "{name:?}");
+    }
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn workspace_create_directory_requires_an_existing_absolute_parent() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let api = workspace_browser_api(state.path());
+
+    let missing = create_folder(&api, &temp.path().join("gone"), "app").unwrap_err();
+    let relative = create_folder(&api, std::path::Path::new("relative"), "app").unwrap_err();
+
+    assert_eq!(missing.code, ProtocolErrorCode::NotFound);
+    assert!(!temp.path().join("gone").exists());
+    assert_eq!(relative.code, ProtocolErrorCode::ValidationFailed);
 }
 
 #[test]
