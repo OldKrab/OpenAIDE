@@ -389,8 +389,8 @@ impl ReplayDelegations {
         session_id: &str,
         message: SessionMessage,
     ) -> Option<SessionUpdate> {
-        let sender = message.sender_session_id.as_ref().map(|id| &*id.0);
-        let recipient = message.recipient_session_id.as_ref().map(|id| &*id.0);
+        let sender = message.sender_session_id.value().map(|id| &*id.0);
+        let recipient = message.recipient_session_id.value().map(|id| &*id.0);
         let row = counterpart(session_id, sender, recipient)
             .and_then(|(child, outgoing)| Some((self.children.get_mut(child)?, outgoing)))
             .and_then(|((name, delegation), outgoing)| {

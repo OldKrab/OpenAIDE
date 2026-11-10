@@ -240,8 +240,8 @@ impl AcpHostCapabilityHandlers {
         let response =
             tokio::task::spawn_blocking(move || sink.request_question(form.clone(), cancellation))
                 .await
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()));
+                .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?
+                .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()));
         self.elicitation_cancellations
             .lock()
             .expect("ACP elicitation cancellation lock poisoned")
@@ -292,8 +292,8 @@ impl AcpHostCapabilityHandlers {
             )
         })
         .await
-        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
-        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+        .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?
+        .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?
         .get("opened")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
@@ -341,7 +341,7 @@ impl AcpHostCapabilityHandlers {
         if let Some((root_session_id, subagent_name)) = self
             .native_subagents
             .permission_attribution(&session_id, request.tool_call.clone())
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?
         {
             if let Some(title) = request.tool_call.fields.title.as_mut() {
                 *title = format!("{} · {}", subagent_name, title);
@@ -365,7 +365,7 @@ impl AcpHostCapabilityHandlers {
                     RequestPermissionOutcome::Cancelled,
                 )),
             }
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
             logging::info(
                 "acp_permission_response_returned",
                 json!({
@@ -404,7 +404,7 @@ impl AcpHostCapabilityHandlers {
                 RequestPermissionOutcome::Cancelled,
             ))
         }
-        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+        .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
         logging::info(
             "acp_permission_response_returned",
             json!({
@@ -429,7 +429,7 @@ impl AcpHostCapabilityHandlers {
     ) -> agent_client_protocol::Result<ReadTextFileResponse> {
         read_text_file_from_host(self.host_bridge.clone(), request, self.trace.clone())
             .await
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))
     }
 
     pub(super) async fn write_text_file(
@@ -438,7 +438,7 @@ impl AcpHostCapabilityHandlers {
     ) -> agent_client_protocol::Result<WriteTextFileResponse> {
         write_text_file_from_host(self.host_bridge.clone(), request, self.trace.clone())
             .await
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))
     }
 
     pub(super) async fn create_terminal(
@@ -449,11 +449,11 @@ impl AcpHostCapabilityHandlers {
         let permit = self
             .terminal_registry
             .begin_create(&session_id)
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
         let response =
             create_terminal_from_host(self.host_bridge.clone(), request, self.trace.clone())
                 .await
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
         permit.complete(&response.terminal_id.to_string());
         Ok(response)
     }
@@ -464,7 +464,7 @@ impl AcpHostCapabilityHandlers {
     ) -> agent_client_protocol::Result<TerminalOutputResponse> {
         terminal_output_from_host(self.host_bridge.clone(), request, self.trace.clone())
             .await
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))
     }
 
     pub(super) async fn wait_for_terminal_exit(
@@ -490,7 +490,7 @@ impl AcpHostCapabilityHandlers {
             self.trace.clone(),
         )
         .await
-        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))
+        .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))
     }
 
     pub(super) async fn kill_terminal(
@@ -499,7 +499,7 @@ impl AcpHostCapabilityHandlers {
     ) -> agent_client_protocol::Result<KillTerminalResponse> {
         kill_terminal_from_host(self.host_bridge.clone(), request, self.trace.clone())
             .await
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))
+            .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))
     }
 
     pub(super) async fn release_terminal(
@@ -511,7 +511,7 @@ impl AcpHostCapabilityHandlers {
         let response =
             release_terminal_from_host(self.host_bridge.clone(), request, self.trace.clone())
                 .await
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
         self.terminal_registry.released(&session_id, &terminal_id);
         Ok(response)
     }

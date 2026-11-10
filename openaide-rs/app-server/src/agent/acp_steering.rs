@@ -6,7 +6,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Instant;
 
-use agent_client_protocol::{Agent, ConnectionTo, JsonRpcRequest, JsonRpcResponse};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::{Agent, JsonRpcRequest, JsonRpcResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -136,7 +137,7 @@ impl SteeringRequests {
                     }
                 }
                 result.map_err(|error| {
-                    if error.code == agent_client_protocol::ErrorCode::MethodNotFound {
+                    if error.code == agent_client_protocol::ErrorCode::METHOD_NOT_FOUND {
                         RuntimeError::MethodNotFound("_session/steering".into())
                     } else {
                         acp_request_error(&error)

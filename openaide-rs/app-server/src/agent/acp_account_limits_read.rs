@@ -3,7 +3,8 @@
 
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::{Agent, ConnectionTo, UntypedMessage};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::{Agent, UntypedMessage};
 use serde_json::{json, Value};
 
 use crate::agent::acp_account_limits_projection::{
@@ -80,7 +81,7 @@ async fn read(
     .await
     .map_err(|_| RuntimeError::NotReady("ACP account limits read timed out".to_string()))?
     .map_err(|error| {
-        if error.code == agent_client_protocol::ErrorCode::MethodNotFound {
+        if error.code == agent_client_protocol::ErrorCode::METHOD_NOT_FOUND {
             RuntimeError::MethodNotFound(ACCOUNT_LIMITS_READ_METHOD.into())
         } else {
             acp_request_error(&error)

@@ -54,8 +54,9 @@ use crate::protocol::model::{
     ConfigOptionKind, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
     ToolPresentationKind,
 };
+use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::JsonRpcMessage;
-use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
+use agent_client_protocol::{Agent, Client, Handled};
 use std::collections::HashMap;
 use std::env;
 #[cfg(unix)]
@@ -134,7 +135,7 @@ impl agent_client_protocol::ConnectTo<Client> for AuthRequiredTestAgent {
         let new_session_count = self.new_session_count.clone();
 
         Agent
-            .builder()
+            .v1()
             .name("auth-required-test-agent")
             .on_receive_request(
                 async move |_request: InitializeRequest, responder, _connection| {
@@ -182,7 +183,7 @@ impl agent_client_protocol::ConnectTo<Client> for SessionListAuthTestAgent {
         let list_count = self.list_count.clone();
 
         Agent
-            .builder()
+            .v1()
             .name("session-list-auth-test-agent")
             .on_receive_request(
                 async move |_request: InitializeRequest, responder, _connection| {
@@ -233,7 +234,7 @@ impl agent_client_protocol::ConnectTo<Client> for LoadSessionReplayTestAgent {
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("load-session-replay-test-agent")
             .on_receive_request(
                 async move |_request: InitializeRequest, responder, _connection| {
@@ -1535,7 +1536,7 @@ fn start_active_session_does_not_implicitly_authenticate_or_retry() {
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         Client
-            .builder()
+            .v1()
             .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
                 let initialize = connection
                     .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -1581,7 +1582,7 @@ fn session_list_does_not_implicitly_authenticate_or_retry() {
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         Client
-            .builder()
+            .v1()
             .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
                 let initialize = connection
                     .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -1619,7 +1620,7 @@ fn load_active_session_captures_replayed_updates_before_response() {
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         Client
-            .builder()
+            .v1()
             .on_receive_notification(
                 async move |notification: SessionNotification, cx| {
                     let mut active = notification_load_replay
@@ -1659,9 +1660,7 @@ fn load_active_session_captures_replayed_updates_before_response() {
                         },
                     )
                     .await
-                    .map_err(|error| {
-                        agent_client_protocol::util::internal_error(error.to_string())
-                    })?;
+                    .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
 
                     assert_eq!(active_session.session_id().to_string(), "external-session");
                     assert_eq!(catalog.model_id().as_deref(), Some("gpt-5.5"));

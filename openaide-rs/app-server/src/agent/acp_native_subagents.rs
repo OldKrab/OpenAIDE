@@ -107,8 +107,10 @@ impl AcpNativeSubagentRouter {
                 self.released_message(ReleasedSessionMessage {
                     session_id: outer_session_id,
                     message_id: message.message_id.to_string(),
-                    sender_session_id: message.sender_session_id,
-                    recipient_session_id: message.recipient_session_id,
+                    // OpenAIDE keeps no per-message identity, so an omitted identity and a
+                    // `null` one both read as unknown, as before schema 1.16.
+                    sender_session_id: message.sender_session_id.take(),
+                    recipient_session_id: message.recipient_session_id.take(),
                     content: message.content.value().cloned().unwrap_or_default(),
                     chunk: false,
                 })
@@ -117,8 +119,12 @@ impl AcpNativeSubagentRouter {
                 self.released_message(ReleasedSessionMessage {
                     session_id: outer_session_id,
                     message_id: chunk.message_id.to_string(),
-                    sender_session_id: chunk.sender_session_id,
-                    recipient_session_id: chunk.recipient_session_id,
+                    // TODO: schema 1.16 moved a chunk's sender and recipient to its
+                    // `session_message`, which a chunk inherits by `messageId`. Remember that
+                    // identity per message so a child's outgoing chunk is not read as its
+                    // incoming User message; until then a chunk is unaddressed.
+                    sender_session_id: None,
+                    recipient_session_id: None,
                     content: vec![chunk.content],
                     chunk: true,
                 })

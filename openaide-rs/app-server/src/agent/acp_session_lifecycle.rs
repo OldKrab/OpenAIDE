@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_schema::{
-    InitializeResponse, ListSessionsResponse, McpServer, NewSessionResponse, SessionConfigOption,
-    SessionId, SessionNotification, SessionUpdate,
+    InitializeResponse, ListSessionsResponse, McpServer, SessionConfigOption, SessionId,
+    SessionNotification, SessionUpdate,
 };
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::{ActiveSession, ConnectionTo, SessionSetup};
+use agent_client_protocol::Agent;
 
 use crate::agent::acp_errors::acp_request_error;
 use crate::agent::acp_replayed_subagents::project_replayed_subagents;
@@ -30,6 +31,13 @@ use crate::protocol::model::{
     AgentCommandsCatalog, AgentListSessionsResult, AgentListedSession, ConfigOptionsCatalog,
 };
 
+// TODO: read the root replay from the `ActiveSession` that `load_session_from` returns (the SDK
+// routes the session before sending `session/load`) once child-session traffic can be kept out of
+// the live Subagent router during a load some other way. The capture must stay for now: the
+// connection's notification handler routes Subagent announcements, `session_message` updates and
+// every child session's updates to that router, and child updates carry the child's session id,
+// so none of them reach the root session's update stream; the replayed delegation rows need them,
+// in arrival order, in `subagent_traffic`.
 pub(super) struct LoadReplayCapture {
     pub(super) session_id: SessionId,
     pub(super) updates: Vec<SessionUpdate>,
@@ -50,14 +58,11 @@ pub(super) async fn start_active_session(
     preferred_auth_method_id: Option<&str>,
     mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
-) -> Result<
-    (
-        agent_client_protocol::ActiveSession<'static, Agent>,
-        Vec<SessionConfigOption>,
-    ),
-    agent_client_protocol::Error,
-> {
-    let response = request_new_session(
+) -> Result<(ActiveSession<'static, Agent>, Vec<SessionConfigOption>), agent_client_protocol::Error>
+{
+    let SessionSetup {
+        session, response, ..
+    } = request_new_session(
         connection,
         cwd,
         initialize,
@@ -67,9 +72,8 @@ pub(super) async fn start_active_session(
         trace,
     )
     .await?;
-    let initial_options = response.config_options.clone().unwrap_or_default();
-    let active_session = connection.attach_session(response, Vec::new())?;
-    Ok((active_session, initial_options))
+    let initial_options = response.config_options.unwrap_or_default();
+    Ok((session, initial_options))
 }
 
 pub(super) struct LoadActiveSessionRequest<'a> {
@@ -88,7 +92,7 @@ pub(super) async fn load_active_session(
     request: LoadActiveSessionRequest<'_>,
 ) -> Result<
     (
-        agent_client_protocol::ActiveSession<'static, Agent>,
+        ActiveSession<'static, Agent>,
         ConfigOptionsCatalog,
         Option<AgentCommandsCatalog>,
         ReplayProjectionResult,
@@ -137,15 +141,12 @@ pub(super) async fn load_active_session(
         .remove(&session_id.to_string())
         .map(|capture| (capture.updates, capture.subagent_traffic))
         .unwrap_or_default();
-    let response = response?;
-    let response_options = response.config_options.clone().unwrap_or_default();
-    let active_response = NewSessionResponse::new(session_id.clone())
-        .modes(response.modes)
-        .config_options(response.config_options)
-        .meta(response.meta);
-    let active_session = connection
-        .attach_session(active_response, Vec::new())
-        .map_err(|error| acp_request_error(&error))?;
+    let SessionSetup {
+        session: active_session,
+        response,
+        ..
+    } = response?;
+    let response_options = response.config_options.unwrap_or_default();
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
     let mut replay = ReplayProjection::for_agent(agent_id, session_id.to_string())
         .project_with_plan(replayed_updates);
@@ -179,13 +180,7 @@ pub(super) async fn resume_active_session(
     initialize: &InitializeResponse,
     trace: Option<&AcpTraceSession>,
     request: ResumeActiveSessionRequest<'_>,
-) -> Result<
-    (
-        agent_client_protocol::ActiveSession<'static, Agent>,
-        Option<ConfigOptionsCatalog>,
-    ),
-    RuntimeError,
-> {
+) -> Result<(ActiveSession<'static, Agent>, Option<ConfigOptionsCatalog>), RuntimeError> {
     let ResumeActiveSessionRequest {
         agent_id,
         session_id,
@@ -195,7 +190,11 @@ pub(super) async fn resume_active_session(
     } = request;
     validate_resume_session_capability(initialize)?;
     let session_id = SessionId::new(session_id);
-    let response = request_resume_session(
+    let SessionSetup {
+        session: active_session,
+        response,
+        ..
+    } = request_resume_session(
         connection,
         session_id.clone(),
         cwd,
@@ -209,15 +208,7 @@ pub(super) async fn resume_active_session(
     .map_err(|error| acp_request_error(&error))?;
     let config_catalog = response
         .config_options
-        .clone()
         .map(|options| normalize_config_options(agent_id, options));
-    let active_response = NewSessionResponse::new(session_id)
-        .modes(response.modes)
-        .config_options(response.config_options)
-        .meta(response.meta);
-    let active_session = connection
-        .attach_session(active_response, Vec::new())
-        .map_err(|error| acp_request_error(&error))?;
     Ok((active_session, config_catalog))
 }
 

@@ -181,6 +181,97 @@ fn steering_message_splits_anonymous_agent_text() {
     api.shutdown().expect("shutdown task runtime");
 }
 
+/// SDK 5 delivers a `session/prompt` error to the stream of an `ActiveSession` that sent it
+/// with `send_prompt`; OpenAIDE sends the prompt itself and must still fail the turn with the
+/// Agent's own explanation, keeping the connection for the next turn.
+#[test]
+fn prompt_error_fails_the_turn_with_the_agents_explanation() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "prompt_error") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    for turn in 1..=2 {
+        api.send(send_params(&task_id, "do the work"))
+            .expect("send prompt");
+        let expected = format!("The Agent stopped: Usage limit reached ({turn}).");
+        wait_until(|| {
+            store
+                .read_task(task_id.as_str())
+                .is_ok_and(|task| task.status == TaskStatus::Inactive)
+                && interruptions(&store, &task_id).contains(&expected)
+        });
+    }
+    assert_eq!(
+        interruptions(&store, &task_id),
+        [
+            "The Agent stopped: Usage limit reached (1).",
+            "The Agent stopped: Usage limit reached (2).",
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+/// A session-scoped Agent request that OpenAIDE does not serve reaches the session's update
+/// stream. SDK 5 answers it with method not found instead of leaving the Agent waiting.
+#[test]
+fn unhandled_session_request_is_answered_method_not_found() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "unhandled_session_request")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "ask the host"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .is_ok_and(|task| task.status == TaskStatus::Inactive)
+            && logical_text_messages(&store, &task_id).len() == 2
+    });
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "ask the host".to_string()),
+            ("agent", "Extension request answered -32601".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
 #[test]
 fn permission_does_not_split_already_received_anonymous_agent_text() {
     let temp = tempfile::TempDir::new().expect("temp dir");
@@ -1468,6 +1559,18 @@ fn visible_chat_rows(store: &Store, task_id: &TaskId) -> Vec<(&'static str, Stri
         .collect()
 }
 
+fn interruptions(store: &Store, task_id: &TaskId) -> Vec<String> {
+    store
+        .read_messages(task_id.as_str())
+        .expect("read task messages")
+        .into_iter()
+        .filter_map(|stored| match stored.chat.message {
+            NormalizedMessage::Interruption { message, .. } => Some(message),
+            _ => None,
+        })
+        .collect()
+}
+
 fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
     server_requests.observe_subscription_added(
         Delivery::new(
@@ -1535,6 +1638,7 @@ prompt_count = 0
 pending_primary_id = None
 pending_prompt_id = None
 permission_rpc_id = "permission-1"
+unhandled_rpc_id = "unhandled-1"
 
 def write(message):
     sys.stdout.write(json.dumps(message) + "\n")
@@ -1617,6 +1721,12 @@ def update_plan(entries):
 
 for line in sys.stdin:
     message = json.loads(line)
+    if message.get("id") == unhandled_rpc_id:
+        code = message.get("error", {}).get("code")
+        update_chunk("agent_message_chunk", f"Extension request answered {code}", "unhandled")
+        respond({"id": pending_prompt_id}, {"stopReason": "end_turn"})
+        pending_prompt_id = None
+        continue
     if message.get("id") == permission_rpc_id:
         if pending_prompt_id is not None:
             update_chunk("agent_message_chunk", "After the edit.", None)
@@ -1676,6 +1786,18 @@ for line in sys.stdin:
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
         prompt_count += 1
+        if mode == "prompt_error":
+            write({"jsonrpc": "2.0", "id": message.get("id"), "error": {
+                "code": -32603, "message": "Internal error",
+                "data": {"message": f"Usage limit reached ({prompt_count})."},
+            }})
+            continue
+        if mode == "unhandled_session_request":
+            # A session-scoped request no OpenAIDE handler serves; the turn ends once it is answered.
+            pending_prompt_id = message.get("id")
+            write({"jsonrpc": "2.0", "id": unhandled_rpc_id, "method": "_vendor/ask",
+                   "params": {"sessionId": session_id}})
+            continue
         if mode == "anonymous_steering_boundary":
             update_chunk("agent_message_chunk", f"Answer {prompt_count}", None)
             if prompt_count == 1:

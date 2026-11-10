@@ -1,5 +1,11 @@
 use crate::protocol::errors::RuntimeError;
 
+/// An internal ACP error carrying `message` as its data. The SDK keeps its own
+/// equivalent private since 5.0.
+pub(super) fn internal_error(message: impl ToString) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::internal_error().data(message.to_string())
+}
+
 pub(super) fn acp_error(error: impl std::fmt::Display) -> RuntimeError {
     let message = error.to_string();
     if message.contains("Authentication required") {
@@ -70,7 +76,7 @@ fn agent_authored_message(error: &agent_client_protocol::Error) -> Option<String
         Error::internal_error().message,
         Error::request_cancelled().message,
         Error::auth_required().message,
-        Error::resource_not_found(None).message,
+        crate::agent::acp_schema::Error::resource_not_found(None).message,
     ];
     let from_data = error
         .data

@@ -3,9 +3,8 @@ use crate::agent::acp_schema::{
     RequestPermissionRequest, SessionNotification, SessionUpdate, TerminalOutputRequest,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use agent_client_protocol::{
-    Agent, Client, ConnectTo, ConnectionTo, Handled, JsonRpcMessage, UntypedMessage,
-};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::{Agent, Client, ConnectTo, Handled, JsonRpcMessage, UntypedMessage};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -83,7 +82,7 @@ where
     // ACP request callbacks run inside the shared connection's dispatch loop. Every host wait
     // must be spawned so one session cannot block updates and responses for every other session.
     Client
-        .builder()
+        .v1()
         .name("openaide")
         .on_receive_notification(
             async move |notification: UntypedMessage, cx| {

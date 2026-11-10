@@ -28,7 +28,7 @@ impl agent_client_protocol::ConnectTo<Client> for TerminationTestAgent {
         let fail_delete = self.fail_delete;
 
         Agent
-            .builder()
+            .v1()
             .name("termination-test-agent")
             .on_receive_request(
                 async move |_request: CloseSessionRequest, responder, _connection| {
@@ -77,7 +77,7 @@ fn run_with_agent(
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         Client
-            .builder()
+            .v1()
             .connect_with(agent, |connection| {
                 run(connection, close_count.clone(), delete_count.clone())
             })

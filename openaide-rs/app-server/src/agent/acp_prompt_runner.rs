@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::agent::acp_schema::SessionNotification;
 use agent_client_protocol::util::MatchDispatch;
-use agent_client_protocol::{Agent, Dispatch, SessionMessage};
+use agent_client_protocol::{v1::SessionMessage, Agent, Dispatch};
 use serde_json::json;
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -17,7 +17,7 @@ use crate::agent::acp_config_options_apply::SessionConfigRequests;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_native_subagent_stop::stop_native_subagent;
-use crate::agent::acp_response_boundary::take_preceding_session_updates;
+use crate::agent::acp_response_boundary::{answer_unmatched, take_preceding_session_updates};
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_with_catalog_snapshot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update,
@@ -53,7 +53,7 @@ pub(super) struct PromptRunContext<'a> {
 // those lifecycle inputs explicit until they have a cohesive shared owner.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_prompt(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &mut agent_client_protocol::v1::ActiveSession<'static, Agent>,
     cancel_rx: &mut tokio_mpsc::UnboundedReceiver<()>,
     close_rx: &mut tokio_mpsc::UnboundedReceiver<mpsc::Sender<Result<(), RuntimeError>>>,
     context: PromptRunContext<'_>,
@@ -578,7 +578,7 @@ fn report_steering_failure(
 }
 
 async fn dispatch_prompt_cancel(
-    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
     trace: Option<&AcpTraceSession>,
     agent_id: &str,
     task_id: &str,
@@ -640,7 +640,7 @@ async fn dispatch_prompt_cancel(
 
 #[allow(clippy::too_many_arguments)]
 async fn project_preceding_session_updates(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &mut agent_client_protocol::v1::ActiveSession<'static, Agent>,
     agent_id: &str,
     task_id: &str,
     active_session_id: &str,
@@ -680,10 +680,10 @@ async fn apply_prompt_session_message(
     background_work: &BackgroundWork,
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
     match update {
-        SessionMessage::SessionMessage(dispatch) => {
+        SessionMessage::Message(dispatch) => {
             dispatch_session_notification(
                 agent_id,
-                dispatch,
+                dispatch.into_raw(),
                 projection,
                 session_event_sink,
                 pending_session_catalogs,
@@ -692,7 +692,8 @@ async fn apply_prompt_session_message(
             )
             .await
         }
-        SessionMessage::StopReason(_) => {
+        // Only `ActiveSession::send_prompt*` posts here; turns settle in `acp_active_prompt`.
+        SessionMessage::PromptResponse(_) => {
             logging::info(
                 "acp_prompt_update_stop_reason",
                 json!({
@@ -755,14 +756,15 @@ pub(super) async fn dispatch_session_notification(
                 .expect("ACP session catalog update lock poisoned") =
                 session_catalogs_from_update(agent_id, &notification.update);
             if let Some(projection) = projection {
-                projection.emit(notification.update).map_err(|error| {
-                    agent_client_protocol::util::internal_error(error.to_string())
-                })?;
+                projection
+                    .emit(notification.update)
+                    .map_err(crate::agent::acp_errors::internal_error)?;
             }
             Ok(())
         })
         .await
-        .otherwise_ignore()
+        .otherwise(async |dispatch| answer_unmatched(agent_id, dispatch))
+        .await
         .map_err(acp_error)?;
     let catalogs = std::mem::take(
         &mut *catalogs

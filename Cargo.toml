@@ -18,12 +18,9 @@ shell-words = "1.1"
 thiserror = "2.0"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 tempfile = "3.23"
-# The fork is upstream v3.4.0 with `attach_session` made public, which opening a
-# Native Session on a shared Agent process needs.
-# TODO: depend on the released crate once upstream exposes `attach_session`.
-agent-client-protocol = { git = "https://github.com/OldKrab/rust-sdk", rev = "6ba3746ca40f11c10bf59c1dff983bf11c09e924", features = ["process", "unstable"] }
-# The SDK requires this exact schema release; Subagents are behind an unstable feature (ADR-0067).
-agent-client-protocol-schema = { version = "=1.12.0", features = ["unstable_subagents"] }
+# ACP message types come through the SDK's `v1::schema`, so the SDK's exact schema pin is the only
+# one. Its `unstable` feature enables Subagents (ADR-0067).
+agent-client-protocol = { version = "5.1.0", features = ["process", "unstable"] }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 fs2 = "0.4"
 base64 = "0.23"

@@ -8,9 +8,10 @@ use crate::agent::acp_schema::{
     KillTerminalRequest, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
     NewSessionResponse, PermissionOption, PermissionOptionKind, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-    SessionResumeCapabilities, SessionUpdate, TerminalOutputRequest, TextContent, ToolCallStatus,
-    ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest, WriteTextFileRequest,
+    RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse,
+    SelectedPermissionOutcome, SessionCapabilities, SessionResumeCapabilities, SessionUpdate,
+    TerminalOutputRequest, TextContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    WaitForTerminalExitRequest, WriteTextFileRequest,
 };
 use agent_client_protocol::{Client, UntypedMessage};
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,18 @@ struct PermissionThenUpdateConnectionTestAgent {
 struct DelayedPermissionSink {
     requested_tx: mpsc::Sender<()>,
     release_rx: Mutex<mpsc::Receiver<()>>,
+    outcome: AgentPermissionOutcome,
+}
+
+type RecordedPermissionAnswer = (&'static str, Result<RequestPermissionOutcome, i32>);
+
+/// Sends one permission request the host holds, then, once the test asks, a probe permission
+/// request the host answers at once. Records every answer in wire order.
+#[derive(Clone)]
+struct HeldPermissionConnectionTestAgent {
+    send_probe: Arc<tokio::sync::Notify>,
+    finished: Arc<tokio::sync::Notify>,
+    answers: Arc<Mutex<Vec<RecordedPermissionAnswer>>>,
 }
 
 struct CancellingQuestionSink;
@@ -106,7 +119,7 @@ impl AgentEventSink for DelayedPermissionSink {
             .expect("permission release lock poisoned")
             .recv_timeout(crate::test_sync::WATCHDOG)
             .expect("permission should be released");
-        Ok(AgentPermissionOutcome::Cancelled)
+        Ok(self.outcome.clone())
     }
 }
 
@@ -116,7 +129,7 @@ impl agent_client_protocol::ConnectTo<Client> for LoadReplayConnectionTestAgent 
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("load-replay-connection-test-agent")
             .on_receive_request(
                 async move |request: LoadSessionRequest, responder, connection| {
@@ -146,7 +159,7 @@ impl agent_client_protocol::ConnectTo<Client> for AllHostHandlersConnectionTestA
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("all-host-handlers-connection-test-agent")
             .connect_with(client, async move |connection| {
                 let permission = connection
@@ -211,7 +224,7 @@ impl agent_client_protocol::ConnectTo<Client> for ElicitationConnectionTestAgent
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("elicitation-connection-test-agent")
             .connect_with(client, async move |connection| {
                 let request =
@@ -246,7 +259,7 @@ impl agent_client_protocol::ConnectTo<Client> for MalformedElicitationConnection
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("malformed-elicitation-connection-test-agent")
             .connect_with(client, async move |connection| {
                 let result = connection
@@ -284,7 +297,7 @@ impl agent_client_protocol::ConnectTo<Client> for SessionMetaRecordingAgent {
             self.requests.clone(),
         );
         Agent
-            .builder()
+            .v1()
             .name("session-meta-recording-test-agent")
             .on_receive_request(
                 async move |request: NewSessionRequest, responder, _connection| {
@@ -323,7 +336,7 @@ impl agent_client_protocol::ConnectTo<Client> for PermissionThenUpdateConnection
         client: impl agent_client_protocol::ConnectTo<Agent>,
     ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
         Agent
-            .builder()
+            .v1()
             .name("permission-then-update-connection-test-agent")
             .on_receive_request(
                 async move |_request: NewSessionRequest, responder, _connection| {
@@ -359,11 +372,58 @@ impl agent_client_protocol::ConnectTo<Client> for PermissionThenUpdateConnection
     }
 }
 
+impl agent_client_protocol::ConnectTo<Client> for HeldPermissionConnectionTestAgent {
+    fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
+        fn permission(session_id: &str, tool_call_id: &str) -> RequestPermissionRequest {
+            RequestPermissionRequest::new(
+                session_id.to_string(),
+                ToolCallUpdate::new(tool_call_id.to_string(), ToolCallUpdateFields::new()),
+                vec![PermissionOption::new(
+                    "allow-once",
+                    "Allow once",
+                    PermissionOptionKind::AllowOnce,
+                )],
+            )
+        }
+        Agent
+            .v1()
+            .name("held-permission-connection-test-agent")
+            .connect_with(client, async move |connection| {
+                // Response callbacks run in the dispatch loop, so `answers` keeps wire order.
+                for (label, request) in [
+                    ("held", permission("permission_session", "tool_call_held")),
+                    ("probe", permission("no_prompt_session", "tool_call_probe")),
+                ] {
+                    if label == "probe" {
+                        self.send_probe.notified().await;
+                    }
+                    let answers = self.answers.clone();
+                    connection
+                        .send_request(request)
+                        .on_receiving_result(async move |result| {
+                            answers.lock().unwrap().push((
+                                label,
+                                result
+                                    .map(|response| response.outcome)
+                                    .map_err(|error| error.code.value()),
+                            ));
+                            Ok(())
+                        })?;
+                }
+                self.finished.notified().await;
+                Ok(())
+            })
+    }
+}
+
 async fn wait_for_done(done_rx: mpsc::Receiver<()>) -> agent_client_protocol::Result<()> {
     tokio::task::spawn_blocking(move || done_rx.recv_timeout(crate::test_sync::WATCHDOG))
         .await
-        .map_err(agent_client_protocol::util::internal_error)?
-        .map_err(agent_client_protocol::util::internal_error)
+        .map_err(crate::agent::acp_errors::internal_error)?
+        .map_err(crate::agent::acp_errors::internal_error)
 }
 
 fn replay_updates(replay: &LoadReplayCaptures, session_id: &str) -> Option<Vec<SessionUpdate>> {
@@ -634,6 +694,7 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
     let sink = Arc::new(DelayedPermissionSink {
         requested_tx,
         release_rx: Mutex::new(release_rx),
+        outcome: AgentPermissionOutcome::Cancelled,
     });
     let current_prompts = Arc::new(Mutex::new(HashMap::from([(
         "permission_session".to_string(),
@@ -678,6 +739,83 @@ fn pending_permission_does_not_block_updates_for_other_sessions() {
                 Ok(())
             },
         )
+        .await
+        .unwrap();
+    });
+}
+
+/// SDK 5 answers a request whose responder is dropped. A permission request held for the user
+/// must keep its responder through the current prompt and the host until the user decides.
+#[test]
+fn pending_permission_request_is_answered_only_with_the_users_decision() {
+    let (requested_tx, requested_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let sink = Arc::new(DelayedPermissionSink {
+        requested_tx,
+        release_rx: Mutex::new(release_rx),
+        outcome: AgentPermissionOutcome::Selected {
+            option_id: "allow-once".to_string(),
+        },
+    });
+    let mut context = connection_context(HostBridge::disabled(), Arc::default());
+    context.current_prompts = Arc::new(Mutex::new(HashMap::from([(
+        "permission_session".to_string(),
+        LivePromptProjection::new("codex", sink, TurnCancellation::new()),
+    )])));
+    let agent = HeldPermissionConnectionTestAgent {
+        send_probe: Arc::new(tokio::sync::Notify::new()),
+        finished: Arc::new(tokio::sync::Notify::new()),
+        answers: Arc::default(),
+    };
+    let (send_probe, finished, answers) = (
+        agent.send_probe.clone(),
+        agent.finished.clone(),
+        agent.answers.clone(),
+    );
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        connect_acp_session_client(agent, context, async |_connection| {
+            tokio::task::spawn_blocking(move || {
+                requested_rx
+                    .recv_timeout(crate::test_sync::WATCHDOG)
+                    .expect("the held permission should reach the user");
+            })
+            .await
+            .unwrap();
+            // The held request has passed through the current prompt to the user. An answer
+            // sent for a responder dropped on that path precedes the probe's on the wire.
+            send_probe.notify_one();
+            let before_decision = crate::test_sync::wait_for_async("the probe answer", || {
+                let answers = answers.lock().unwrap();
+                answers
+                    .iter()
+                    .any(|(label, _)| *label == "probe")
+                    .then(|| answers.clone())
+            })
+            .await;
+            assert_eq!(
+                before_decision,
+                [("probe", Ok(RequestPermissionOutcome::Cancelled))]
+            );
+
+            release_tx.send(()).unwrap();
+            let after_decision = crate::test_sync::wait_for_async("the held answer", || {
+                let answers = answers.lock().unwrap();
+                (answers.len() == 2).then(|| answers.clone())
+            })
+            .await;
+            assert_eq!(
+                after_decision[1],
+                (
+                    "held",
+                    Ok(RequestPermissionOutcome::Selected(
+                        SelectedPermissionOutcome::new("allow-once")
+                    ))
+                )
+            );
+            finished.notify_one();
+            Ok(())
+        })
         .await
         .unwrap();
     });
@@ -1033,7 +1171,7 @@ impl agent_client_protocol::ConnectTo<Client> for CommandsBeforeSessionResponseA
         use crate::agent::acp_schema::{AvailableCommand, AvailableCommandsUpdate};
 
         Agent
-            .builder()
+            .v1()
             .name("commands-before-session-response-test-agent")
             .on_receive_request(
                 async move |_request: NewSessionRequest, responder, connection| {
@@ -1079,7 +1217,7 @@ fn session_start_keeps_commands_the_agent_sent_before_its_response() {
                     tokio::time::timeout(crate::test_sync::WATCHDOG, active_session.read_update())
                         .await
                         .expect("the update sent before the response reaches the session")?;
-                let agent_client_protocol::SessionMessage::SessionMessage(dispatch) = update else {
+                let agent_client_protocol::v1::SessionMessage::Message(dispatch) = update else {
                     panic!("expected the deferred session update");
                 };
                 let agent_client_protocol::Dispatch::Notification(notification) = dispatch else {

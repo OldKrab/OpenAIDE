@@ -1,5 +1,6 @@
 use crate::agent::acp_schema::{CloseSessionRequest, DeleteSessionRequest, SessionId};
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::Agent;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_trace::AcpTraceSession;

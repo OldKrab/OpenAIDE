@@ -5,7 +5,8 @@ use std::time::Instant;
 use crate::agent::acp_schema::{
     InitializeRequest, InitializeResponse, McpServer, SessionConfigOption,
 };
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::Agent;
 
 use crate::agent::acp_session_lifecycle::{
     initialize_supports_session_close, initialize_supports_session_delete, load_active_session,
@@ -15,7 +16,7 @@ use crate::agent::acp_session_lifecycle::{
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::errors::RuntimeError;
 
-pub(super) type AcpActiveSession = agent_client_protocol::ActiveSession<'static, Agent>;
+pub(super) type AcpActiveSession = agent_client_protocol::v1::ActiveSession<'static, Agent>;
 
 pub(super) async fn initialize_agent_connection(
     connection: &ConnectionTo<Agent>,
@@ -62,9 +63,7 @@ pub(super) async fn initialize_agent_connection(
             }),
         );
         let _ = start_error_tx.send(Err(error.clone()));
-        return Err(agent_client_protocol::util::internal_error(
-            error.to_string(),
-        ));
+        return Err(crate::agent::acp_errors::internal_error(error.to_string()));
     }
     crate::logging::info(
         "acp_initialize_completed",
@@ -191,5 +190,5 @@ impl<'a> AcpSessionRunner<'a> {
 }
 
 pub(super) fn acp_start_error(error: RuntimeError) -> agent_client_protocol::Error {
-    agent_client_protocol::util::internal_error(error.to_string())
+    crate::agent::acp_errors::internal_error(error.to_string())
 }

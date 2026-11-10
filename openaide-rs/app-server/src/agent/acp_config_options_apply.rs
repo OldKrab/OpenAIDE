@@ -69,7 +69,7 @@ impl SessionConfigRequests {
 
     pub(super) fn dispatch(
         &mut self,
-        active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+        active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
         command: AcpSessionConfigCommand,
     ) {
         let AcpSessionConfigCommand::SetConfigOption {

@@ -3,12 +3,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::{
-    AcpAgent, Agent, Channel, Client, ConnectTo, RawJsonRpcMessage, RawJsonRpcResponse,
+    AcpAgent, Agent, Channel, Client, ConnectTo, RawJsonRpcId, RawJsonRpcMessage,
+    RawJsonRpcResponse,
 };
 use tokio::sync::{watch, Notify};
 use tokio::time::Instant;
-
-use crate::agent::acp_schema::RequestId;
 
 /// Retention policy shared by every process of a pool. It is a live value so
 /// a change applies to running processes as well as later ones.
@@ -48,7 +47,7 @@ struct State {
     /// may still be installing the Agent package.
     initialized: bool,
     admitted_operations: usize,
-    agent_requests: HashSet<RequestId>,
+    agent_requests: HashSet<RawJsonRpcId>,
 }
 
 impl AcpProcessLifetime {
@@ -246,9 +245,7 @@ impl ConnectTo<Client> for RetainedAgent {
         // An Agent process always owns its stdio work. Without a driver nothing
         // would ever report the process ending, so refuse to serve it.
         let agent_future = agent_driver.ok_or_else(|| {
-            agent_client_protocol::util::internal_error(
-                "ACP Agent process has no connection driver",
-            )
+            crate::agent::acp_errors::internal_error("ACP Agent process has no connection driver")
         })?;
         let (client_channel, client_driver) = client.into_channel_and_future();
         // Inspect complete frames without rewriting IDs, ordering, batches, or
@@ -270,7 +267,7 @@ impl ConnectTo<Client> for RetainedAgent {
             // which would leave the connection serving a dead process. The Agent is
             // never expected to end first, so report every such end as a failure.
             result = agent_future => result.and_then(|()| {
-                Err(agent_client_protocol::util::internal_error(
+                Err(crate::agent::acp_errors::internal_error(
                     "Process exited with exit status: 0",
                 ))
             }),
