@@ -9,7 +9,13 @@
 //!
 //! Output is no evidence of a cycle: the adapter also writes lines of its own
 //! after the prompt response, such as the acknowledgement of a stopped command.
+//!
+//! A running Subagent is background work too: its completion wakes the Main
+//! Agent like a finished command does. The Subagent router reports child run
+//! state from the connection, outside the session's update order, so a change
+//! wakes the prompt runner through `changed` instead.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,6 +24,7 @@ use agent_client_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::sync::Notify;
 
 use crate::agent::acp_schema::SessionId;
 use crate::agent::acp_trace::AcpTraceSession;
@@ -38,9 +45,9 @@ pub(super) const SESSION_STATE_METHOD: &str = "_session/state_changed";
 const ASYNC_TASK_STATE_METHOD: &str = "_openaide/async_task_state";
 const ASYNC_TASK_STOP_METHOD: &str = "_session/async_task/stop";
 
-/// How long a finished background command may take to wake the model. The
-/// Agent reports the cycle's start well under a second after the command ends;
-/// the rest covers a slow machine.
+/// How long a finished background command or Subagent may take to wake the
+/// model. The Agent reports the cycle's start well under a second after the
+/// work ends; the rest covers a slow machine.
 const DEFAULT_FOLLOWUP_GRACE: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -194,6 +201,8 @@ struct AsyncTaskStopResponse {
 pub(crate) struct BackgroundWork {
     state: Arc<Mutex<State>>,
     followup_grace: Duration,
+    /// Signals a change the session's update stream did not carry.
+    changed: Arc<Notify>,
 }
 
 /// A background command ended; reported once to the Task's Tool row.
@@ -207,6 +216,8 @@ pub(super) struct FinishedCommand {
 struct State {
     /// Running or paused commands in spawn order.
     live_tasks: Vec<AgentBackgroundCommand>,
+    /// Child session ids of this session's running Subagents, at any depth.
+    running_subagents: BTreeSet<String>,
     /// Ended commands whose Tool row has not been told yet.
     finished: Vec<FinishedCommand>,
     /// Set while a settled prompt response waits for this work to end.
@@ -231,6 +242,7 @@ impl BackgroundWork {
         Self {
             state: Arc::default(),
             followup_grace,
+            changed: Arc::default(),
         }
     }
 
@@ -314,6 +326,50 @@ impl BackgroundWork {
                 "live_tasks": state.live_tasks.len(),
             }),
         );
+    }
+
+    /// A Subagent of this session started or ended a run. Its end wakes the
+    /// Main Agent with the result, so during a hold the follow-up wait starts
+    /// as it does for a finished command. Load replay never reaches this: only
+    /// live reports change what holds the turn.
+    pub(super) fn subagent_state_changed(
+        &self,
+        root_session_id: &str,
+        subagent_session_id: &str,
+        running: bool,
+    ) {
+        let mut state = self.state();
+        let changed = if running {
+            state
+                .running_subagents
+                .insert(subagent_session_id.to_string())
+        } else {
+            state.running_subagents.remove(subagent_session_id)
+        };
+        if !changed {
+            return;
+        }
+        if !running && state.hold_started.is_some() {
+            state.followup_deadline = Some(Instant::now() + self.followup_grace);
+        }
+        logging::info(
+            "acp_background_subagent_changed",
+            json!({
+                "session_id": root_session_id,
+                "subagent_session_id": subagent_session_id,
+                "phase": if running { "started" } else { "ended" },
+                "running_subagents": state.running_subagents.len(),
+                "holding": state.hold_started.is_some(),
+            }),
+        );
+        drop(state);
+        // A stored permit wakes the next wait if no prompt runner waits now.
+        self.changed.notify_one();
+    }
+
+    /// Resolves after a change the session's update stream did not carry.
+    pub(super) async fn changed(&self) {
+        self.changed.notified().await;
     }
 
     /// The Agent started or stopped working. During a hold `running` starts the
@@ -412,6 +468,7 @@ impl BackgroundWork {
             );
         }
         let holds = !state.live_tasks.is_empty()
+            || !state.running_subagents.is_empty()
             || state.agent_running
             || state.followup_deadline.is_some();
         if holds && state.hold_started.is_none() {
@@ -422,6 +479,7 @@ impl BackgroundWork {
                     "session_id": session_id,
                     "task_id": task_id,
                     "live_tasks": state.live_tasks.len(),
+                    "running_subagents": state.running_subagents.len(),
                 }),
             );
         }
@@ -433,8 +491,8 @@ impl BackgroundWork {
     }
 
     /// What the Task shows of this work: the live commands, and whether they
-    /// alone keep the answered turn open. `held` is false while the prompt or a
-    /// cycle the Agent started is running.
+    /// or running Subagents alone keep the answered turn open. `held` is false
+    /// while the prompt or a cycle the Agent started is running.
     pub(super) fn report(&self, turn_held: bool) -> AgentBackgroundWork {
         let state = self.state();
         AgentBackgroundWork {
@@ -473,6 +531,7 @@ impl BackgroundWork {
                 "task_id": task_id,
                 "outcome": outcome,
                 "live_tasks": state.live_tasks.len(),
+                "running_subagents": state.running_subagents.len(),
                 "duration_ms": started.elapsed().as_millis(),
             }),
         );

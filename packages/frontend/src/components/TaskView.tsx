@@ -228,6 +228,7 @@ export function TaskView({
   // An Agent with no subagent history has nothing to navigate, so the header shows the Agent
   // identity (its configured icon) instead of an empty navigator.
   const subagentEntries = subagents.catalog?.entries ?? [];
+  const runningSubagentCount = subagentEntries.filter(({ status }) => status === "running").length;
   useReturnToMainHistory(subagents.selectedSubagentId, subagents.selectSubagent);
   const { chat, visiblePlan } = useTaskHistoryView({ chatPageState, snapshot, subagents });
   const chatItems = useMemo(() => [
@@ -597,6 +598,7 @@ export function TaskView({
           timelineStatusLabel={timelineStatusLabel}
           workingStartedAt={workingStartedAt}
           backgroundCommands={backgroundWork.commands}
+          runningSubagentCount={runningSubagentCount}
           onStopBackgroundCommand={backendReady ? onStopBackgroundCommand : undefined}
         />
         {backendConnectionState?.status === "unavailable" ? (

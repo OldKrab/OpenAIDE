@@ -458,6 +458,20 @@ impl AcpNativeSubagentRouter {
                 "run_duration_ms": run_duration_ms,
             }),
         );
+        let background_work = self
+            .background_works
+            .lock()
+            .expect("ACP background work map lock poisoned")
+            .get(&root_session_id)
+            .cloned();
+        // A root without a live worker has no turn to hold.
+        if let Some(background_work) = background_work {
+            background_work.subagent_state_changed(
+                &root_session_id,
+                child_session_id,
+                next == AgentNativeSubagentState::Running,
+            );
+        }
         Ok(close.map(|row| (root_session_id, row)))
     }
 }
