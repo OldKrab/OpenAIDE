@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::agent::acp_host_capabilities::AcpSessionEventSinkMap;
+use crate::agent::acp_host_capabilities::{AcpSessionBackgroundWorkMap, AcpSessionEventSinkMap};
 use crate::agent::acp_live_prompt_projection::LivePromptProjection;
 use crate::agent::acp_native_subagents_delegation::ChildDelegation;
 use crate::agent::acp_schema::{SessionNotification, SessionUpdate};
@@ -23,6 +23,8 @@ const SUBAGENT_NOT_OFFERED: &str = "ACP Agent sent Subagent traffic that OpenAID
 pub(super) struct AcpNativeSubagentRouter {
     agent_id: String,
     sinks: AcpSessionEventSinkMap,
+    /// Root sessions register here; a child's run state holds their turn.
+    background_works: AcpSessionBackgroundWorkMap,
     inner: Arc<Mutex<RouterState>>,
 }
 
@@ -61,8 +63,14 @@ impl AcpNativeSubagentRouter {
         Self {
             agent_id: agent_id.into(),
             sinks,
+            background_works: Arc::default(),
             inner: Arc::default(),
         }
+    }
+
+    /// Where root session workers register their Background Work.
+    pub(super) fn background_works(&self) -> AcpSessionBackgroundWorkMap {
+        self.background_works.clone()
     }
 
     pub(super) fn set_negotiated(&self, negotiated: bool, implementation_name: Option<&str>) {

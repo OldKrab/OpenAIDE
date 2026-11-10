@@ -11,9 +11,12 @@ import { backgroundWorkLabel } from "./taskSurfaceHelpers";
 export function BackgroundCommandsRow({
   commands,
   onStop,
+  runningSubagentCount = 0,
 }: {
   commands: BackgroundCommand[];
   onStop?: (commandId: string) => void;
+  /** Running Subagents, which hold the turn too; the navigator lists them. */
+  runningSubagentCount?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
@@ -23,7 +26,7 @@ export function BackgroundCommandsRow({
         <CircleDashed aria-hidden="true" className="working-status-background-icon" size={14} />
         {commands.length === 0 ? (
           <span className="background-commands-label" role="status" aria-live="polite">
-            {backgroundWorkLabel(0)}
+            {backgroundWorkLabel(0, runningSubagentCount)}
           </span>
         ) : (
           <button

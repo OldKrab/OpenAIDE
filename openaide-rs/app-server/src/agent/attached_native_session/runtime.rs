@@ -43,6 +43,7 @@ pub(super) async fn run(
         current_prompts,
         trace,
         session_event_sinks,
+        session_background_works,
         session_idle: mut session_idle_policy,
         process_lifetime,
         snapshot,
@@ -70,6 +71,11 @@ pub(super) async fn run(
     let mut steering_requests = SteeringRequests::new(&initialize);
     let background_work = BackgroundWork::default();
     let session_id = active_session.session_id().to_string();
+    let _background_work_registration = BackgroundWorkRegistration::new(
+        session_id.clone(),
+        session_background_works,
+        &background_work,
+    );
     let sink_registration = SessionSinkRegistration {
         session_id,
         sinks: session_event_sinks,
@@ -472,6 +478,36 @@ impl Drop for SessionSinkRegistration {
         self.sinks
             .lock()
             .expect("ACP session event sink lock poisoned")
+            .remove(&self.session_id);
+    }
+}
+
+/// Lets the Subagent router reach this session's Background Work for as long
+/// as the session worker runs.
+struct BackgroundWorkRegistration {
+    session_id: String,
+    works: crate::agent::acp_host_capabilities::AcpSessionBackgroundWorkMap,
+}
+
+impl BackgroundWorkRegistration {
+    fn new(
+        session_id: String,
+        works: crate::agent::acp_host_capabilities::AcpSessionBackgroundWorkMap,
+        work: &BackgroundWork,
+    ) -> Self {
+        works
+            .lock()
+            .expect("ACP background work map lock poisoned")
+            .insert(session_id.clone(), work.clone());
+        Self { session_id, works }
+    }
+}
+
+impl Drop for BackgroundWorkRegistration {
+    fn drop(&mut self) {
+        self.works
+            .lock()
+            .expect("ACP background work map lock poisoned")
             .remove(&self.session_id);
     }
 }

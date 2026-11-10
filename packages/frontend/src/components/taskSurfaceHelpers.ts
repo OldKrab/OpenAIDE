@@ -25,9 +25,16 @@ export function taskTurnOpen(status: TaskStatus | undefined) {
   return status === "active" || status === "background";
 }
 
-/** Summary of the Background Work row; zero means a finished command's follow-up is awaited. */
-export function backgroundWorkLabel(commandCount: number) {
-  if (!commandCount) return "Background command finished";
+/**
+ * Summary of the Background Work row. With no command left, a running Subagent may hold the turn;
+ * otherwise the follow-up of finished work is awaited.
+ */
+export function backgroundWorkLabel(commandCount: number, runningSubagentCount = 0) {
+  if (!commandCount) {
+    if (runningSubagentCount === 1) return "Subagent running";
+    if (runningSubagentCount > 1) return `${runningSubagentCount} subagents running`;
+    return "Background command finished";
+  }
   return commandCount === 1 ? "1 background command running" : `${commandCount} background commands running`;
 }
 

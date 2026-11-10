@@ -48,6 +48,8 @@ pub(super) struct AttachedNativeSessionRunInput {
     pub(super) current_prompts: Arc<Mutex<std::collections::HashMap<String, LivePromptProjection>>>,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    pub(super) session_background_works:
+        crate::agent::acp_host_capabilities::AcpSessionBackgroundWorkMap,
     pub(super) session_idle: tokio::sync::watch::Receiver<SessionIdleTimeouts>,
     pub(super) process_lifetime: AcpProcessLifetime,
     pub(super) snapshot: SessionSnapshotPublisher,

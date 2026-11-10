@@ -35,6 +35,10 @@ mod tests;
 
 pub(super) type AcpSessionEventSinkMap =
     Arc<Mutex<HashMap<String, Arc<dyn AgentSessionEventSink>>>>;
+/// Each live root session's Background Work, so the Subagent router can report
+/// child run state to the session whose turn it may hold.
+pub(super) type AcpSessionBackgroundWorkMap =
+    Arc<Mutex<HashMap<String, crate::agent::acp_background_work::BackgroundWork>>>;
 pub(super) type AcpSessionTraceMap = Arc<Mutex<HashMap<String, AcpTraceSession>>>;
 pub(super) type AcpElicitationCancellationMap =
     Arc<Mutex<HashMap<WireRequestId, TurnCancellation>>>;

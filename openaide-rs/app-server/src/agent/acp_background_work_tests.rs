@@ -396,3 +396,78 @@ fn a_cycle_no_turn_owns_is_logged_and_holds_nothing() {
         [("started".to_owned(), false), ("ended".to_owned(), true)]
     );
 }
+
+#[test]
+fn a_running_subagent_holds_the_turn_until_its_followup_cycle_ends() {
+    let work = BackgroundWork::default();
+    work.subagent_state_changed("session-1", "child-1", true);
+    assert!(work.holds_turn("session-1", "task-a"));
+    assert_eq!(
+        live_ids(&work, true),
+        (true, Vec::new()),
+        "only the Subagent keeps the answered turn open"
+    );
+
+    // The Subagent's result has not woken the Main Agent yet.
+    work.subagent_state_changed("session-1", "child-1", false);
+    assert!(work.holds_turn("session-1", "task-a"));
+
+    work.session_state_changed(&agent_state("running"));
+    assert_eq!(live_ids(&work, true), (false, Vec::new()));
+    work.session_state_changed(&agent_state("idle"));
+    assert!(!work.holds_turn("session-1", "task-a"));
+}
+
+#[test]
+fn a_subagent_that_ended_inside_the_prompt_does_not_hold_its_turn() {
+    let work = BackgroundWork::default();
+    work.subagent_state_changed("session-1", "child-1", true);
+    work.subagent_state_changed("session-1", "child-1", false);
+    assert!(!work.holds_turn("session-1", "task-a"));
+}
+
+#[test]
+fn a_subagent_woken_by_its_own_command_keeps_holding_after_the_command_grace() {
+    // timing: expiry — a zero grace has already run out at the next check.
+    let work = BackgroundWork::with_followup_grace(Duration::ZERO);
+    // The prompt answers while a command the Subagent left running is live.
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Running));
+    assert!(work.holds_turn("session-1", "task-a"));
+
+    // The command's end wakes the Subagent, not the Main Agent.
+    work.task_state_changed(&task_state("task-1", AsyncTaskState::Completed));
+    work.subagent_state_changed("session-1", "child-1", true);
+    assert!(
+        work.holds_turn("session-1", "task-a"),
+        "the running Subagent holds the turn after the command's grace ran out"
+    );
+
+    // Its end promises a Main Agent cycle; with no grace left, none is awaited.
+    work.subagent_state_changed("session-1", "child-1", false);
+    assert!(!work.holds_turn("session-1", "task-a"));
+}
+
+#[test]
+fn a_repeated_subagent_report_changes_nothing() {
+    let work = BackgroundWork::with_followup_grace(Duration::ZERO);
+    work.subagent_state_changed("session-1", "child-1", false);
+    assert!(!work.holds_turn("session-1", "task-a"));
+    work.subagent_state_changed("session-1", "child-1", true);
+    work.subagent_state_changed("session-1", "child-1", true);
+    work.subagent_state_changed("session-1", "child-2", true);
+    work.subagent_state_changed("session-1", "child-1", false);
+    assert!(
+        work.holds_turn("session-1", "task-a"),
+        "the other Subagent still runs"
+    );
+}
+
+#[tokio::test]
+async fn a_subagent_change_wakes_the_prompt_runner() {
+    let work = BackgroundWork::default();
+    // The permit is stored when nothing waits yet.
+    work.subagent_state_changed("session-1", "child-1", true);
+    tokio::time::timeout(crate::test_sync::WATCHDOG, work.changed())
+        .await
+        .expect("a Subagent change wakes the waiting runner");
+}

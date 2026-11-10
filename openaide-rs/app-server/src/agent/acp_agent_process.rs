@@ -200,6 +200,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         config.agent_id.clone(),
         session_event_sinks.clone(),
     );
+    let session_background_works = native_subagents.background_works();
     let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap = Arc::default();
     let diagnostic_current_prompts = current_prompts.clone();
     let diagnostic_active_session_ids = active_session_ids.clone();
@@ -316,6 +317,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     &early_catalogs,
                     &connection_terminal_registry,
                     &session_event_sinks,
+                    &session_background_works,
                     &session_traces,
                     &attachment_lifetime,
                     first_open,
@@ -351,6 +353,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                             &early_catalogs,
                             &connection_terminal_registry,
                             &session_event_sinks,
+                            &session_background_works,
                             &session_traces,
                             &attachment_lifetime,
                             open,
@@ -642,6 +645,7 @@ async fn open_on_shared_process(
     early_catalogs: &EarlySessionCatalogs,
     terminal_registry: &AcpHostTerminalRegistry,
     session_event_sinks: &crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    session_background_works: &crate::agent::acp_host_capabilities::AcpSessionBackgroundWorkMap,
     session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     process_lifetime: &AcpProcessLifetime,
     open: AcpAgentProcessOpen,
@@ -734,6 +738,7 @@ async fn open_on_shared_process(
     let current_prompts_for_task = current_prompts.clone();
     let load_replay_for_task = Arc::clone(load_replay);
     let session_event_sinks_for_task = Arc::clone(session_event_sinks);
+    let session_background_works_for_task = Arc::clone(session_background_works);
     let session_traces_for_task = Arc::clone(session_traces);
     let session_id_for_task = session_id.clone();
     let process_lifetime = process_lifetime.clone();
@@ -751,6 +756,7 @@ async fn open_on_shared_process(
             current_prompts: current_prompts_for_task,
             trace,
             session_event_sinks: session_event_sinks_for_task,
+            session_background_works: session_background_works_for_task,
             session_idle,
             process_lifetime,
             snapshot,

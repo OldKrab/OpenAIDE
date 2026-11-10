@@ -1002,6 +1002,65 @@ fn background_command_keeps_the_task_working_until_its_followup_cycle_ends() {
 }
 
 #[test]
+fn a_running_subagent_keeps_the_task_turn_until_its_followup_cycle_ends() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let gate_path = temp.path().join("subagent-release");
+    let Some((api, store, workspace_root)) = task_chat_fixture_with_runtime(
+        &temp,
+        "subagent_followup",
+        ServerRequestRuntime::new(),
+        vec![(
+            "OPENAIDE_TASK_CHAT_GATE".to_string(),
+            gate_path.to_string_lossy().to_string(),
+        )],
+        None,
+    ) else {
+        return;
+    };
+    let task_id = ready_task(&api, &store, &workspace_root);
+
+    api.send(send_params(&task_id, "survey the code"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .subagent_catalog(task_id.as_str())
+            .is_ok_and(|catalog| !catalog.entries.is_empty())
+    });
+    // The fixture answered the prompt with end_turn and keeps its Subagent
+    // running until released.
+    crate::test_sync::observe_absence();
+    let held = store.read_task(task_id.as_str()).expect("read held task");
+    assert_eq!(
+        held.status,
+        TaskStatus::Active,
+        "a running Subagent must keep its turn open"
+    );
+    assert!(held.background_only(), "the held turn shows as background");
+    assert_eq!(
+        held.background_work
+            .as_ref()
+            .map(|work| work.commands.len()),
+        Some(0),
+        "a Subagent is not listed as a command"
+    );
+    fs::write(&gate_path, "").expect("finish the Subagent");
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    assert!(
+        visible_chat_rows(&store, &task_id)
+            .iter()
+            .any(|(_, text)| text == "Survey reviewed"),
+        "the cycle the Subagent's result started belongs to the held turn"
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn stop_ends_a_turn_held_by_a_background_command_and_stops_the_command() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let stop_marker = temp.path().join("background-command-stopped");
@@ -1137,11 +1196,12 @@ fn stopping_a_subagent_cancels_its_child_session_and_reports_cancelled() {
             .ok()
             .and_then(|catalog| catalog.entries.into_iter().next())
     };
+    // The prompt was answered; the running Subagent alone holds the turn.
     wait_until(|| {
         subagent(&store).is_some()
             && store
                 .read_task(task_id.as_str())
-                .map(|task| task.active_turn_id.is_none())
+                .map(|task| task.background_only())
                 .unwrap_or(false)
     });
     let running = subagent(&store).expect("announced Subagent");
@@ -1647,6 +1707,20 @@ for line in sys.stdin:
                 agent_state("running")
                 update_chunk("agent_message_chunk", "Build finished", "finished")
                 agent_state("idle")
+            continue
+        if mode == "subagent_followup":
+            # A backgrounded Subagent outlives the prompt; its result wakes the
+            # Main Agent after the response, in a cycle no prompt started.
+            agent_state("running")
+            update_chunk("agent_message_chunk", "Survey delegated", "delegated")
+            update_raw({"sessionUpdate": "subagent_update", "sessionId": "child-1", "title": "general-purpose", "state": {"state": "running"}})
+            respond(message, {"stopReason": "end_turn"})
+            agent_state("idle")
+            await_release()
+            update_raw({"sessionUpdate": "subagent_update", "sessionId": "child-1", "state": {"state": "idle", "stopReason": "end_turn"}})
+            agent_state("running")
+            update_chunk("agent_message_chunk", "Survey reviewed", "reviewed")
+            agent_state("idle")
             continue
         if mode == "subagent_stop":
             # The Subagent outlives the prompt, as a backgrounded one does.

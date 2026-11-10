@@ -69,6 +69,7 @@ type TaskChatTimelineProps = {
   timelineStatusLabel?: string;
   workingStartedAt?: string;
   backgroundCommands: BackgroundCommand[];
+  runningSubagentCount?: number;
   onStopBackgroundCommand?: (commandId: string) => void;
 };
 
@@ -100,6 +101,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   timelineStatusLabel,
   workingStartedAt,
   backgroundCommands,
+  runningSubagentCount,
   onStopBackgroundCommand,
 }: TaskChatTimelineProps) {
   const backgroundToolCalls = useMemo(
@@ -233,7 +235,11 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                     toolDetails={toolDetails}
                   />
                 ) : row.kind === "background" ? (
-                  <BackgroundCommandsRow commands={backgroundCommands} onStop={onStopBackgroundCommand} />
+                  <BackgroundCommandsRow
+                    commands={backgroundCommands}
+                    onStop={onStopBackgroundCommand}
+                    runningSubagentCount={runningSubagentCount}
+                  />
                 ) : timelineStatusLabel ? (
                   <TimelineStatus
                     kind={timelineStatusKind}

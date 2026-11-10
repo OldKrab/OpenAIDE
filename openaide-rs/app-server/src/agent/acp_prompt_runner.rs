@@ -203,8 +203,10 @@ pub(super) async fn run_prompt(
                     )
                     .await;
             }
-            // Re-evaluates the hold once an expected cycle failed to appear.
+            // Re-evaluates the hold once an expected cycle failed to appear,
+            // or once a Subagent started or ended a run.
             () = background_work.followup_timeout() => {}
+            () = background_work.changed() => {}
             close = close_rx.recv() => {
                 let Some(reply_tx) = close else {
                     break Err(RuntimeError::NotReady("ACP close channel stopped".to_string()));
