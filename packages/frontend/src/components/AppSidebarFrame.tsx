@@ -1,5 +1,6 @@
-import { ChevronRight } from "lucide-react";
+import { PanelLeft } from "lucide-react";
 import {
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -24,6 +25,12 @@ type SidebarFrameState = {
 
 type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> & {
   children: ReactNode;
+  /**
+   * Lets the user hide the sidebar with a toggle, the resizer's left edge, or
+   * Enter/Home on the resizer. A frame that is not collapsible always shows its
+   * sidebar and leaves the shared collapse preference untouched.
+   */
+  collapsible?: boolean;
   header?: ReactNode;
   headerPlacement?: "overlay" | "row";
   sidebar: ReactNode;
@@ -32,10 +39,15 @@ type AppSidebarFrameProps = Omit<ComponentPropsWithoutRef<"main">, "children"> &
 /**
  * Owns the stable application sidebar frame. Sidebar contents can change by
  * surface without changing the user's width or collapse preference.
+ *
+ * The toggle stays mounted in one place for both states, so it keeps keyboard
+ * focus across a toggle. Only the toggle animates the column; a drag already
+ * moved it, so a drag to the edge snaps closed.
  */
 export function AppSidebarFrame({
   children,
   className,
+  collapsible = false,
   header,
   headerPlacement = "row",
   sidebar,
@@ -43,16 +55,20 @@ export function AppSidebarFrame({
   ...rootProps
 }: AppSidebarFrameProps) {
   const frameRef = useRef<HTMLElement>(null);
-  const sidebarState = useAppSidebarState(frameRef);
+  const sidebarState = useAppSidebarState(frameRef, collapsible);
+  const paneId = useId();
+  const collapsed = collapsible && sidebarState.collapsed;
+  const toggleLabel = collapsed ? "Show sidebar" : "Hide sidebar";
   return (
     <main
       {...rootProps}
       ref={frameRef}
       className={[
         "app-sidebar-frame",
+        collapsible ? "app-sidebar-frame-collapsible" : undefined,
         header && headerPlacement === "row" ? "app-sidebar-frame-with-header" : undefined,
         header && headerPlacement === "overlay" ? "app-sidebar-frame-with-overlay-header" : undefined,
-        sidebarState.collapsed ? "sidebar-collapsed" : undefined,
+        collapsed ? "sidebar-collapsed" : undefined,
         className,
       ].filter(Boolean).join(" ")}
       style={{
@@ -68,8 +84,21 @@ export function AppSidebarFrame({
           {header}
         </div>
       ) : null}
-      <div className="app-sidebar-pane">{sidebar}</div>
-      {!sidebarState.collapsed ? (
+      {collapsible ? (
+        <button
+          aria-controls={paneId}
+          aria-expanded={!collapsed}
+          aria-label={toggleLabel}
+          className="app-sidebar-toggle"
+          onClick={sidebarState.toggle}
+          title={toggleLabel}
+          type="button"
+        >
+          <PanelLeft aria-hidden="true" size={16} strokeWidth={1.75} />
+        </button>
+      ) : null}
+      <div className="app-sidebar-pane" id={paneId}>{sidebar}</div>
+      {!collapsed ? (
         <>
           <div
             aria-label="Resize sidebar"
@@ -84,27 +113,17 @@ export function AppSidebarFrame({
             onPointerMove={sidebarState.resize}
             onPointerUp={sidebarState.finishResize}
             role="separator"
-            title="Drag to resize. Drag to the left edge to hide."
+            title={collapsible ? "Drag to resize. Drag to the left edge to hide." : "Drag to resize."}
             tabIndex={0}
           />
         </>
-      ) : (
-        <button
-          aria-label="Show sidebar"
-          className="app-sidebar-expand"
-          onClick={sidebarState.expand}
-          title="Show sidebar"
-          type="button"
-        >
-          <ChevronRight aria-hidden="true" size={14} />
-        </button>
-      )}
+      ) : null}
       {children}
     </main>
   );
 }
 
-function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
+function useAppSidebarState(frameRef: RefObject<HTMLElement | null>, collapsible: boolean) {
   const [state, setState] = useState<SidebarFrameState>(readState);
   const stateRef = useRef(state);
   const dragRef = useRef<{
@@ -130,6 +149,7 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
   const beginResize = (event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
+    setSidebarMotion(frameRef.current, false);
     dragRef.current = {
       liveWidth: stateRef.current.width,
       pointerId: event.pointerId,
@@ -142,7 +162,8 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
   const resize = (event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const width = clampDragWidth(drag.startWidth + event.clientX - drag.startX);
+    const offset = drag.startWidth + event.clientX - drag.startX;
+    const width = collapsible ? clampDragWidth(offset) : clampWidth(offset);
     drag.liveWidth = width;
     applySidebarWidth(frameRef.current, width);
   };
@@ -152,17 +173,16 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = undefined;
     setLayoutResizing(frameRef.current, false);
-    if (drag.liveWidth <= COLLAPSE_THRESHOLD) {
+    if (collapsible && drag.liveWidth <= COLLAPSE_THRESHOLD) {
       // React still considers the remembered width current, so restore the
       // CSS variable after the imperative drag before hiding the column.
       applySidebarWidth(frameRef.current, drag.startWidth);
       update({ collapsed: true, width: drag.startWidth });
       return;
     }
-    update({
-      collapsed: false,
-      width: clampWidth(drag.liveWidth),
-    });
+    // The resizer only shows while the sidebar does; a frame that is not
+    // collapsible keeps the shared preference it was given.
+    update({ ...stateRef.current, width: clampWidth(drag.liveWidth) });
   };
   const cancelResize = (event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
@@ -174,13 +194,14 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
     update({ ...stateRef.current, width: drag.startWidth }, false);
   };
   const resizeWithKeyboard = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === "Enter" || event.key === "Home") {
+    if (collapsible && (event.key === "Enter" || event.key === "Home")) {
       event.preventDefault();
+      setSidebarMotion(frameRef.current, true);
       update({ ...stateRef.current, collapsed: true });
       return;
     }
     const delta = event.key === "ArrowLeft" ? -16 : event.key === "ArrowRight" ? 16 : undefined;
-    const absoluteWidth = event.key === "End" ? MAX_WIDTH : undefined;
+    const absoluteWidth = event.key === "End" ? MAX_WIDTH : event.key === "Home" ? MIN_WIDTH : undefined;
     if (delta === undefined && absoluteWidth === undefined) return;
     event.preventDefault();
     update({
@@ -193,11 +214,45 @@ function useAppSidebarState(frameRef: RefObject<HTMLElement | null>) {
     ...state,
     beginResize,
     cancelResize,
-    expand: () => update({ ...stateRef.current, collapsed: false }),
+    toggle: () => {
+      setSidebarMotion(frameRef.current, true);
+      update({ ...stateRef.current, collapsed: !stateRef.current.collapsed });
+    },
     finishResize,
     resize,
     resizeWithKeyboard,
   };
+}
+
+/**
+ * Marks the frame so CSS animates the next column change. The mark lasts until
+ * that transition ends, so live resizing and drag-to-hide stay immediate. It is
+ * cleared on transitionend because the column change happens in CSS, after
+ * React has committed.
+ */
+function setSidebarMotion(frame: HTMLElement | null, moving: boolean) {
+  if (!frame) return;
+  if (!moving) {
+    delete frame.dataset.sidebarMotion;
+    return;
+  }
+  // A pending mark already has its listeners; reduced motion never transitions.
+  if (frame.dataset.sidebarMotion || prefersReducedMotion()) return;
+  frame.dataset.sidebarMotion = "true";
+  const settle = (event: TransitionEvent) => {
+    if (event.target !== frame || event.propertyName !== "--app-sidebar-track") return;
+    delete frame.dataset.sidebarMotion;
+    frame.removeEventListener("transitionend", settle);
+    frame.removeEventListener("transitioncancel", settle);
+  };
+  frame.addEventListener("transitionend", settle);
+  frame.addEventListener("transitioncancel", settle);
+}
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function readState(): SidebarFrameState {

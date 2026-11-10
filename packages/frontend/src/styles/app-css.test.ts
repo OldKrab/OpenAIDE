@@ -482,17 +482,19 @@ describe("task list row styles", () => {
 
   it("keeps the Settings navigation fixed while page content scrolls", () => {
     expect(appCss).toMatch(/\.app-shell\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/);
-    expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-width,\s*304px\) minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-track\) minmax\(0,\s*1fr\);/);
     expect(appCss).toMatch(/\.settings-view\s*{[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden;/);
     expect(appCss).toMatch(/\.settings-nav\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
     expect(appCss).toMatch(/\.settings-page\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;/);
   });
 
   it("keeps the shared sidebar controls quiet until they are needed", () => {
-    expect(appCss).toMatch(/\.app-sidebar-frame\.sidebar-collapsed\s*{[^}]*grid-template-columns:\s*0 minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.app-sidebar-frame\.sidebar-collapsed\s*{[^}]*--app-sidebar-track:\s*0px;/);
+    expect(appCss).toMatch(/\.app-sidebar-frame\[data-sidebar-motion\]\s*{[^}]*transition:\s*--app-sidebar-track 180ms ease-out;/);
+    expect(appCss).not.toMatch(/\.app-sidebar-expand/);
     expect(appCss).not.toMatch(/\.app-sidebar-collapse/);
     expect(appCss).not.toMatch(/\.app-sidebar-resizer::after/);
-    expect(appCss).toMatch(/\.app-sidebar-expand\s*{[^}]*top:\s*10px;[^}]*left:\s*10px;/);
+    expect(appCss).toMatch(/\.app-sidebar-toggle\s*{[^}]*top:\s*8px;[^}]*left:\s*8px;/);
   });
 
   it("shows the Settings index or one page on constrained widths, never both", () => {

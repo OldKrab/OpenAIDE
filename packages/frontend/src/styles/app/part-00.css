@@ -123,14 +123,14 @@ body[data-shell="desktop"] .sidebar {
 }
 
 .web-workbench-shell {
-  grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr);
+  grid-template-columns: var(--app-sidebar-track) minmax(0, 1fr);
   background:
     linear-gradient(
       90deg,
       transparent 0,
-      transparent calc(var(--app-sidebar-width, 304px) - 1px),
-      var(--oa-border-subtle) calc(var(--app-sidebar-width, 304px) - 1px),
-      transparent calc(var(--app-sidebar-width, 304px) + 1px)
+      transparent calc(var(--app-sidebar-track) - 1px),
+      var(--oa-border-subtle) calc(var(--app-sidebar-track) - 1px),
+      transparent calc(var(--app-sidebar-track) + 1px)
     ),
     var(--oa-bg);
 }
