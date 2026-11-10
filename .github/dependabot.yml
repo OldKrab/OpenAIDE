@@ -5,6 +5,19 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # One weekly pull request carries every minor and patch update; a major
+    # update keeps its own pull request because it needs a review of its own.
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        # The Tauri CLI refuses a build whose npm packages and crates differ in
+        # major or minor version, so these move with the Desktop crate instead.
+        exclude-patterns:
+          - "@tauri-apps/*"
+        update-types:
+          - minor
+          - patch
     ignore:
       # VS Code's 1.x minor versions expose new extension API levels. Keep the
       # types aligned with our declared minimum VS Code version deliberately.
@@ -22,8 +35,22 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
