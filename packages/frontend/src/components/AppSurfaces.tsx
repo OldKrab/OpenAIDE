@@ -649,6 +649,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <MobileTaskMoreProvider>
       <TerminalSurfaceContext.Provider value={frontendShell?.terminals ? terminalPage.surface : undefined}>
       <AppSidebarFrame
+        collapsible
         className={[
           "app-shell web-workbench-shell",
           terminalPage.target ? "terminal-page-open" : undefined,

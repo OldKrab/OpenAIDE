@@ -119,12 +119,12 @@ body[data-shell="desktop"][data-platform="macos"] .web-workbench-shell.app-sideb
   padding-top: 45px;
 }
 
-/* With the sidebar hidden, its expand control sits beside the traffic lights on
+/* The sidebar toggle sits beside the traffic lights in both states and on
    every surface: at its default offset it would straddle the well's top edge
    under a Task, and it must not move when a Task opens. It shares the lights'
    centerline, which the native window places higher than the band's own
    center. It sits above the title bar's drag region so it stays clickable. */
-body[data-shell="desktop"][data-platform="macos"] .web-workbench-shell.sidebar-collapsed .app-sidebar-expand {
+body[data-shell="desktop"][data-platform="macos"] .web-workbench-shell .app-sidebar-toggle {
   z-index: 21;
   top: 1px;
   left: 78px;

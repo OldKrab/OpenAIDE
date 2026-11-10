@@ -1,6 +1,23 @@
+/*
+ * The sidebar column is a registered length so a toggle can transition it.
+ * --app-sidebar-width stays the remembered width; the track is what is shown
+ * right now. Everything that follows the column edge reads the track.
+ */
+@property --app-sidebar-track {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 .app-sidebar-frame {
+  --app-sidebar-track: var(--app-sidebar-width, 304px);
   position: relative;
-  grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr);
+  grid-template-columns: var(--app-sidebar-track) minmax(0, 1fr);
+}
+
+/* Set only by the toggle, so live resizing and drag-to-hide stay immediate. */
+.app-sidebar-frame[data-sidebar-motion] {
+  transition: --app-sidebar-track 180ms ease-out;
 }
 
 .app-sidebar-pane {
@@ -31,7 +48,7 @@
 
 .app-sidebar-frame.app-sidebar-frame-with-header .app-sidebar-pane > *,
 .app-sidebar-frame.app-sidebar-frame-with-header .sidebar,
-.app-sidebar-frame-with-header > :not(.app-sidebar-frame-header):not(.app-sidebar-resizer):not(.app-sidebar-expand) {
+.app-sidebar-frame-with-header > :not(.app-sidebar-frame-header):not(.app-sidebar-resizer):not(.app-sidebar-toggle) {
   grid-row: 2;
 }
 
@@ -39,21 +56,53 @@
   top: 44px;
 }
 
-.app-sidebar-frame-with-header.sidebar-collapsed .app-sidebar-expand {
-  top: 54px;
-}
-
-.app-sidebar-frame-with-overlay-header.sidebar-collapsed .app-sidebar-expand {
-  top: 36px;
-}
-
 .app-sidebar-frame.sidebar-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr);
+  --app-sidebar-track: 0px;
   background: var(--oa-bg);
 }
 
-.app-sidebar-frame.sidebar-collapsed .app-sidebar-pane {
-  display: none;
+@media (min-width: 761px) {
+  /* The sidebar keeps its full width and slides out past the frame's left edge
+     as the column narrows, so its contents never reflow during the motion. */
+  .app-sidebar-frame-collapsible .app-sidebar-pane > * {
+    width: var(--app-sidebar-width, 304px);
+    justify-self: end;
+    justify-self: unsafe end;
+  }
+
+  .app-sidebar-frame.sidebar-collapsed .app-sidebar-pane > * {
+    visibility: hidden;
+  }
+
+  /* Hidden after the slide, not before it; showing is immediate. */
+  .app-sidebar-frame[data-sidebar-motion].sidebar-collapsed .app-sidebar-pane > * {
+    transition: visibility 0s linear 180ms;
+  }
+
+  /* Without shell chrome above it, the toggle shares the sidebar's first row.
+     The Task header's center is 22px down; the row moves up to meet it. */
+  .app-sidebar-frame-collapsible:not(.app-sidebar-frame-with-header, .app-sidebar-frame-with-overlay-header) .sidebar {
+    padding-top: 8px;
+  }
+
+  .app-sidebar-frame-collapsible:not(.app-sidebar-frame-with-header, .app-sidebar-frame-with-overlay-header) .sidebar-actions > button:first-child,
+  .app-sidebar-frame-collapsible:not(.app-sidebar-frame-with-header, .app-sidebar-frame-with-overlay-header) .archive-section-head {
+    width: auto;
+    margin-left: 32px;
+  }
+
+  /* With the sidebar hidden, the toggle stays put over the Task page, which
+     leaves room for it instead of running its title underneath. */
+  .app-sidebar-frame-collapsible.sidebar-collapsed:not(.app-sidebar-frame-with-header, .app-sidebar-frame-with-overlay-header) .task-work-stack-header {
+    padding-left: 32px;
+  }
+}
+
+@media (min-width: 761px) and (prefers-reduced-motion: reduce) {
+  .app-sidebar-frame[data-sidebar-motion],
+  .app-sidebar-frame[data-sidebar-motion].sidebar-collapsed .app-sidebar-pane > * {
+    transition: none;
+  }
 }
 
 .app-sidebar-resizer {
@@ -61,7 +110,7 @@
   z-index: 12;
   top: 0;
   bottom: 0;
-  left: calc(var(--app-sidebar-width, 304px) - 3px);
+  left: calc(var(--app-sidebar-track) - 3px);
   width: 6px;
   border: 0;
   outline: 0;
@@ -69,28 +118,24 @@
   touch-action: none;
 }
 
-.app-sidebar-expand {
+/* One fixed place for both states; shells with chrome move it into that band. */
+.app-sidebar-toggle {
   position: absolute;
   z-index: 13;
-  border: 1px solid var(--oa-border);
-  background: var(--oa-panel);
+  top: 8px;
+  left: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
   color: var(--oa-muted);
   display: grid;
   place-items: center;
   padding: 0;
 }
 
-.app-sidebar-expand {
-  top: 10px;
-  left: 10px;
-  width: 28px;
-  height: 28px;
-  border-color: transparent;
-  border-radius: var(--oa-radius-sm);
-}
-
-.app-sidebar-expand:hover {
-  border-color: var(--oa-border);
+.app-sidebar-toggle:hover {
   background: var(--oa-raised);
   color: var(--oa-text);
 }
@@ -102,12 +147,8 @@
     background: var(--oa-bg);
   }
 
-  .app-sidebar-frame.sidebar-collapsed .app-sidebar-pane {
-    display: contents;
-  }
-
   .app-sidebar-resizer,
-  .app-sidebar-expand {
+  .app-sidebar-toggle {
     display: none;
   }
 }

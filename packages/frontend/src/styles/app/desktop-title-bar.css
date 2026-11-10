@@ -60,12 +60,14 @@
   padding-left: 78px;
 }
 
-.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-windows {
-  grid-template-columns: 144px minmax(0, 1fr) auto;
+/* Inside the frame the sidebar column follows the animated track down to the
+   room the window controls and the sidebar toggle need. */
+.app-sidebar-frame .desktop-title-bar-windows {
+  grid-template-columns: max(144px, var(--app-sidebar-track)) minmax(0, 1fr) auto;
 }
 
-.app-sidebar-frame.sidebar-collapsed .desktop-title-bar-macos {
-  grid-template-columns: 78px minmax(0, 1fr) auto;
+.app-sidebar-frame .desktop-title-bar-macos {
+  grid-template-columns: max(78px, var(--app-sidebar-track)) minmax(0, 1fr) auto;
 }
 
 .app-sidebar-frame.sidebar-collapsed .desktop-title-bar-sidebar {
@@ -120,4 +122,20 @@
 .desktop-caption-buttons button:last-child:hover {
   background: #c42b1c;
   color: white;
+}
+
+/* Windows and Linux: the sidebar toggle sits at the start of the title band in
+   both states, above the band's drag region so it stays clickable. */
+body[data-shell="desktop"]:not([data-platform="macos"]) .app-sidebar-frame-with-overlay-header .app-sidebar-toggle {
+  z-index: 21;
+  top: 2px;
+}
+
+body[data-shell="desktop"]:not([data-platform="macos"]) .app-sidebar-frame-with-overlay-header.desktop-task-title-bar .app-sidebar-toggle {
+  top: 8px;
+}
+
+/* An integrated Task header starts under the toggle once the sidebar hides. */
+body[data-shell="desktop"]:not([data-platform="macos"]) .app-sidebar-frame-collapsible.sidebar-collapsed .task-work-stack-header {
+  padding-left: 32px;
 }
