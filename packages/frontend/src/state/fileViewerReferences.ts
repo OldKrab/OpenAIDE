@@ -86,8 +86,9 @@ export function chatMarkdownFileLocation(href: string | undefined, allFileTypes 
   return pathLikeFileLocation(relative);
 }
 
+/** Splits a `:N` line or `:N-M` range suffix; a range opens at its first line. */
 function splitLineSuffix(value: string): { path: string; line?: number } {
-  const match = value.match(/^(.*):([1-9]\d*)$/);
+  const match = value.match(/^(.*):([1-9]\d*)(?:-[1-9]\d*)?$/);
   if (match?.[1]) return { path: match[1], line: Number(match[2]) };
   return { path: value };
 }

@@ -57,6 +57,12 @@ describe("inline file reference candidates", () => {
     expect(inlineFileReferenceCandidate("/srv/app/run.log")).toEqual({ location: { path: "/srv/app/run.log" }, needsCheck: false });
   });
 
+  it("opens a line range at its first line", () => {
+    expect(inlineFileReferenceCandidate("package.json:8-15")).toEqual({ location: { path: "package.json", line: 8 }, needsCheck: true });
+    expect(inlineFileReferenceCandidate("/srv/app/main.rs:27-74")).toEqual({ location: { path: "/srv/app/main.rs", line: 27 }, needsCheck: false });
+    expect(chatMarkdownFileLocation("README.md:12-20")).toEqual({ path: "README.md", line: 12 });
+  });
+
   it("skips words, commands, URLs and directories", () => {
     expect(inlineFileReferenceCandidate("useState")).toBeUndefined();
     expect(inlineFileReferenceCandidate("npm run build")).toBeUndefined();
