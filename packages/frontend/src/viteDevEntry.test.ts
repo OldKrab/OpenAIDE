@@ -34,8 +34,10 @@ test("the dev server serves the Browser Shell entry that its page loads", async 
     const origin = `http://127.0.0.1:${port}/`;
 
     const page = await fetch(origin, { headers: { Accept: "text/html" } });
+    // Vite escapes the attribute as HTML, so `&` arrives as `&amp;`; a browser decodes it
+    // before it requests the script.
     const scripts = [...(await page.text()).matchAll(/<script type="module" src="([^"]+)"/g)]
-      .map(([, src]) => new URL(src, origin))
+      .map(([, src]) => new URL(src.replaceAll("&amp;", "&"), origin))
       .filter((url) => !url.pathname.startsWith("/@"));
     expect(scripts).toHaveLength(1);
 

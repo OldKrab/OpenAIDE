@@ -16,14 +16,15 @@
     "@openaide/app-server-client": "*",
     "@openaide/app-shell-contracts": "*",
     "@tauri-apps/api": "2.12.4",
-    "@tauri-apps/plugin-dialog": "2.7.2",
+    "@tauri-apps/plugin-dialog": "2.8.4",
     "@tauri-apps/plugin-notification": "2.8.0",
     "@tauri-apps/plugin-opener": "2.7.2"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.3",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@tauri-apps/cli": "2.12.4",
+    "@types/node": "~24.13.6",
+    "@vitejs/plugin-react": "^6.3.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.2"
+    "vite": "^8.3.7"
   }
 }
