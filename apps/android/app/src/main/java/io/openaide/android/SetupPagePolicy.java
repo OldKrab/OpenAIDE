@@ -48,9 +48,10 @@ final class SetupPagePolicy {
      * What the workspace page may ask while this phone is not the computer in use; its
      * local tools wait for the phone to be in use. Setup stays allowed: it is how an
      * unready phone becomes usable (ADR-0070), and its own page runs those tools.
+     * Battery access is the app's own: a paired computer's Task notifications need it too.
      */
     private static final java.util.Set<String> REMOTE_ACTIONS = java.util.Set.of("state", "close", "pair_setup", "phone_setup", "app_settings", "diagnostics",
-        "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check");
+        "ssh_add", "use_ssh", "forget_ssh", "stop_ssh", "update_ssh", "background", "battery", "remote_check");
 
     static boolean allowedWhileRemote(String action) { return REMOTE_ACTIONS.contains(action); }
 
