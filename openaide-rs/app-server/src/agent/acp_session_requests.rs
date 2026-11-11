@@ -6,10 +6,14 @@ use crate::agent::acp_schema::{
     LoadSessionResponse, McpServer, Meta, NewSessionRequest, NewSessionResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionId,
 };
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::{ConnectionTo, SessionSetup};
+use agent_client_protocol::Agent;
 
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::logging;
+
+/// A session the Agent set up, routed on the connection, with the setup response.
+pub(super) type AcpSessionSetup<Response> = SessionSetup<'static, Agent, Response>;
 
 pub(super) async fn request_new_session(
     connection: &ConnectionTo<Agent>,
@@ -19,7 +23,7 @@ pub(super) async fn request_new_session(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<NewSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<NewSessionResponse>, agent_client_protocol::Error> {
     send_new_session_request(connection, cwd, mcp_servers, meta, trace).await
 }
 
@@ -35,7 +39,7 @@ pub(super) async fn request_load_session(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<LoadSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<LoadSessionResponse>, agent_client_protocol::Error> {
     send_load_session_request(connection, session_id, cwd, mcp_servers, meta, trace).await
 }
 
@@ -51,7 +55,7 @@ pub(super) async fn request_resume_session(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<ResumeSessionResponse>, agent_client_protocol::Error> {
     send_resume_session_request(connection, session_id, cwd, mcp_servers, meta, trace).await
 }
 
@@ -71,7 +75,7 @@ async fn send_new_session_request(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<NewSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<NewSessionResponse>, agent_client_protocol::Error> {
     let started_at = Instant::now();
     logging::info(
         "acp_session_request_started",
@@ -87,15 +91,22 @@ async fn send_new_session_request(
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/new.request", &request);
     }
-    let response = match connection.send_request(request).block_task().await {
-        Ok(response) => response,
+    // The builder routes the session before the dispatch loop takes the next message.
+    let setup = match connection
+        .build_session_from(request)
+        .block_task()
+        .start_session()
+        .await
+    {
+        Ok(setup) => setup,
         Err(error) => {
             record_session_failure("session/new", trace, started_at, &error);
             return Err(error);
         }
     };
+    let response = &setup.response;
     if let Some(trace) = trace {
-        trace.record("agent_to_client", "session/new.response", &response);
+        trace.record("agent_to_client", "session/new.response", response);
     }
     logging::info(
         "acp_session_request_completed",
@@ -110,7 +121,7 @@ async fn send_new_session_request(
                 .unwrap_or(0),
         }),
     );
-    Ok(response)
+    Ok(setup)
 }
 
 async fn send_load_session_request(
@@ -120,7 +131,7 @@ async fn send_load_session_request(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<LoadSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<LoadSessionResponse>, agent_client_protocol::Error> {
     let started_at = Instant::now();
     logging::info(
         "acp_session_request_started",
@@ -136,15 +147,23 @@ async fn send_load_session_request(
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/load.request", &request);
     }
-    let response = match connection.send_request(request).block_task().await {
-        Ok(response) => response,
+    // The builder routes the session before it sends `session/load`. The connection's load
+    // capture still takes the replay first; see `load_active_session`.
+    let setup = match connection
+        .load_session_from(request)
+        .block_task()
+        .start_session()
+        .await
+    {
+        Ok(setup) => setup,
         Err(error) => {
             record_session_failure("session/load", trace, started_at, &error);
             return Err(error);
         }
     };
+    let response = &setup.response;
     if let Some(trace) = trace {
-        trace.record("agent_to_client", "session/load.response", &response);
+        trace.record("agent_to_client", "session/load.response", response);
     }
     logging::info(
         "acp_session_request_completed",
@@ -159,7 +178,7 @@ async fn send_load_session_request(
                 .unwrap_or(0),
         }),
     );
-    Ok(response)
+    Ok(setup)
 }
 
 async fn send_resume_session_request(
@@ -169,7 +188,7 @@ async fn send_resume_session_request(
     mcp_servers: Vec<McpServer>,
     meta: Option<Meta>,
     trace: Option<&AcpTraceSession>,
-) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
+) -> Result<AcpSessionSetup<ResumeSessionResponse>, agent_client_protocol::Error> {
     let started_at = Instant::now();
     logging::info(
         "acp_session_request_started",
@@ -185,15 +204,22 @@ async fn send_resume_session_request(
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/resume.request", &request);
     }
-    let response = match connection.send_request(request).block_task().await {
-        Ok(response) => response,
+    // The builder routes the session before it sends `session/resume`.
+    let setup = match connection
+        .resume_session_from(request)
+        .block_task()
+        .start_session()
+        .await
+    {
+        Ok(setup) => setup,
         Err(error) => {
             record_session_failure("session/resume", trace, started_at, &error);
             return Err(error);
         }
     };
+    let response = &setup.response;
     if let Some(trace) = trace {
-        trace.record("agent_to_client", "session/resume.response", &response);
+        trace.record("agent_to_client", "session/resume.response", response);
     }
     logging::info(
         "acp_session_request_completed",
@@ -208,7 +234,7 @@ async fn send_resume_session_request(
                 .unwrap_or(0),
         }),
     );
-    Ok(response)
+    Ok(setup)
 }
 
 async fn send_session_list_request(

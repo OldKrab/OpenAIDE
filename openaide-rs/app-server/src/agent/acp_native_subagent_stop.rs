@@ -7,7 +7,8 @@
 
 use std::time::Instant;
 
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::Agent;
 use serde_json::json;
 
 use crate::agent::acp_errors::acp_error;

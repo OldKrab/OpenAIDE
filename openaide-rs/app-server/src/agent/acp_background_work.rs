@@ -19,8 +19,9 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::{
-    Agent, ConnectionTo, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, UntypedMessage,
+    Agent, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, UntypedMessage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

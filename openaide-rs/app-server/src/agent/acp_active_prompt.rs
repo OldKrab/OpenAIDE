@@ -36,7 +36,7 @@ impl ActivePrompt {
     // session registries; keeping those seams explicit avoids another context bag.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
-        active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+        active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
         current_prompts: &AcpSessionPromptMap,
         agent_id: &str,
         content_policy: PromptContentPolicy,
@@ -107,7 +107,7 @@ impl ActivePrompt {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn continue_prompt(
         &self,
-        active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+        active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
         content_policy: PromptContentPolicy,
         trace: Option<&AcpTraceSession>,
         mut prompt: AgentPrompt,
@@ -316,7 +316,7 @@ impl Drop for CurrentPromptSlot {
 // Prompt dispatch keeps response projection and generation ownership explicit at this boundary.
 #[allow(clippy::too_many_arguments)]
 fn send_prompt_request(
-    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
     prompt: AgentPrompt,
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
@@ -423,7 +423,7 @@ fn send_prompt_request(
 /// Sends steering on the same ACP method. A current `end_turn` joins the primary
 /// completion channel; other outcomes remain prompt-local diagnostics.
 pub(super) fn send_steering_prompt_request(
-    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
     prompt: AgentPrompt,
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
@@ -564,7 +564,7 @@ fn prompt_outcome(stop_reason: crate::agent::acp_schema::StopReason) -> AgentPro
 }
 
 pub(super) async fn cancel_active_prompt(
-    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    active_session: &agent_client_protocol::v1::ActiveSession<'static, Agent>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<(), RuntimeError> {
     let dispatch_started = Instant::now();

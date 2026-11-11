@@ -3,7 +3,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use crate::agent::acp_schema::InitializeResponse;
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::Agent;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -603,9 +604,7 @@ async fn initialize_shared_process_connection(
                     "error_kind": "invalid_capabilities",
                 }),
             );
-            return Err(agent_client_protocol::util::internal_error(
-                error.to_string(),
-            ));
+            return Err(crate::agent::acp_errors::internal_error(error.to_string()));
         }
         logging::info(
             "acp_initialize_completed",

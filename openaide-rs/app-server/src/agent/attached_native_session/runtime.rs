@@ -23,7 +23,7 @@ use crate::agent::{
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentCommandsCatalog, ConfigOptionsCatalog, ConfigOptionsStatus};
-use agent_client_protocol::SessionMessage;
+use agent_client_protocol::v1::SessionMessage;
 
 use super::{AcpSessionCommand, AttachedNativeSessionRunInput};
 
@@ -138,7 +138,7 @@ pub(super) async fn run(
                             session_snapshot.commands_catalog.as_ref(),
                             sink.clone(),
                         )
-                        .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                        .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
                         session_projection = Some(LivePromptProjection::for_session(
                             request_agent_id.clone(),
                             sink,
@@ -336,7 +336,7 @@ pub(super) async fn run(
                 let Some(response) = response else { continue; };
                 for update in take_preceding_session_updates(&mut active_session)
                     .await
-                    .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+                    .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?
                 {
                     apply_opened_session_message(
                         &request_agent_id,
@@ -348,7 +348,7 @@ pub(super) async fn run(
                         &mut pending_session_catalogs,
                         &background_work,
                     ).await
-                    .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                    .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
                 }
                 if let Some(catalog) = response.finish_with_session_sink(session_event_sink.as_deref()) {
                     config_catalog = catalog;
@@ -373,7 +373,7 @@ pub(super) async fn run(
                     &background_work,
                 )
                 .await
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                .map_err(|error| crate::agent::acp_errors::internal_error(error.to_string()))?;
                 session_snapshot = session_with_catalog_snapshots(
                     &session_snapshot,
                     &config_catalog,
@@ -534,12 +534,12 @@ async fn apply_opened_session_message(
     pending_session_catalogs: &mut PendingSessionCatalogs,
     background_work: &BackgroundWork,
 ) -> Result<(), RuntimeError> {
-    let SessionMessage::SessionMessage(dispatch) = update else {
+    let SessionMessage::Message(dispatch) = update else {
         return Ok(());
     };
     let catalogs = dispatch_session_notification(
         agent_id,
-        dispatch,
+        dispatch.into_raw(),
         session_projection,
         session_event_sink.cloned(),
         pending_session_catalogs,

@@ -2,7 +2,8 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use crate::agent::acp_schema::InitializeResponse;
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::Agent;
 
 use crate::agent::acp_agent_process::{AcpSessionOpenRequest, AcpStartedSession};
 use crate::agent::acp_config_projection::normalize_config_options;
@@ -151,9 +152,7 @@ async fn open_acp_session_inner<'a>(
             let _ = context.start_error_tx.send(Err(
                 crate::protocol::errors::RuntimeError::InvalidParams(error.to_string()),
             ));
-            return Err(agent_client_protocol::util::internal_error(
-                error.to_string(),
-            ));
+            return Err(crate::agent::acp_errors::internal_error(error.to_string()));
         }
     }
 
