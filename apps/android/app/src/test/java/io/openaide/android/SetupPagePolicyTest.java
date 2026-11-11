@@ -34,12 +34,12 @@ public class SetupPagePolicyTest {
         // Settings offers Set up only while another computer is in use, so refusing it there strands the phone.
         assertTrue(SetupPagePolicy.allowedWhileRemote("phone_setup"));
         for (String action : new String[]{"state", "close", "pair_setup", "app_settings", "diagnostics", "ssh_add", "use_ssh",
-            "forget_ssh", "stop_ssh", "update_ssh", "background", "remote_check"})
+            "forget_ssh", "stop_ssh", "update_ssh", "background", "battery", "remote_check"})
             assertTrue(SetupPagePolicy.allowedWhileRemote(action));
     }
 
     @Test public void localToolsWaitForThePhoneToBeInUse() {
-        for (String action : new String[]{"check", "install", "termux", "get_termux", "access", "grant", "signin", "battery", "termux_settings", ""})
+        for (String action : new String[]{"check", "install", "termux", "get_termux", "access", "grant", "signin", "termux_settings", ""})
             assertFalse(SetupPagePolicy.allowedWhileRemote(action));
     }
 
