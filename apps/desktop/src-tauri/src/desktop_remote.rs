@@ -518,22 +518,36 @@ fn device_key(path: &Path) -> Result<remote::SecretKey, String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn device_key_entry() -> Result<keyring::Entry, ()> {
-    keyring::Entry::new("dev.openaide.desktop.device", "device-key").map_err(|_| ())
+fn device_key_entry() -> Result<keyring_core::Entry, ()> {
+    crate::desktop_keyring::entry("dev.openaide.desktop.device", "device-key")
+        .map_err(|error| device_key_store_failed("open", &error))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn device_key_store_failed(step: &str, error: &keyring_core::Error) {
+    desktop_log!(
+        "desktop_remote_device_key_store_failed step={step} error_class={}",
+        crate::desktop_keyring::error_class(error)
+    );
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn read_device_key(_path: &Path) -> Result<Option<String>, ()> {
     match device_key_entry()?.get_password() {
         Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err(()),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
+        Err(error) => {
+            device_key_store_failed("read", &error);
+            Err(())
+        }
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn write_device_key(_path: &Path, text: &str) -> Result<(), ()> {
-    device_key_entry()?.set_password(text).map_err(|_| ())
+    device_key_entry()?
+        .set_password(text)
+        .map_err(|error| device_key_store_failed("write", &error))
 }
 
 // Other platforms have no credential store wired into this shell, so the key is

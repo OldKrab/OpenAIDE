@@ -16,6 +16,8 @@ mod desktop_log;
 mod desktop_app_server_hold;
 mod desktop_app_server_launch;
 mod desktop_connection;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod desktop_keyring;
 mod desktop_local_attention;
 mod desktop_quit;
 mod desktop_remote;

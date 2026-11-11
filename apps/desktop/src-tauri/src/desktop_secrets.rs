@@ -51,16 +51,31 @@ fn validate_key(key: &str) -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn platform_entry(key: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, key).map_err(|_| "Secure storage is unavailable.".to_string())
+fn platform_entry(key: &str) -> Result<keyring_core::Entry, String> {
+    crate::desktop_keyring::entry(SERVICE, key)
+        .map_err(|error| store_failure("open", &error, "Secure storage is unavailable."))
+}
+
+/// Logs a credential store failure by class only, and returns the user-facing message.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn store_failure(step: &str, error: &keyring_core::Error, message: &str) -> String {
+    desktop_log!(
+        "desktop_secret_store_failed step={step} error_class={}",
+        crate::desktop_keyring::error_class(error)
+    );
+    message.to_string()
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn read_platform_secret(key: &str) -> Result<Option<String>, String> {
     match platform_entry(key)?.get_password() {
         Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_) => Err("Secure storage could not be read.".to_string()),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
+        Err(error) => Err(store_failure(
+            "read",
+            &error,
+            "Secure storage could not be read.",
+        )),
     }
 }
 
@@ -73,7 +88,7 @@ fn read_platform_secret(_key: &str) -> Result<Option<String>, String> {
 fn write_platform_secret(key: &str, value: &str) -> Result<(), String> {
     platform_entry(key)?
         .set_password(value)
-        .map_err(|_| "Secure storage could not be written.".to_string())
+        .map_err(|error| store_failure("write", &error, "Secure storage could not be written."))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -84,8 +99,12 @@ fn write_platform_secret(_key: &str, _value: &str) -> Result<(), String> {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn delete_platform_secret(key: &str) -> Result<(), String> {
     match platform_entry(key)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(_) => Err("Secure storage could not be deleted.".to_string()),
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+        Err(error) => Err(store_failure(
+            "delete",
+            &error,
+            "Secure storage could not be deleted.",
+        )),
     }
 }
 
