@@ -139,8 +139,8 @@ one agent command that works in Termux: `codex` or `claude`. The managed Codex
 integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
 publishes an Android build, so setup installs one that runs in Termux when it is
 missing. Codex is a pinned community build. Claude Code ships only as a glibc binary:
-setup takes the binary the app's Claude adapter was built against from the adapter's
-own npm package, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
+setup installs the binary of the Claude SDK version the app's Claude adapter
+runtime lockfile pins, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
 command that starts it with Termux's glibc packages. Two things make it behave like
 any other program there. The binary names Termux's glibc loader, written into unused
 padding because tools that move the file's contents break it; started as an argument

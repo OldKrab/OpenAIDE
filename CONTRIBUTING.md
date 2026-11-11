@@ -13,7 +13,9 @@ protocols, and user-facing behavior are still evolving.
 
 1. Fork the repository and create a focused feature branch.
 2. Install Node.js 24, npm, and the stable Rust toolchain.
-3. Run `npm ci`.
+3. Run `npm ci`, then `npm run build:adapters`. The App Server embeds the
+   built-in Agent adapters from the git submodules under `adapters/` and does not
+   build without them; the script initializes the submodules when needed.
 4. Make the smallest cohesive change with tests at the user-visible, protocol, or
    storage boundary.
 5. Run `npm run ci` before opening a pull request.

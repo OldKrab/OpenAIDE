@@ -30,6 +30,7 @@ jobs:
         with:
           ref: main
           token: ${{ steps.repository-token.outputs.token }}
+          submodules: true
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -47,7 +48,10 @@ jobs:
 
       - name: Verify the fallback configuration
         if: steps.adapter.outputs.changed == 'true'
-        run: cargo test --locked -p openaide-app-server agent::acp_agent_config::tests
+        run: |
+          # The App Server embeds the Claude adapter fork (ADR-0079).
+          npm run build:adapters
+          cargo test --locked -p openaide-app-server agent::acp_agent_config::tests
 
       - name: Open the update pull request
         if: steps.adapter.outputs.changed == 'true'

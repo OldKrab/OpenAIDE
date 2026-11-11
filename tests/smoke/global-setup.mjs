@@ -49,6 +49,8 @@ export default async function globalSetup() {
         "--emptyOutDir=false",
       ]);
     }
+    // The App Server embeds the adapter forks and refuses to build without them (ADR-0079).
+    await step("adapters", "npm", ["run", "build:adapters"]);
     await step("app_server", "cargo", ["build", "-p", "openaide-app-server"]);
   } catch (error) {
     await rm(root, { recursive: true, force: true });

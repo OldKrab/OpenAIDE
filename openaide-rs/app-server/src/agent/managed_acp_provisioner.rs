@@ -3,6 +3,7 @@
 //! One provisioner serves every [`ManagedAcpRuntime`]. Each runtime owns its own
 //! directory under `agent-runtimes/`, so their install locks, leases, and pruning are
 //! independent. An installation is staged with `npm ci` from the embedded lockfile,
+//! receives the embedded adapter package when the runtime has one (ADR-0079), is
 //! validated, marked, and published by rename; a launch then holds a shared lease on
 //! it so a newer App Server cannot prune a version still running.
 
@@ -23,8 +24,10 @@ use crate::agent::acp_agent_config::{
 use crate::agent::status_cache::AgentStatusCache;
 use crate::protocol::errors::RuntimeError;
 
+mod embedded;
 mod runtime;
 mod runtime_patch;
+use embedded::AdapterFault;
 pub(crate) use runtime::ManagedAcpRuntime;
 use runtime_patch::ArtifactDigests;
 const MANAGED_MARKER: &str = ".openaide-managed";
@@ -145,7 +148,7 @@ impl ManagedAcpProvisioner {
         fs::create_dir_all(&runtimes_root)
             .map_err(|error| provisioning_io_error(runtime, error))?;
         let version_root = runtimes_root.join(&package.runtime_id);
-        let cache_hit = self.valid_installation(runtime, &version_root);
+        let cache_hit = self.valid_installation(runtime, &version_root, Check::Launch);
         let previous_status = (!cache_hit).then(|| self.statuses.begin_installation(agent_id));
         let started_at = Instant::now();
         let fields = |extra: serde_json::Value| {
@@ -214,7 +217,7 @@ impl ManagedAcpProvisioner {
         lock_exclusive_until(runtime, &install_lock, Instant::now() + timeout)?;
         cleanup_stale_staging(runtimes_root);
 
-        if !self.valid_installation(runtime, version_root) {
+        if !self.valid_installation(runtime, version_root, Check::Passive) {
             if version_root.exists() {
                 remove_invalid_installation(runtime, version_root)?;
             }
@@ -225,8 +228,9 @@ impl ManagedAcpProvisioner {
                 .installer
                 .install(runtime, &staging)
                 .map_err(|message| provisioning_installer_error(runtime, message))
+                .and_then(|_| unpack_embedded_adapter(runtime, &staging))
                 .and_then(|_| {
-                    self.validate_installation(runtime, &staging)?;
+                    self.validate_installation(runtime, &staging, Check::Staged)?;
                     fs::write(staging.join(MANAGED_MARKER), managed_marker(runtime))
                         .map_err(io_error)?;
                     fs::rename(&staging, version_root).map_err(io_error)
@@ -272,6 +276,7 @@ impl ManagedAcpProvisioner {
             &self
                 .runtimes_root(runtime)
                 .join(&runtime.package().runtime_id),
+            Check::Passive,
         )
     }
 
@@ -281,25 +286,170 @@ impl ManagedAcpProvisioner {
             .join(runtime.runtimes_dir())
     }
 
-    fn valid_installation(&self, runtime: ManagedAcpRuntime, version_root: &Path) -> bool {
+    fn valid_installation(
+        &self,
+        runtime: ManagedAcpRuntime,
+        version_root: &Path,
+        check: Check,
+    ) -> bool {
         fs::read_to_string(version_root.join(MANAGED_MARKER))
             .ok()
             .as_deref()
             == Some(managed_marker(runtime).as_str())
-            && self.validate_installation(runtime, version_root).is_ok()
+            && self
+                .validate_installation(runtime, version_root, check)
+                .is_ok()
     }
 
     fn validate_installation(
         &self,
         runtime: ManagedAcpRuntime,
         version_root: &Path,
+        check: Check,
     ) -> Result<(), RuntimeError> {
+        validate_embedded_adapter(runtime, version_root, check)?;
         validate_package(runtime, version_root)?;
         if runtime.has_runtime_patch() {
             self.artifacts.validate(version_root)?;
         }
         validate_platform_runtime(runtime, version_root, self.windows)
     }
+}
+
+/// Why an installation is being validated; it decides what is logged. Passive
+/// checks (Native Session Discovery) stay quiet, a launch records the cached
+/// installation's check, and a staged installation records its install check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Check {
+    Passive,
+    Launch,
+    Staged,
+}
+
+impl Check {
+    fn stage(self) -> Option<&'static str> {
+        match self {
+            Self::Passive => None,
+            Self::Launch => Some("cached"),
+            Self::Staged => Some("staged"),
+        }
+    }
+}
+
+/// Safe metadata identifying one embedded adapter operation.
+fn adapter_fields(runtime: ManagedAcpRuntime, extra: serde_json::Value) -> serde_json::Value {
+    let package = runtime.package();
+    let mut fields = json!({
+        "agent_id": runtime.agent_id(),
+        "version": package.version,
+        "runtime_id": package.runtime_id,
+        "commit": runtime.embedded().map(|adapter| adapter.short_commit()),
+        "file_count": runtime.embedded().map(|adapter| adapter.files.len()),
+    });
+    if let (Some(fields), serde_json::Value::Object(extra)) = (fields.as_object_mut(), extra) {
+        fields.extend(extra);
+    }
+    fields
+}
+
+fn adapter_fault_error(runtime: ManagedAcpRuntime, fault: AdapterFault) -> RuntimeError {
+    match fault {
+        AdapterFault::Io => provisioning_error(
+            runtime,
+            format!(
+                "managed {} integration storage is unavailable",
+                runtime.label()
+            ),
+        ),
+        AdapterFault::MissingFile | AdapterFault::DigestMismatch => provisioning_error(
+            runtime,
+            format!(
+                "installed {} integration did not match the embedded adapter",
+                runtime.label()
+            ),
+        ),
+    }
+}
+
+/// Writes the embedded adapter into a staging installation, after npm installed
+/// its dependencies. The adapter never comes from npm (ADR-0079).
+fn unpack_embedded_adapter(runtime: ManagedAcpRuntime, staging: &Path) -> Result<(), RuntimeError> {
+    let Some(adapter) = runtime.embedded() else {
+        return Ok(());
+    };
+    let started_at = Instant::now();
+    crate::logging::info(
+        &runtime.event("adapter_unpack_started"),
+        adapter_fields(runtime, json!({})),
+    );
+    let result = adapter.unpack(&package_root(runtime, staging));
+    let duration_ms = started_at.elapsed().as_millis();
+    match result {
+        Ok(()) => crate::logging::info(
+            &runtime.event("adapter_unpack_completed"),
+            adapter_fields(
+                runtime,
+                json!({ "outcome_kind": "unpacked", "duration_ms": duration_ms }),
+            ),
+        ),
+        Err(fault) => crate::logging::warn(
+            &runtime.event("adapter_unpack_completed"),
+            adapter_fields(
+                runtime,
+                json!({
+                    "outcome_kind": "failed",
+                    "error_kind": fault.kind(),
+                    "duration_ms": duration_ms,
+                }),
+            ),
+        ),
+    }
+    result.map_err(|fault| adapter_fault_error(runtime, fault))
+}
+
+/// Checks an installed adapter's bytes against the digests recorded when it was
+/// built. Runs for every launch, so a modified cached installation is reinstalled.
+fn validate_embedded_adapter(
+    runtime: ManagedAcpRuntime,
+    version_root: &Path,
+    check: Check,
+) -> Result<(), RuntimeError> {
+    let Some(adapter) = runtime.embedded() else {
+        return Ok(());
+    };
+    let started_at = Instant::now();
+    if let Some(stage) = check.stage() {
+        crate::logging::info(
+            &runtime.event("adapter_validate_started"),
+            adapter_fields(runtime, json!({ "stage": stage })),
+        );
+    }
+    let result = adapter.validate(&package_root(runtime, version_root));
+    if let Some(stage) = check.stage() {
+        let duration_ms = started_at.elapsed().as_millis();
+        match result {
+            Ok(()) => crate::logging::info(
+                &runtime.event("adapter_validate_completed"),
+                adapter_fields(
+                    runtime,
+                    json!({ "stage": stage, "outcome_kind": "valid", "duration_ms": duration_ms }),
+                ),
+            ),
+            Err(fault) => crate::logging::warn(
+                &runtime.event("adapter_validate_completed"),
+                adapter_fields(
+                    runtime,
+                    json!({
+                        "stage": stage,
+                        "outcome_kind": "invalid",
+                        "error_kind": fault.kind(),
+                        "duration_ms": duration_ms,
+                    }),
+                ),
+            ),
+        }
+    }
+    result.map_err(|fault| adapter_fault_error(runtime, fault))
 }
 
 struct NpmManagedAcpInstaller;
@@ -543,7 +693,9 @@ fn prune_old_versions(runtimes_root: &Path, current: &str) {
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             (entry.path().is_dir() && name != current)
-                .then(|| version_key(&name).map(|key| (key, entry.path())))
+                .then(|| {
+                    version_key(&name, installed_at(&entry.path())).map(|key| (key, entry.path()))
+                })
                 .flatten()
         })
         .collect::<Vec<_>>();
@@ -554,7 +706,18 @@ fn prune_old_versions(runtimes_root: &Path, current: &str) {
     }
 }
 
-fn version_key(version: &str) -> Option<(u64, u64, u64, String)> {
+/// When an installation was published; orders installations of one adapter
+/// version built from different fork commits (`<version>-<commit>`), whose names
+/// carry no order. Unmarked directories sort first, so they are pruned first.
+fn installed_at(version_root: &Path) -> std::time::SystemTime {
+    fs::metadata(version_root.join(MANAGED_MARKER))
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
+type VersionKey = (u64, u64, u64, std::time::SystemTime, String);
+
+fn version_key(version: &str, installed_at: std::time::SystemTime) -> Option<VersionKey> {
     let numeric = version
         .split_once('-')
         .map_or(version, |(numeric, _)| numeric);
@@ -565,7 +728,7 @@ fn version_key(version: &str) -> Option<(u64, u64, u64, String)> {
     parts
         .next()
         .is_none()
-        .then(|| (major, minor, patch, version.to_string()))
+        .then(|| (major, minor, patch, installed_at, version.to_string()))
 }
 
 #[cfg(not(windows))]
@@ -628,3 +791,7 @@ fn provisioning_installer_error(runtime: ManagedAcpRuntime, message: String) -> 
 #[cfg(test)]
 #[path = "managed_acp_provisioner_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "managed_acp_provisioner_embedded_tests.rs"]
+mod embedded_tests;

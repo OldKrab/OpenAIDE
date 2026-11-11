@@ -29,3 +29,5 @@ deploy/demo/vendor/
 deploy/local-web.env
 deploy/local-web.*.local.env
 packages/frontend/.impeccable/
+# Built adapter packages the App Server embeds (`npm run build:adapters`).
+adapters/build/
