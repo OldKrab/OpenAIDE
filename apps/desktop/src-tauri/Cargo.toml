@@ -37,9 +37,15 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
-keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
+keyring-core = "1.0.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The `keychain` store reads entries written by keyring 3; see `desktop_keyring.rs`.
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 libc = "0.2"
 objc2-app-kit = { version = "0.3", features = ["NSScreen", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# The default store reads entries written by keyring 3; see `desktop_keyring.rs`.
+windows-native-keyring-store = "1.1.0"
