@@ -31,3 +31,15 @@ zstd = "0.14"
 data-encoding = "2.11"
 # Remote Devices reach the App Server by public key (ADR-0062).
 iroh = { version = "1.3", default-features = false, features = ["tls-ring", "portmapper"] }
+
+# Development builds keep line tables for this workspace's crates, so backtraces still
+# show file and line, and drop debug info for dependencies. A full `cargo test --no-run`
+# shrinks from 6.4 GB to 5.1 GB per build variant, and every branch switch leaves a
+# variant behind in `target/`, without changing build time. Debuggers can still step
+# through workspace code but cannot inspect local variables; set `debug = true` locally
+# when a debugging session needs that.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
