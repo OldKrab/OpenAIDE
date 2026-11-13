@@ -3,12 +3,18 @@ name: Update Claude ACP
 on:
   schedule:
     - cron: "17 6 * * *"
-  # The adapter repository dispatches this after each npm publish; the schedule
-  # is the fallback when that dispatch is lost.
+  # The adapter fork dispatches this after CI passes on its main branch; the
+  # schedule is the fallback when that dispatch is lost (ADR-0079).
   workflow_dispatch:
     inputs:
+      commit:
+        description: Full fork commit to embed (defaults to the fork's main branch)
+        required: false
+        type: string
+      # TODO(ADR-0079 PR 3): remove once the fork dispatches `commit`. Its publish
+      # workflow still sends the npm version; the update follows the fork's main.
       version:
-        description: Exact published version to pin (defaults to the latest npm release)
+        description: Ignored; kept so the fork's current dispatch is accepted
         required: false
         type: string
 
@@ -22,7 +28,7 @@ concurrency:
 
 jobs:
   update:
-    name: Check for a new adapter release
+    name: Move the Claude adapter submodule
     runs-on: ubuntu-24.04
     steps:
       - name: Generate repository token
@@ -37,16 +43,26 @@ jobs:
         with:
           ref: main
           token: ${{ steps.repository-token.outputs.token }}
+          submodules: true
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
+          cache: npm
 
-      - name: Update the exact adapter pin and its lockfile
+      - run: npm ci
+
+      - name: Move the submodule and regenerate its runtime lockfile
         id: adapter
         env:
-          CLAUDE_ACP_TARGET_VERSION: ${{ inputs.version }}
-        run: node scripts/update-claude-acp-version.mjs
+          CLAUDE_ACP_TARGET_COMMIT: ${{ inputs.commit }}
+        run: node scripts/update-claude-acp.mjs
+
+      - name: Check the runtime lockfile and build the adapter
+        if: steps.adapter.outputs.changed == 'true'
+        run: |
+          npm run adapters:check
+          npm run build:adapters
 
       - name: Set up Rust
         if: steps.adapter.outputs.changed == 'true'
@@ -56,32 +72,38 @@ jobs:
 
       - name: Verify the launch configuration and managed installation
         if: steps.adapter.outputs.changed == 'true'
-        run: cargo test --locked -p openaide-app-server -- agent::acp_agent_config::tests agent::managed_acp_provisioner::tests
+        run: cargo test --locked -p openaide-app-server -- agent::acp_agent_config::tests agent::managed_acp_provisioner
 
-      - name: Open the update pull request
+      - name: Open the update pull request and merge it on green CI
         if: steps.adapter.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.repository-token.outputs.token }}
-          LATEST_VERSION: ${{ steps.adapter.outputs.latest }}
+          TARGET_SHORT: ${{ steps.adapter.outputs.short }}
+          TARGET_VERSION: ${{ steps.adapter.outputs.version }}
+          CURRENT: ${{ steps.adapter.outputs.current }}
+          TARGET: ${{ steps.adapter.outputs.target }}
         shell: bash
         run: |
-          branch="shushakov/update-claude-acp-${LATEST_VERSION}"
+          branch="shushakov/update-claude-acp-${TARGET_SHORT}"
           existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
           if [[ -n "$existing" ]]; then
             echo "Pull request #$existing already owns $branch"
             exit 0
           fi
 
+          title="Update Claude ACP to ${TARGET_VERSION} (${TARGET_SHORT})"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git switch --create "$branch"
-          git add packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json \
+          git add adapters/claude-agent-acp \
+            packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json \
             packages/app-shell-contracts/src/agentCatalog/claude-acp/package-lock.json
           git diff --cached --check
-          git commit --message "Update Claude ACP to $LATEST_VERSION"
+          git commit --message "$title"
           git push --set-upstream origin "$branch"
           gh pr create \
             --base main \
             --head "$branch" \
-            --title "Update Claude ACP to $LATEST_VERSION" \
-            --body "Updates the exact built-in Claude ACP pin and its install lockfile to the published npm release. The focused launch configuration and managed installation tests passed before this pull request was opened."
+            --title "$title" \
+            --body "Moves the embedded Claude adapter submodule to OldKrab/claude-agent-acp@${TARGET} (from ${CURRENT}) and regenerates its runtime lockfile. Changes: https://github.com/OldKrab/claude-agent-acp/compare/${CURRENT}...${TARGET}. The focused launch configuration and managed installation tests passed before this pull request was opened; it merges itself once required CI passes."
+          gh pr merge "$branch" --auto --merge

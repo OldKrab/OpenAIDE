@@ -41,19 +41,21 @@ impl AcpAgentConfig {
     }
 
     /// Pin the Claude adapter rather than selecting an arbitrary executable from PATH.
-    /// The adapter bundles the Claude runtime and owns authentication and session storage.
-    /// Like Codex, production resolves it to the per-user managed installation.
+    /// The adapter is embedded from its fork (ADR-0079); its npm dependencies bring the
+    /// Claude runtime, and it owns authentication and session storage. Like Codex,
+    /// production resolves it to the per-user managed installation.
     pub fn claude_code() -> Self {
         Self::managed_package(ManagedAcpRuntime::Claude)
     }
 
-    /// The declaration keeps the `npx -y` form so a runtime without the provisioner
-    /// (tests, embedders) can still launch the same pinned package.
+    /// The declaration names the pinned package; see [`ManagedAcpRuntime::declared_launch`]
+    /// for which runtimes a launch without the provisioner (tests, embedders) can start.
     fn managed_package(runtime: ManagedAcpRuntime) -> Self {
+        let (launcher, args) = runtime.declared_launch();
         Self {
             agent_id: runtime.agent_id().to_string(),
-            command: resolved_command_or_name("npx"),
-            args: vec!["-y".to_string(), runtime.declared_spec()],
+            command: resolved_command_or_name(launcher),
+            args,
             env: Vec::new(),
             secret_env: Vec::new(),
         }
@@ -121,12 +123,12 @@ impl AcpAgentConfig {
     /// replaced launch (tests, Custom Agents under a built-in id) keeps its command.
     pub(crate) fn managed_runtime(&self) -> Option<ManagedAcpRuntime> {
         let runtime = ManagedAcpRuntime::for_agent(&self.agent_id)?;
-        let launcher_is_npx = Path::new(&self.command)
+        let (launcher, args) = runtime.declared_launch();
+        let declared_launcher = Path::new(&self.command)
             .file_stem()
             .and_then(OsStr::to_str)
-            .is_some_and(|name| name.eq_ignore_ascii_case("npx"));
-        (launcher_is_npx && self.args == ["-y".to_string(), runtime.declared_spec()])
-            .then_some(runtime)
+            .is_some_and(|name| name.eq_ignore_ascii_case(launcher));
+        (declared_launcher && self.args == args).then_some(runtime)
     }
 
     pub(super) fn secret_env_values(
@@ -301,8 +303,9 @@ fn command_not_found_error(agent_id: &str, command: &str) -> RuntimeError {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(command);
-    // Every built-in Agent launches through npx when its own command is absent, so a missing
-    // npx means Node.js; a Custom Agent's command is the user's, so it stays a generic setup failure.
+    // Every built-in Agent launches through Node.js or npx when its own command is absent, so a
+    // missing launcher means Node.js; a Custom Agent's command is the user's, so it stays a generic
+    // setup failure.
     if matches!(
         agent_id,
         CODEX_AGENT_ID | CLAUDE_CODE_AGENT_ID | OPENCODE_AGENT_ID

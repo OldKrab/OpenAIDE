@@ -25,14 +25,24 @@ fn built_in_codex_uses_the_product_pinned_adapter() {
 }
 
 #[test]
-fn built_in_claude_uses_an_exact_stable_package_pin() {
+fn built_in_claude_declares_the_embedded_adapter_build() {
     let config = AcpAgentConfig::claude_code();
     assert_eq!(config.agent_id, "claude-code");
-    assert_eq!(config.args.len(), 2);
-    assert_eq!(config.args[0], "-y");
-    let version = config.args[1]
+    // The embedded adapter has no npm release for npx to fetch (ADR-0079).
+    assert_eq!(
+        std::path::Path::new(&config.command)
+            .file_stem()
+            .and_then(OsStr::to_str),
+        Some("node")
+    );
+    assert_eq!(config.args.len(), 1);
+    let (version, commit) = config.args[0]
         .strip_prefix("@openaide/claude-agent-acp@")
-        .expect("the built-in must use the OpenAIDE-maintained Claude ACP package");
+        .expect("the built-in must use the OpenAIDE-maintained Claude ACP package")
+        .split_once('+')
+        .expect("the declaration names the fork commit as build metadata");
+    assert_eq!(commit.len(), 12);
+    assert!(commit.bytes().all(|byte| byte.is_ascii_hexdigit()));
     let components: Vec<_> = version.split('.').collect();
     assert_eq!(
         components.len(),
@@ -52,7 +62,11 @@ fn built_in_claude_uses_an_exact_stable_package_pin() {
 #[test]
 fn replaced_built_in_launch_is_not_managed() {
     let mut config = AcpAgentConfig::claude_code();
-    config.args[1] = "@openaide/claude-agent-acp@0.0.1".to_string();
+    config.args[0] = "@openaide/claude-agent-acp@0.0.1+000000000000".to_string();
+    assert_eq!(config.managed_runtime(), None);
+
+    let mut config = AcpAgentConfig::claude_code();
+    config.command = "npx".to_string();
     assert_eq!(config.managed_runtime(), None);
 
     let mut config = AcpAgentConfig::claude_code();

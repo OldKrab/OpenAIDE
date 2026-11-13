@@ -14,8 +14,8 @@ pub(super) const INDEX_FIXTURE: &[u8] = b"#!/usr/bin/env node\n";
 pub(super) const HELPER_FIXTURE: &[u8] = b"export const fixture = true;\n";
 
 #[derive(Clone, Default)]
-struct RecordingInstaller {
-    destinations: Arc<Mutex<Vec<std::path::PathBuf>>>,
+pub(super) struct RecordingInstaller {
+    pub(super) destinations: Arc<Mutex<Vec<std::path::PathBuf>>>,
 }
 
 #[test]
@@ -66,7 +66,7 @@ impl ManagedAcpInstaller for RecordingInstaller {
             .expect("installer destinations poisoned")
             .push(destination.to_path_buf());
         if runtime == ManagedAcpRuntime::Claude {
-            write_claude_fixture(destination);
+            super::embedded_tests::write_claude_dependencies(destination);
             return Ok(());
         }
         let package_root = destination.join("node_modules/@openaide/codex-acp");
@@ -101,10 +101,10 @@ impl ManagedAcpInstaller for RecordingInstaller {
     }
 }
 
-struct BlockingInstaller {
-    started: std::sync::mpsc::Sender<()>,
-    release: Mutex<std::sync::mpsc::Receiver<()>>,
-    recording: RecordingInstaller,
+pub(super) struct BlockingInstaller {
+    pub(super) started: std::sync::mpsc::Sender<()>,
+    pub(super) release: Mutex<std::sync::mpsc::Receiver<()>>,
+    pub(super) recording: RecordingInstaller,
 }
 
 impl ManagedAcpInstaller for BlockingInstaller {
@@ -601,141 +601,6 @@ fn npm_permission_failure_is_not_reported_as_missing_node() {
     ));
 }
 
-/// Writes what `npm ci` leaves for the pinned Claude adapter on this host.
-fn write_claude_fixture(destination: &std::path::Path) {
-    let package = ManagedAcpRuntime::Claude.package();
-    let package_root = destination.join("node_modules").join(&package.name);
-    fs::create_dir_all(package_root.join("dist")).expect("create Claude package fixture");
-    fs::write(
-        package_root.join("package.json"),
-        serde_json::json!({"name": package.name, "version": package.version}).to_string(),
-    )
-    .expect("write Claude package manifest");
-    fs::write(package_root.join("dist/index.js"), INDEX_FIXTURE)
-        .expect("write Claude package entrypoint");
-    if let Some(binary) = super::runtime::claude_native_binaries(destination, cfg!(windows)).first()
-    {
-        fs::create_dir_all(binary.parent().unwrap()).expect("create native Claude fixture");
-        fs::write(binary, "native Claude fixture").expect("write native Claude fixture");
-    }
-}
-
-#[test]
-fn claude_launch_installs_its_own_managed_runtime_and_runs_it_with_node() {
-    let storage = TempDir::new().expect("temporary storage root");
-    let statuses = AgentStatusCache::default();
-    let capture = capture_test_logs();
-    let installer = RecordingInstaller::default();
-    let provisioner = ManagedAcpProvisioner::with_installer_and_statuses(
-        storage.path().to_path_buf(),
-        Arc::new(installer.clone()),
-        statuses.clone(),
-    );
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-
-    let launch = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect("managed Claude launch");
-    let cached = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect("cached managed Claude launch");
-
-    let version_root = storage
-        .path()
-        .join("agent-runtimes/claude-agent-acp")
-        .join(&ManagedAcpRuntime::Claude.package().runtime_id);
-    assert_eq!(installer.destinations.lock().unwrap().len(), 1);
-    assert_eq!(launch.config.args, cached.config.args);
-    assert!(std::path::Path::new(&launch.config.args[0]).starts_with(&version_root));
-    assert!(
-        launch.config.args[0].ends_with("node_modules/@openaide/claude-agent-acp/dist/index.js")
-    );
-    assert!(!launch.config.command.contains("npx"));
-    assert!(launch.lease.is_some());
-    assert!(provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-    // Each runtime owns its directory, so Claude never provisions Codex.
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Codex));
-    assert_eq!(
-        statuses.snapshot("claude-code").status,
-        AgentStatus::Launching
-    );
-    let events = capture
-        .snapshot()
-        .iter()
-        .filter_map(|entry| entry.get("event").and_then(serde_json::Value::as_str))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    assert!(events.contains(&"claude_acp_provision_started".to_string()));
-    assert!(events.contains(&"claude_acp_provision_completed".to_string()));
-}
-
-#[test]
-fn claude_installation_reports_installing_while_npm_runs() {
-    let storage = TempDir::new().expect("temporary storage root");
-    let statuses = AgentStatusCache::default();
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let provisioner = ManagedAcpProvisioner::with_installer_and_statuses(
-        storage.path().to_path_buf(),
-        Arc::new(BlockingInstaller {
-            started: started_tx,
-            release: Mutex::new(release_rx),
-            recording: RecordingInstaller::default(),
-        }),
-        statuses.clone(),
-    );
-
-    let worker = std::thread::spawn(move || provisioner.prepare(AcpAgentConfig::claude_code()));
-    started_rx.recv().expect("installation should start");
-    assert_eq!(
-        statuses.snapshot("claude-code").status,
-        AgentStatus::Installing
-    );
-    assert_ne!(statuses.snapshot("codex").status, AgentStatus::Installing);
-
-    release_tx.send(()).expect("finish installation");
-    worker
-        .join()
-        .expect("provisioning thread")
-        .expect("managed Claude launch");
-}
-
-struct MissingNativeClaudeInstaller;
-
-impl ManagedAcpInstaller for MissingNativeClaudeInstaller {
-    fn install(
-        &self,
-        _runtime: ManagedAcpRuntime,
-        destination: &std::path::Path,
-    ) -> Result<(), String> {
-        write_claude_fixture(destination);
-        let _ = fs::remove_dir_all(destination.join("node_modules/@anthropic-ai"));
-        Ok(())
-    }
-}
-
-#[test]
-fn claude_installation_without_its_native_runtime_is_not_published() {
-    if super::runtime::claude_native_binaries(std::path::Path::new("."), cfg!(windows)).is_empty() {
-        // The SDK publishes no native binary for this host, so none is required.
-        return;
-    }
-    let storage = TempDir::new().unwrap();
-    let provisioner = ManagedAcpProvisioner::with_installer(
-        storage.path().to_path_buf(),
-        Arc::new(MissingNativeClaudeInstaller),
-    );
-
-    let error = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect_err("a missing native runtime must fail installation");
-
-    assert!(error
-        .to_string()
-        .contains("Claude integration setup failed"));
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-}
-
 struct MissingNativeCodexInstaller;
 
 impl ManagedAcpInstaller for MissingNativeCodexInstaller {
@@ -770,30 +635,4 @@ fn codex_installation_without_its_native_runtime_is_not_published() {
     assert!(capture.snapshot().iter().any(|entry| {
         entry.get("event").and_then(serde_json::Value::as_str) == Some("codex_acp_provision_failed")
     }));
-}
-
-#[test]
-fn claude_installer_uses_the_lockfile_of_the_pinned_adapter_without_codex_patch_assets() {
-    let destination = TempDir::new().unwrap();
-    super::write_installer_manifest(ManagedAcpRuntime::Claude, destination.path()).unwrap();
-
-    let package = ManagedAcpRuntime::Claude.package();
-    let lock: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(destination.path().join("package-lock.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        lock["packages"][""]["dependencies"][&package.name],
-        package.version.as_str(),
-        "the lockfile root must pin the same adapter version as package.json"
-    );
-    assert_eq!(
-        lock["packages"][format!("node_modules/{}", package.name)]["version"],
-        package.version.as_str(),
-        "the lockfile must lock the pinned adapter version"
-    );
-    assert!(!destination
-        .path()
-        .join("apply-session-recovery.mjs")
-        .exists());
 }

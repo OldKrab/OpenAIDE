@@ -4,7 +4,11 @@ use std::{
     process::Command,
 };
 
+#[path = "build_support/embedded_adapters.rs"]
+mod embedded_adapters;
+
 fn main() {
+    embed_adapters();
     println!("cargo:rerun-if-env-changed=OPENAIDE_BUILD_COMMIT");
     watch_git_revision();
 
@@ -16,6 +20,32 @@ fn main() {
     println!("cargo:rustc-env=OPENAIDE_BUILD_COMMIT={commit}");
 
     embed_windows_metadata();
+}
+
+/// Embeds the adapters `npm run build:adapters` staged (ADR-0079). A missing or
+/// stale stage fails the build with the command that fixes it.
+fn embed_adapters() {
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"));
+    let repository_root = manifest_dir.join("../..");
+    println!("cargo:rerun-if-changed=build_support/embedded_adapters.rs");
+    let generated = match embedded_adapters::generate(&repository_root) {
+        Ok(generated) => generated,
+        Err(message) => {
+            // Keep watching the stage so producing it reruns this script.
+            println!(
+                "cargo:rerun-if-changed={}",
+                repository_root.join("adapters/build").display()
+            );
+            panic!("\n\nOpenAIDE App Server build: {message}\n\n");
+        }
+    };
+    for input in &generated.inputs {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo sets OUT_DIR"));
+    fs::write(out_dir.join("embedded_adapters.rs"), generated.code)
+        .expect("write the embedded adapter table");
 }
 
 #[cfg(windows)]

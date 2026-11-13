@@ -1,0 +1,10 @@
+{
+  "adapters": [
+    {
+      "id": "claude-agent-acp",
+      "submodule": "adapters/claude-agent-acp",
+      "runtimePackage": "packages/app-shell-contracts/src/agentCatalog/claude-acp",
+      "build": ["npm", "run", "build"]
+    }
+  ]
+}

@@ -124,7 +124,6 @@ function claudeTools(installation, starts, termuxExec = false) {
   const preload = termuxExec ? `test "$LD_PRELOAD" = '${prefix}/opt/openaide-claude/preload/$LIB/exec.so' || exit 1` : 'test -z "${LD_PRELOAD:-}" || exit 1';
   fs.writeFileSync(path.join(tools, 'npm'), `#!${process.execPath}
 const fs = require('node:fs'), path = require('node:path'), args = process.argv.slice(2);
-if (args[0] === 'view') { console.log(args[1] === '@openaide/claude-agent-acp@1.5.0' ? '0.3.293' : ''); process.exit(0); }
 if (!args.includes('@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.293')) process.exit(1);
 const target = path.join(args[args.indexOf('--prefix') + 1], 'node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64');
 fs.mkdirSync(target, { recursive: true });
@@ -134,7 +133,7 @@ fs.writeFileSync(path.join(target, 'claude'), ${JSON.stringify(`#!/bin/sh\n${pre
   const systemPath = ['/usr/bin', '/bin'];
   if (!fs.existsSync(path.join(path.dirname(process.execPath), 'claude'))) systemPath.unshift(path.dirname(process.execPath));
   return { command: path.join(tools, 'claude'), binary: path.join(prefix, 'opt/openaide-claude/claude-0.3.293'),
-    env: { OPENAIDE_CLAUDE_ACP_VERSION: '1.5.0', PATH: systemPath.join(':'), LD_PRELOAD: '' } };
+    env: { OPENAIDE_CLAUDE_SDK_VERSION: '0.3.293', PATH: systemPath.join(':'), LD_PRELOAD: '' } };
 }
 
 test('installs the Claude binary of the adapter behind a command that starts it', context => {
@@ -163,6 +162,15 @@ test('a Claude binary that cannot start is removed and setup continues with Code
   assert.equal(fs.existsSync(command), false);
   assert.equal(fs.existsSync(binary), false);
   assert.match(fs.readFileSync(path.join(installation.runtimeRoot, 'install.log'), 'utf8'), /claude=unavailable step=start/);
+});
+
+// The app passes the SDK version its runtime lockfile pins; setup never asks npm for it.
+test('a build without the Claude SDK version skips Claude and continues with Codex', context => {
+  const installation = fixture(context);
+  const { command, env } = claudeTools(installation, true);
+  assert.equal(installation.run(undefined, { ...env, OPENAIDE_CLAUDE_SDK_VERSION: '' }).status, 0);
+  assert.equal(fs.existsSync(command), false);
+  assert.match(fs.readFileSync(path.join(installation.runtimeRoot, 'install.log'), 'utf8'), /claude=unavailable step=sdk_version/);
 });
 
 // The loader path step is a Node program inside the install script; these run it on a small made-up binary.

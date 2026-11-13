@@ -21,6 +21,9 @@ jobs:
     runs-on: ${{ inputs.target == 'win32-x64' && 'windows-2025' || inputs.target == 'darwin-arm64' && 'macos-15' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
@@ -58,6 +61,8 @@ jobs:
           sudo apt-get install --yes musl-tools
       - name: Set artifact versions
         run: node scripts/set-release-artifact-version.mjs "${{ inputs.version }}"
+      - name: Build the embedded adapters
+        run: npm run build:adapters
       - name: Test repeated Windows Project persistence
         if: inputs.target == 'win32-x64'
         run: cargo test --locked -p openaide-app-server --test project_persistence managed_projects_survive_repeated_catalog_writes

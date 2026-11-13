@@ -67,3 +67,7 @@ For visual-only changes, verify the affected interaction in the browser. Use rel
 ## Rust test placement
 
 Put test bodies in dedicated files. Use integration tests by default; private unit tests use the adjacent `<module>_tests.rs` convention. Shared integration helpers live in `tests/common/mod.rs`.
+
+## Embedded adapters
+
+The App Server embeds the built-in Agent adapters from the submodules under `adapters/` ([ADR-0079](adr/0079-built-in-agent-adapters-are-embedded-from-fork-submodules.md)) and does not compile without their staged build. Run `npm run build:adapters` before a direct `cargo` command; the npm backend scripts, `npm run check`, and the smoke setup run it first, and it skips an adapter whose recorded commit and staged files are unchanged. After moving an adapter submodule, run `npm run adapters:lock`: `npm run adapters:check` fails until the committed runtime lockfile matches the submodule.

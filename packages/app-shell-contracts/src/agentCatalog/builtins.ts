@@ -1,8 +1,11 @@
 import type { AgentCatalogEntry } from "./types.js";
-import claudeAcpPolicy from "./claude-acp/package.json" with { type: "json" };
+import claudeAcpRuntime from "./claude-acp/package.json" with { type: "json" };
 
-// Shared with App Server: update-claude-acp.yml updates this exact launch pin in one place.
-const claudeAcpSpec = `@openaide/claude-agent-acp@${claudeAcpPolicy.dependencies["@openaide/claude-agent-acp"]}`;
+// Shared with App Server, which embeds this adapter commit (ADR-0079). `npm run
+// adapters:lock` writes the identity from the fork submodule; the spec matches the
+// App Server declaration, with the fork commit as semver build metadata.
+const claudeAdapter = claudeAcpRuntime.openaideAdapter;
+const claudeAcpSpec = `${claudeAdapter.name}@${claudeAdapter.version}+${claudeAdapter.commit.slice(0, 12)}`;
 
 export const builtInAgents = [
   {
@@ -41,9 +44,9 @@ export const builtInAgents = [
     icon: "claude",
     enabled: true,
     transport: "stdio",
-    command_line: `npx -y ${claudeAcpSpec}`,
-    command: "npx",
-    args: ["-y", claudeAcpSpec],
+    command_line: `node ${claudeAcpSpec}`,
+    command: "node",
+    args: [claudeAcpSpec],
     env: {},
     secret_env: [],
   },

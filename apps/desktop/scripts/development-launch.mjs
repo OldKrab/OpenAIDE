@@ -45,6 +45,8 @@ export async function runDesktopDevelopment({
   }
 
   await run(`npm${commandSuffix}`, ["install"], { cwd: repositoryRoot, env: environment });
+  // The App Server embeds the adapter forks and refuses to build without them (ADR-0079).
+  await run(`npm${commandSuffix}`, ["run", "build:adapters"], { cwd: repositoryRoot, env: environment });
   await run(`cargo${executableSuffix}`, ["build", "-p", "openaide-app-server"], {
     cwd: repositoryRoot,
     env: environment,

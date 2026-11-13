@@ -1,0 +1,4 @@
+[submodule "adapters/claude-agent-acp"]
+	path = adapters/claude-agent-acp
+	url = https://github.com/OldKrab/claude-agent-acp.git
+	branch = main
