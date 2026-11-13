@@ -449,7 +449,6 @@ impl AgentRuntime for MixedCatalogRuntime {
             ));
         }
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id.clone(),
             sessions: vec![AgentListedSession {
                 session_id: format!(

@@ -2,66 +2,6 @@ use super::*;
 use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
 
 #[test]
-fn indexed_empty_listing_preserves_owned_and_cached_history() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().join("state")).unwrap();
-    let workspace = temp.path().join("workspace");
-    let mut task = task_record("saved-history", workspace.to_str().unwrap());
-    task.agent_session_id = Some("saved-native".into());
-    store.write_task(&task).unwrap();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        Arc::new(IndexedHistoryAgent),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let reference = NativeSessionRef::new("codex", "cached-native");
-    api.native_session_catalog()
-        .record_page(
-            project_id_for_workspace(workspace.to_str().unwrap()).as_str(),
-            workspace.to_str().unwrap(),
-            vec![NativeSessionObservation {
-                reference: reference.clone(),
-                title: None,
-                last_activity: None,
-            }],
-        )
-        .unwrap();
-    api.refresh_native_session_catalogs().unwrap();
-    assert!(
-        !store.read_task("saved-history").unwrap().tombstoned,
-        "a missing index entry is not proof that native history was deleted"
-    );
-    assert!(api.native_session_catalog().entry(&reference).is_some());
-}
-
-struct IndexedHistoryAgent;
-impl AgentRuntime for IndexedHistoryAgent {
-    fn list_sessions(
-        &self,
-        request: AgentListSessionsRequest,
-    ) -> Result<AgentListSessionsResult, RuntimeError> {
-        Ok(serde_json::from_value(serde_json::json!({
-            "agent_id": request.agent_id, "sessions": [], "next_cursor": null,
-            "authoritative": false,
-        }))
-        .unwrap())
-    }
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        unreachable!("listing never starts a session")
-    }
-    fn prompt(
-        &self,
-        _request: AgentPrompt,
-        _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
-        unreachable!("listing never prompts")
-    }
-}
-
-#[test]
 fn healthy_history_refresh_logs_only_the_context_summary() {
     let diagnostic_logs = crate::logging::capture_test_logs();
     let temp = tempfile::tempdir().unwrap();
@@ -238,7 +178,6 @@ impl AgentRuntime for BlockingHistoryAgent {
                 .unwrap();
         }
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions: Vec::new(),
             next_cursor: None,
@@ -407,7 +346,6 @@ impl AgentRuntime for IncompleteHistoryAgent {
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         if request.agent_id != "codex" {
             return Ok(AgentListSessionsResult {
-                authoritative: true,
                 agent_id: request.agent_id,
                 sessions: vec![],
                 next_cursor: None,
@@ -423,7 +361,6 @@ impl AgentRuntime for IncompleteHistoryAgent {
             "observed-b"
         };
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions: vec![AgentListedSession {
                 session_id: id.into(),

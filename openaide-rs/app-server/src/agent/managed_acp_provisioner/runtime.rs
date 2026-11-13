@@ -1,25 +1,24 @@
 //! The product-pinned ACP adapters App Server installs into per-user storage and
-//! launches with Node.js. Each owns one exact package version and the npm lockfile
-//! of its dependency graph; locking, publication, leases, and pruning are shared.
-//!
-//! Codex is still an npm package App Server installs and patches. Claude is
-//! embedded from its fork submodule (ADR-0079): npm installs only its dependencies
-//! and the provisioner unpacks the adapter itself.
+//! launches with Node.js. Each adapter is embedded from its fork submodule
+//! (ADR-0079): npm installs only the adapter's dependencies, including its native
+//! agent, from a lockfile generated from the fork, and the provisioner unpacks the
+//! adapter itself. Locking, publication, leases, and pruning are shared.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use super::embedded::{self, EmbeddedAdapter};
-use super::runtime_patch;
 
-// Workflows update each package pin together with its lockfile.
-const CODEX_PACKAGE_JSON: &str = include_str!("../../../assets/codex-acp-runtime/package.json");
-const CODEX_PACKAGE_LOCK: &str =
-    include_str!("../../../assets/codex-acp-runtime/package-lock.json");
-// Generated from the Claude fork submodule by `npm run adapters:lock`; the shared
-// catalog and Android read the adapter identity from the same file, and build.rs
-// refuses an embedded adapter whose commit differs from the one it records.
+// Generated from each fork submodule by `npm run adapters:lock`; the shared catalog
+// (and, for Claude, Android) read the adapter identity from the same file, and
+// build.rs refuses an embedded adapter whose commit differs from the one it records.
+const CODEX_PACKAGE_JSON: &str = include_str!(
+    "../../../../../packages/app-shell-contracts/src/agentCatalog/codex-acp/package.json"
+);
+const CODEX_PACKAGE_LOCK: &str = include_str!(
+    "../../../../../packages/app-shell-contracts/src/agentCatalog/codex-acp/package-lock.json"
+);
 const CLAUDE_PACKAGE_JSON: &str = include_str!(
     "../../../../../packages/app-shell-contracts/src/agentCatalog/claude-acp/package.json"
 );
@@ -64,15 +63,12 @@ impl ManagedAcpRuntime {
         }
     }
 
-    /// The adapter compiled into App Server, for runtimes that do not install
-    /// their adapter from npm.
-    // TODO(ADR-0079 PR 2): embed Codex from its fork submodule too, so every built-in
-    // shares one install path and the npm pin and `npx -y` declaration form can go.
-    pub(super) fn embedded(self) -> Option<&'static EmbeddedAdapter> {
-        match self {
-            Self::Codex => None,
-            Self::Claude => Some(embedded::adapter("claude-agent-acp")),
-        }
+    /// The adapter compiled into App Server; its `adapters/adapters.json` id.
+    pub(super) fn embedded(self) -> &'static EmbeddedAdapter {
+        embedded::adapter(match self {
+            Self::Codex => "codex-acp",
+            Self::Claude => "claude-agent-acp",
+        })
     }
 
     /// The package the built-in declares; it identifies the locked graph before
@@ -80,31 +76,21 @@ impl ManagedAcpRuntime {
     /// npm release, so its fork commit rides as semver build metadata:
     /// `@openaide/claude-agent-acp@1.11.0+30726077a8be`.
     pub(crate) fn declared_spec(self) -> String {
-        match self.embedded() {
-            Some(adapter) => format!(
-                "{}@{}+{}",
-                adapter.name,
-                adapter.version,
-                adapter.short_commit()
-            ),
-            None => format!(
-                "{}@{}",
-                CODEX_PACKAGE_NAME,
-                pinned_version(CODEX_PACKAGE_JSON, CODEX_PACKAGE_NAME)
-            ),
-        }
+        let adapter = self.embedded();
+        format!(
+            "{}@{}+{}",
+            adapter.name,
+            adapter.version,
+            adapter.short_commit()
+        )
     }
 
-    /// The launcher and arguments of the built-in declaration. An npm-installed
-    /// adapter keeps the `npx -y` form, which a runtime without the provisioner can
-    /// still launch. An embedded adapter has nothing for npx to fetch, so it
-    /// declares `node <spec>`, which only the provisioner can resolve to an
-    /// entrypoint; launched unresolved it fails visibly instead of running other code.
+    /// The launcher and arguments of the built-in declaration. An embedded adapter
+    /// has nothing for npx to fetch, so it declares `node <spec>`, which only the
+    /// provisioner can resolve to an entrypoint; launched unresolved it fails
+    /// visibly instead of running other code.
     pub(crate) fn declared_launch(self) -> (&'static str, Vec<String>) {
-        match self.embedded() {
-            Some(_) => ("node", vec![self.declared_spec()]),
-            None => ("npx", vec!["-y".to_string(), self.declared_spec()]),
-        }
+        ("node", vec![self.declared_spec()])
     }
 
     pub(super) fn runtimes_dir(self) -> &'static str {
@@ -114,31 +100,23 @@ impl ManagedAcpRuntime {
         }
     }
 
+    /// The fork commit identifies the embedded code and, through the lockfile
+    /// generated from it, the dependency graph.
     pub(super) fn package(self) -> &'static ManagedPackage {
         static CODEX: OnceLock<ManagedPackage> = OnceLock::new();
         static CLAUDE: OnceLock<ManagedPackage> = OnceLock::new();
-        match self {
-            // The Codex runtime is patched, so its cache revision comes from the
-            // patch manifest rather than the upstream version alone.
-            Self::Codex => CODEX.get_or_init(|| {
-                let manifest = runtime_patch::manifest();
-                ManagedPackage {
-                    name: manifest.package_name.clone(),
-                    version: manifest.package_version.clone(),
-                    runtime_id: manifest.runtime_id.clone(),
-                }
-            }),
-            // The fork commit identifies the embedded code and, through the
-            // lockfile generated from it, the dependency graph.
-            Self::Claude => CLAUDE.get_or_init(|| {
-                let adapter = self.embedded().expect("Claude is embedded");
-                ManagedPackage {
-                    name: adapter.name.to_string(),
-                    version: adapter.version.to_string(),
-                    runtime_id: adapter.runtime_id(),
-                }
-            }),
-        }
+        let cell = match self {
+            Self::Codex => &CODEX,
+            Self::Claude => &CLAUDE,
+        };
+        cell.get_or_init(|| {
+            let adapter = self.embedded();
+            ManagedPackage {
+                name: adapter.name.to_string(),
+                version: adapter.version.to_string(),
+                runtime_id: adapter.runtime_id(),
+            }
+        })
     }
 
     /// The `package.json` and `package-lock.json` npm installs from.
@@ -155,10 +133,6 @@ impl ManagedAcpRuntime {
             Self::Codex => Duration::from_secs(120),
             Self::Claude => Duration::from_secs(10 * 60),
         }
-    }
-
-    pub(super) fn has_runtime_patch(self) -> bool {
-        self == Self::Codex
     }
 
     pub(super) fn event(self, stage: &str) -> String {
@@ -216,15 +190,4 @@ pub(super) fn unix_codex_binary(version_root: &Path) -> Option<PathBuf> {
             .join(target)
             .join("bin/codex"),
     )
-}
-
-const CODEX_PACKAGE_NAME: &str = "@openaide/codex-acp";
-
-fn pinned_version(package_json: &str, package_name: &str) -> String {
-    let policy: serde_json::Value =
-        serde_json::from_str(package_json).expect("embedded ACP policy is valid JSON");
-    policy["dependencies"][package_name]
-        .as_str()
-        .expect("embedded ACP policy pins its package version")
-        .to_string()
 }

@@ -1,11 +1,16 @@
 import type { AgentCatalogEntry } from "./types.js";
 import claudeAcpRuntime from "./claude-acp/package.json" with { type: "json" };
+import codexAcpRuntime from "./codex-acp/package.json" with { type: "json" };
 
-// Shared with App Server, which embeds this adapter commit (ADR-0079). `npm run
-// adapters:lock` writes the identity from the fork submodule; the spec matches the
+// Shared with App Server, which embeds these adapter commits (ADR-0079). `npm run
+// adapters:lock` writes each identity from its fork submodule; the spec matches the
 // App Server declaration, with the fork commit as semver build metadata.
-const claudeAdapter = claudeAcpRuntime.openaideAdapter;
-const claudeAcpSpec = `${claudeAdapter.name}@${claudeAdapter.version}+${claudeAdapter.commit.slice(0, 12)}`;
+function embeddedAdapterSpec(runtime: { openaideAdapter: { name: string; version: string; commit: string } }): string {
+  const adapter = runtime.openaideAdapter;
+  return `${adapter.name}@${adapter.version}+${adapter.commit.slice(0, 12)}`;
+}
+const claudeAcpSpec = embeddedAdapterSpec(claudeAcpRuntime);
+const codexAcpSpec = embeddedAdapterSpec(codexAcpRuntime);
 
 export const builtInAgents = [
   {
@@ -16,9 +21,9 @@ export const builtInAgents = [
     icon: "openai",
     enabled: true,
     transport: "stdio",
-    command_line: "codex-acp",
-    command: "codex-acp",
-    args: [],
+    command_line: `node ${codexAcpSpec}`,
+    command: "node",
+    args: [codexAcpSpec],
     env: {},
     secret_env: [],
   },

@@ -25,7 +25,8 @@ pub struct AcpAgentConfig {
 }
 
 impl AcpAgentConfig {
-    /// The built-in Codex adapter is product-controlled and version-pinned.
+    /// The built-in Codex adapter is product-controlled and embedded from its fork
+    /// (ADR-0079); its npm dependencies bring native Codex.
     ///
     /// A `codex-acp` executable found on PATH is intentionally not used here:
     /// users who need a different adapter build can register it as a Custom

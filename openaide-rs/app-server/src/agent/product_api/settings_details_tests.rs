@@ -120,12 +120,14 @@ fn built_in_agent_settings_show_what_is_really_started() {
         "{claude}"
     );
     assert!(claude.ends_with(", installed by OpenAIDE"), "{claude}");
-    // The embedded adapter shows its version and short fork commit (ADR-0079).
-    let (_, build) = claude
-        .trim_end_matches(", installed by OpenAIDE")
-        .split_once('+')
-        .expect("Claude's launch label names its fork commit");
-    assert_eq!(build.len(), 12, "{claude}");
+    // An embedded adapter shows its version and short fork commit (ADR-0079).
+    for label in [codex, claude] {
+        let (_, build) = label
+            .trim_end_matches(", installed by OpenAIDE")
+            .split_once('+')
+            .expect("the launch label names the fork commit");
+        assert_eq!(build.len(), 12, "{label}");
+    }
     assert!(launch(OPENCODE_AGENT_ID).ends_with(" acp"));
 }
 
