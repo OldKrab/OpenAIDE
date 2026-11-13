@@ -2,3 +2,7 @@
 	path = adapters/claude-agent-acp
 	url = https://github.com/OldKrab/claude-agent-acp.git
 	branch = main
+[submodule "adapters/codex-acp"]
+	path = adapters/codex-acp
+	url = https://github.com/OldKrab/codex-acp.git
+	branch = main

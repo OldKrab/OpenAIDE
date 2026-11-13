@@ -123,7 +123,6 @@ impl NativeCatalogRefreshCoordinator {
             "outcome": if result.is_ok() { "completed" } else { "failed" },
             "queue_ms": queue_ms, "duration_ms": started_at.elapsed().as_millis(),
             "returned_count": result.as_ref().ok().map(|page| page.sessions.len()),
-            "authoritative": result.as_ref().ok().map(|page| page.authoritative),
             "error_kind": result.as_ref().err().map(|error| error.reason()),
         });
         if result.is_err() {

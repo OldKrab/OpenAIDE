@@ -85,7 +85,6 @@ impl AgentRuntime for BlockedListRuntime {
             AuthRequiredListRuntime.list_sessions(request)
         } else {
             Ok(crate::protocol::model::AgentListSessionsResult {
-                authoritative: true,
                 agent_id: request.agent_id,
                 sessions: Vec::new(),
                 next_cursor: None,
