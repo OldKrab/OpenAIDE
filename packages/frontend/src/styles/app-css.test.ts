@@ -198,6 +198,7 @@ describe("task list row styles", () => {
   it("shows working status as a quiet animated row in the message stream", () => {
     expect(appCss).toMatch(/\.working-status\s*{[^}]*margin-top:\s*32px;/);
     expect(appCss).toMatch(/\.message-list-virtual-row\[data-row-kind="status"\]\[data-after-activity="true"\] \.working-status\s*{[^}]*margin-top:\s*28px;/);
+    expect(appCss).toMatch(/@media \(min-width: 761px\)\s*{\s*\.message-list-virtual-row\[data-follows-agent-answer="true"\] > \.chat-agent-block\s*{[^}]*margin-block-start:\s*16px;/);
     expect(appCss).toMatch(/\.working-status\s*{[^}]*color:\s*var\(--oa-muted\);[^}]*display:\s*inline-flex;/);
     expect(appCss).toMatch(/\.working-status-dots span\s*{[^}]*animation:\s*working-dot-pulse 1\.2s ease-in-out infinite;/);
     expect(appCss).toMatch(/\.working-status-duration-separator\s*{[^}]*width:\s*1px;[^}]*height:\s*12px;[^}]*background:\s*var\(--oa-border\);/);
