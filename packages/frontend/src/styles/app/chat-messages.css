@@ -40,6 +40,14 @@
   padding-inline-end: 24px;
 }
 
+/* Consecutive Agent answers are separate messages; paragraph spacing alone would merge them.
+   Narrow layouts already separate them with the in-flow Copy row (see mobile-chat.css). */
+@media (min-width: 761px) {
+  .message-list-virtual-row[data-follows-agent-answer="true"] > .chat-agent-block {
+    margin-block-start: 16px;
+  }
+}
+
 .chat-agent-content-image {
   width: min(320px, 100%);
   border: 1px solid var(--oa-border);
