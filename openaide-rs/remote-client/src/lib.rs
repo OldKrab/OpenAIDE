@@ -15,6 +15,8 @@ mod client;
 #[cfg(feature = "pairing")]
 mod gateway;
 #[cfg(feature = "pairing")]
+mod net_report;
+#[cfg(feature = "pairing")]
 mod pairing_code;
 #[cfg(feature = "pairing")]
 mod relay_limits;
@@ -34,6 +36,8 @@ pub use client::{
 pub use gateway::Gateway;
 #[cfg(feature = "pairing")]
 pub use iroh::{Endpoint, PublicKey, SecretKey};
+#[cfg(feature = "pairing")]
+pub use net_report::watch_net_report;
 #[cfg(feature = "pairing")]
 pub use pairing_code::{clamp_label, InviteCode, PairingCodeError};
 #[cfg(feature = "pairing")]

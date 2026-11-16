@@ -18,6 +18,7 @@ use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 mod bridge;
 pub mod edge;
 mod host_name;
+mod network_watch;
 mod pairing_code;
 mod relay_check;
 mod store;

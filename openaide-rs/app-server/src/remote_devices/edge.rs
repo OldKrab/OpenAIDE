@@ -14,13 +14,12 @@ use iroh::endpoint::{
 };
 use iroh::{Endpoint, PublicKey, SecretKey};
 use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
-use openaide_app_server_protocol::devices::{
-    RemoteAccessState, RemoteDeviceConnection, RemoteDevicePath,
-};
+use openaide_app_server_protocol::devices::RemoteAccessState;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use super::bridge::{self, BridgeTarget};
+use super::network_watch::{self, describe, is_direct, path_name, watch_path, RouteTally};
 use super::relay_check::{self, CheckOutcome, RelayCheck, RelayHealth};
 use super::{EdgeCommand, RemoteDevices};
 use crate::client_lifecycle::AppServerTime;
@@ -38,7 +37,6 @@ const PAIRING_MESSAGE_LIMIT: usize = 4096;
 /// A device that showed a join request stays on that screen for about this long.
 const ANNOUNCE_ATTEMPTS: u32 = 6;
 const ANNOUNCE_RETRY_DELAY: Duration = Duration::from_secs(3);
-const PATH_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The major version is part of the name, so an incompatible device fails the
 /// handshake instead of a request.
@@ -336,6 +334,7 @@ async fn reconcile(
             );
             relay_check::watch_home_relay(&bound);
             relay_check::watch_rate_limits(&bound);
+            network_watch::watch_net_report(&bound);
             *endpoint = Some(bound);
             devices.set_access(RemoteAccessState::On);
         }
@@ -534,8 +533,17 @@ async fn serve_device(
         // Named `route` because the log redacts every field called `path`.
         serde_json::json!({ "device": device_label, "route": path_name(&initial_path) }),
     );
+    let tally = Arc::new(Mutex::new(RouteTally::new(started)));
+    tally
+        .lock()
+        .expect("route tally lock poisoned")
+        .observe(is_direct(&initial_path), started);
     devices.device_connected(&device, initial_path);
-    let path_watch = tokio::spawn(watch_path(connection.clone(), devices.clone()));
+    let path_watch = tokio::spawn(watch_path(
+        connection.clone(),
+        devices.clone(),
+        tally.clone(),
+    ));
 
     let mut streams: u64 = 0;
     while let Ok((send, recv)) = connection.accept_bi().await {
@@ -583,50 +591,20 @@ async fn serve_device(
         open.retain(|other| other.stable_id() != connection.stable_id());
     }
     devices.device_disconnected(&device, AppServerTime::now().0);
-    logging::info(
-        "remote_device_disconnected",
-        serde_json::json!({
-            "device": device_label,
-            "duration_ms": elapsed_ms(started),
-            "streams": streams,
-        }),
-    );
-}
-
-/// Reports a move between a direct path and a relay. The loop is silent unless the path changes.
-async fn watch_path(connection: Connection, devices: RemoteDevices) {
-    let device = connection.remote_id();
-    let mut interval = tokio::time::interval(PATH_POLL_INTERVAL);
-    interval.tick().await;
-    let mut route = path_name(&describe(&connection));
-    loop {
-        interval.tick().await;
-        let current = describe(&connection);
-        // A route change can explain a stall on the device's side.
-        if path_name(&current) != route {
-            route = path_name(&current);
-            logging::info(
-                "remote_device_route_changed",
-                serde_json::json!({ "device": device.fmt_short().to_string(), "route": route }),
-            );
-        }
-        devices.device_path_changed(&device, current);
+    let mut fields = serde_json::json!({
+        "device": device_label,
+        "duration_ms": elapsed_ms(started),
+        "streams": streams,
+    });
+    // How long the connection was direct shows whether hole punching ever succeeded.
+    let route = tally
+        .lock()
+        .expect("route tally lock poisoned")
+        .fields(Instant::now());
+    if let (Some(fields), serde_json::Value::Object(route)) = (fields.as_object_mut(), route) {
+        fields.extend(route);
     }
-}
-
-fn describe(connection: &Connection) -> RemoteDeviceConnection {
-    let paths = connection.paths();
-    let selected = paths.iter().find(|path| path.is_selected());
-    match selected.map(|path| path.remote_addr().clone()) {
-        Some(iroh::TransportAddr::Ip(address)) => RemoteDeviceConnection {
-            path: RemoteDevicePath::Direct,
-            address: Some(address.ip().to_string()),
-        },
-        _ => RemoteDeviceConnection {
-            path: RemoteDevicePath::Relayed,
-            address: None,
-        },
-    }
+    logging::info("remote_device_disconnected", fields);
 }
 
 /// Logs a response write that waits on the device, with the QUIC figures that
@@ -661,13 +639,6 @@ fn log_write_stall(
                 serde_json::json!(u64::try_from(waited.as_millis()).unwrap_or(u64::MAX));
             logging::warn("remote_device_stream_write_resumed", fields);
         }
-    }
-}
-
-fn path_name(connection: &RemoteDeviceConnection) -> &'static str {
-    match connection.path {
-        RemoteDevicePath::Direct => "direct",
-        RemoteDevicePath::Relayed => "relayed",
     }
 }
 
