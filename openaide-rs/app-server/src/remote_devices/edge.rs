@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::{presets, ConnectingError, Connection, ConnectionError, Incoming};
+use iroh::endpoint::{
+    presets, ConnectingError, Connection, ConnectionError, Incoming, IncomingAddr,
+};
 use iroh::{Endpoint, PublicKey, SecretKey};
 use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
 use openaide_app_server_protocol::devices::{
@@ -333,6 +335,7 @@ async fn reconcile(
                 }),
             );
             relay_check::watch_home_relay(&bound);
+            relay_check::watch_rate_limits(&bound);
             *endpoint = Some(bound);
             devices.set_access(RemoteAccessState::On);
         }
@@ -398,12 +401,18 @@ async fn handle_incoming(
     connections: Connections,
 ) {
     let started = Instant::now();
+    // Read before the handshake consumes `incoming`: a failure can then be tied to its route and,
+    // over a relay, to the device that sent it.
+    let origin = IncomingOrigin::of(&incoming.remote_addr(), &devices);
     let connection = match incoming.await {
         Ok(connection) => connection,
         Err(error) => {
             logging::info(
                 "remote_device_handshake_failed",
                 serde_json::json!({
+                    "route": origin.route,
+                    "device": origin.device,
+                    "trusted": origin.trusted,
                     "error_kind": connecting_error_kind(&error),
                     "transport_code": connecting_transport_code(&error),
                     "duration_ms": started.elapsed().as_millis() as u64,
@@ -420,6 +429,38 @@ async fn handle_incoming(
         relay_check::answer(connection);
     } else {
         connection.close(CLOSE_UNKNOWN_PROTOCOL.into(), b"unknown protocol");
+    }
+}
+
+/// What an incoming connection reveals about its sender before the handshake. Only a relayed
+/// connection names its endpoint; a direct one is known by address alone, which stays out of logs.
+#[derive(Debug, PartialEq, Eq)]
+struct IncomingOrigin {
+    /// Named `route` because the log redacts every field called `path`.
+    route: &'static str,
+    device: Option<String>,
+    trusted: Option<bool>,
+}
+
+impl IncomingOrigin {
+    fn of(address: &IncomingAddr, devices: &RemoteDevices) -> Self {
+        match address {
+            IncomingAddr::Ip(_) => Self {
+                route: "direct",
+                device: None,
+                trusted: None,
+            },
+            IncomingAddr::Relay { endpoint_id, .. } => Self {
+                route: "relayed",
+                device: Some(endpoint_id.fmt_short().to_string()),
+                trusted: Some(devices.is_trusted(endpoint_id)),
+            },
+            _ => Self {
+                route: "custom",
+                device: None,
+                trusted: None,
+            },
+        }
     }
 }
 

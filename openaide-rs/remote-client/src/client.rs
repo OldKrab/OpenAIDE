@@ -106,6 +106,7 @@ pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
         .bind()
         .await
         .map_err(|_| Failure::Unreachable)?;
+    crate::watch_relay_rate_limits(&endpoint, log.clone(), "remote_endpoint_relay_rate_limited");
     let mut statuses = endpoint.home_relay_status();
     tokio::spawn(async move {
         let mut connected = None;
