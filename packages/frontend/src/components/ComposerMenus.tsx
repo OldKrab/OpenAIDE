@@ -15,12 +15,17 @@ import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { attachEveryImage } from "./imageAttachmentBatch";
 import type { ComposerFileUpload } from "./ComposerAttachments";
 import { composerErrorMessage } from "./composerDraftPolicy";
+import type { FileUploadKind } from "../services/fileUploadHttp";
 
 export type ComposerMenu = "add" | "agent" | ComposerRunMenu;
+
+/** One file the Composer uploads: a File Attachment, or a Composer Image on upload shells. */
+export type ComposerUploadSelection = { file: File; kind: FileUploadKind };
 
 type WebFileUploadItem = {
   id: string;
   file: File;
+  kind: FileUploadKind;
   controller: AbortController;
   dismiss(): void;
 };
@@ -37,7 +42,8 @@ type ComposerControlsProps = {
   imageAttachmentsAllowed: boolean;
   attachmentCount: number;
   onFileUploadsChange: (uploads: ComposerFileUpload[]) => void;
-  fileDropHandlerRef: MutableRefObject<((files: File[]) => void) | undefined>;
+  /** Starts uploads for dropped or pasted files; set while the shell uploads over HTTP or picks natively. */
+  fileDropHandlerRef: MutableRefObject<((uploads: ComposerUploadSelection[]) => void) | undefined>;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
@@ -94,15 +100,22 @@ export function ComposerControls({
     for (const controller of uploadControllers.current) controller.abort();
     uploadControllers.current.clear();
   }, []);
+  const imagesUpload = fileBrowser?.attachmentMode === "webUpload" && Boolean(fileBrowser.attachFiles);
   const uploadImages = (files: File[], input: HTMLInputElement) => {
     input.value = "";
     if (disabled || !imageAttachmentsAllowed || files.length === 0 || !fileBrowser?.attachImage) return;
+    if (imagesUpload) {
+      // The upload route carries Images of any size; only VS Code still sends them inline.
+      setOpenMenu(undefined);
+      attachFiles(files.map((file) => ({ file, kind: "image" })));
+      return;
+    }
     void attachEveryImage(files, (file) => fileBrowser.attachImage(file)).then(
       () => setOpenMenu(undefined),
       (error: unknown) => onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to upload image.")),
     );
   };
-  const attachFiles = (selectedFiles: File[]) => {
+  const attachFiles = (selectedFiles: ComposerUploadSelection[]) => {
     if (disabled || !fileBrowser?.attachFiles) return;
     if (fileAcquisitionActive.current) {
       onUnsupportedImageAttachment?.("Wait for the current file selection to finish.");
@@ -137,6 +150,7 @@ export function ComposerControls({
       onUnsupportedImageAttachment?.("A draft can attach at most 20 files.");
     }
     const uploadFile = async (item: WebFileUploadItem) => {
+      const imageItem = item.kind === "image";
       const controller = item.controller;
       uploadControllers.current.add(controller);
       setFileUploads((current) => current.map((upload) => upload.id === item.id
@@ -145,6 +159,7 @@ export function ComposerControls({
       try {
         await fileBrowser.attachFiles?.([item.file], {
           maxFiles: 1,
+          kind: item.kind,
           signal: controller.signal,
           onProgress: ({ loaded, total }) => setFileUploads((current) => current.map((upload) =>
             upload.id === item.id ? { ...upload, loaded, total } : upload)),
@@ -153,7 +168,7 @@ export function ComposerControls({
       } catch (error) {
         if (controller.signal.aborted) item.dismiss();
         else setFileUploads((current) => current.map((upload) => upload.id === item.id
-          ? { ...upload, state: "error", error: composerErrorMessage(error, "Unable to upload file.") }
+          ? { ...upload, state: "error", error: composerErrorMessage(error, imageItem ? "Unable to upload image." : "Unable to upload file.") }
           : upload));
       } finally {
         uploadControllers.current.delete(controller);
@@ -166,12 +181,13 @@ export function ComposerControls({
         if (uploadControllers.current.size === 0) fileAcquisitionActive.current = false;
       });
     };
-    const queued = accepted.map((file, index): WebFileUploadItem => {
+    const queued = accepted.map(({ file, kind }, index): WebFileUploadItem => {
       const id = `file-upload-${Date.now()}-${index}`;
       const dismiss = () => setFileUploads((current) => current.filter((item) => item.id !== id));
       return {
         id,
         file,
+        kind,
         controller: new AbortController(),
         dismiss,
       };
@@ -179,7 +195,7 @@ export function ComposerControls({
     fileAcquisitionActive.current = true;
     setFileUploads(queued.map((item) => ({
       id: item.id,
-      label: item.file.name || "Attached file",
+      label: item.file.name || (item.kind === "image" ? "Image" : "Attached file"),
       loaded: 0,
       total: item.file.size,
       state: "queued",
@@ -215,7 +231,7 @@ export function ComposerControls({
         onChange={(event) => {
           const files = Array.from(event.target.files ?? []);
           event.currentTarget.value = "";
-          attachFiles(files);
+          attachFiles(files.map((file) => ({ file, kind: "file" })));
         }}
         ref={fileUploadRef}
         style={{ display: "none" }}
@@ -223,7 +239,7 @@ export function ComposerControls({
       />
       <input
         accept="image/*"
-        disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
+        disabled={disabled || !imageAttachmentsAllowed || !fileBrowser || (imagesUpload && uploadsActive)}
         multiple
         onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
         ref={imageUploadRef}
@@ -234,7 +250,7 @@ export function ComposerControls({
         <input
           accept="image/*"
           capture="environment"
-          disabled={disabled || !imageAttachmentsAllowed}
+          disabled={disabled || !imageAttachmentsAllowed || (imagesUpload && uploadsActive)}
           onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
           ref={photoCaptureRef}
           style={{ display: "none" }}
@@ -275,7 +291,8 @@ export function ComposerControls({
             <MenuButton
               className="composer-attach-choice"
               description="Choose images from this device."
-              disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
+              disabled={disabled || !imageAttachmentsAllowed || !fileBrowser
+                || (imagesUpload && (uploadsActive || attachmentCount >= 20))}
               icon={<Images size={18} strokeWidth={1.75} />}
               label="Attach images"
               onClick={() => imageUploadRef.current?.click()}
@@ -284,7 +301,8 @@ export function ComposerControls({
               <MenuButton
                 className="composer-attach-choice"
                 description="Use this device's camera."
-                disabled={disabled || !imageAttachmentsAllowed}
+                disabled={disabled || !imageAttachmentsAllowed
+                  || (imagesUpload && (uploadsActive || attachmentCount >= 20))}
                 icon={<Camera size={18} strokeWidth={1.75} />}
                 label="Take photo"
                 onClick={() => photoCaptureRef.current?.click()}

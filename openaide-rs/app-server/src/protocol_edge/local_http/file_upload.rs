@@ -218,6 +218,31 @@ impl ChunkUploadRegistry {
     }
 }
 
+/// What an upload becomes once its bytes are complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UploadKind {
+    /// A general File Attachment the Agent receives as a file reference.
+    File,
+    /// A Composer Image the Agent receives as image content.
+    Image,
+}
+
+impl UploadKind {
+    pub(crate) fn from_header(value: Option<&str>) -> Self {
+        match value {
+            Some("image") => Self::Image,
+            _ => Self::File,
+        }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Image => "image",
+        }
+    }
+}
+
 pub(crate) fn temporary_upload(
     task_id: &str,
     file_name: &str,

@@ -20,6 +20,7 @@ import {
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
   CLIENT_HEARTBEAT,
+  DIAGNOSTICS_RECORD_CLIENT_EVENTS,
   MCP_CREATE_SERVER,
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_FORK,
@@ -575,6 +576,8 @@ describe("app controller callbacks", () => {
     const request = vi.fn((method: string) => {
       if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
       if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
+      // Uploads forward their lifecycle events to the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     const state = preparedNewTaskState("task_ready");
@@ -682,6 +685,7 @@ describe("app controller callbacks", () => {
       if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot("task_recovered", "Recovered task") });
       }
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     const fileBrowser = callbacks({
@@ -697,7 +701,7 @@ describe("app controller callbacks", () => {
       signal: new AbortController().signal,
     })).resolves.toBeUndefined();
 
-    expect(upload).toHaveBeenCalledWith("task_recovered", expect.any(File), expect.any(Function), expect.any(AbortSignal));
+    expect(upload).toHaveBeenCalledWith("task_recovered", expect.any(File), expect.any(Function), expect.any(AbortSignal), { kind: "file" });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "taskInput:attachment:addAppServer",
       taskId: "task_recovered",
@@ -760,6 +764,8 @@ describe("app controller callbacks", () => {
       }));
       if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
       if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
+      // Uploads forward their lifecycle events to the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     frontendShellState.files = {

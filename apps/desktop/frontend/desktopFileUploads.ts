@@ -15,7 +15,7 @@ export function createDesktopFileUploads(
 ): FrontendFileAcquisition {
   return {
     kind: "webUpload",
-    upload(taskId, file, onProgress, signal) {
+    upload(taskId, file, onProgress, signal, options) {
       const { endpointUrl, authToken } = connection();
       const url = localHttpRouteUrl(endpointUrl, "upload");
       if (!url) {
@@ -26,6 +26,7 @@ export function createDesktopFileUploads(
         target: { url: url.toString(), headers: { Authorization: `Bearer ${authToken}` } },
         taskId,
         file,
+        kind: options?.kind,
         clientInstanceId,
         onProgress,
         signal,

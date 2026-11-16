@@ -143,11 +143,12 @@ export function createWebAppShell(): FrontendShell {
     },
     files: {
       kind: "webUpload",
-      upload: (taskId, file, onProgress, signal) =>
+      upload: (taskId, file, onProgress, signal, options) =>
         uploadFileOverHttp({
           target: { url: "/__openaide-app-server/upload" },
           taskId,
           file,
+          kind: options?.kind,
           clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
           onProgress,
           signal,

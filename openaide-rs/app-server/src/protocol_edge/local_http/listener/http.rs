@@ -20,6 +20,7 @@ pub(super) struct HttpRequest {
     pub upload_offset: Option<usize>,
     pub upload_size: Option<usize>,
     pub upload_cancel: bool,
+    pub upload_kind: Option<String>,
     pub session_id: Option<String>,
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
@@ -54,6 +55,7 @@ pub(super) fn read_http_request(
     let upload_size = header_value(&headers, "x-openaide-upload-size")
         .and_then(|value| value.parse::<usize>().ok());
     let upload_cancel = header_value(&headers, "x-openaide-upload-cancel") == Some("true");
+    let upload_kind = header_value(&headers, "x-openaide-upload-kind").map(str::to_string);
     let session_id = header_value(&headers, "x-openaide-session-id").map(str::to_string);
     let after_header = header_value(&headers, "x-openaide-after");
     let after_header_present = after_header.is_some();
@@ -109,6 +111,7 @@ pub(super) fn read_http_request(
         upload_offset,
         upload_size,
         upload_cancel,
+        upload_kind,
         session_id,
         after_header_present,
         after_sequence,
@@ -159,7 +162,7 @@ pub(super) fn write_http_response(
         "Content-Type: application/json\r\n".to_string()
     };
     let wire = format!(
-        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name, X-OpenAIDE-Upload-Id, X-OpenAIDE-Upload-Offset, X-OpenAIDE-Upload-Size, X-OpenAIDE-Upload-Cancel\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name, X-OpenAIDE-Upload-Id, X-OpenAIDE-Upload-Offset, X-OpenAIDE-Upload-Size, X-OpenAIDE-Upload-Cancel, X-OpenAIDE-Upload-Kind\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         reason_phrase(response.status),
         content_type,

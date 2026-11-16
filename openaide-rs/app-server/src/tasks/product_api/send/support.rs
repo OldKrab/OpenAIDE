@@ -96,6 +96,9 @@ pub(in crate::tasks::product_api) fn protocol_error_from_attachment_runtime(
         AttachmentRuntimeError::InvalidImage => {
             validation_error("message.images", "Image data is invalid")
         }
+        AttachmentRuntimeError::UnsupportedImage => {
+            validation_error("message.images", "Images must be PNG, JPEG, GIF, or WebP")
+        }
         AttachmentRuntimeError::TooLarge => {
             validation_error("message.images", "Image data is too large")
         }

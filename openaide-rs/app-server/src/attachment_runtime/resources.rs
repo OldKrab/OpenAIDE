@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use openaide_app_server_protocol::ids::FileBrowserRootId;
@@ -6,6 +7,7 @@ use openaide_app_server_protocol::ids::FileBrowserRootId;
 use crate::protocol::model::Attachment;
 
 use super::path_validation::AllowedRoot;
+use super::uploaded_image::UploadedImageFile;
 use super::{AttachmentOwner, AttachmentRuntimeError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +31,12 @@ pub(crate) enum AttachmentTarget {
     PastedImage {
         mime_type: String,
         data: String,
+        size_bytes: u64,
+    },
+    /// An Image whose bytes stay in the upload file until Send reads them.
+    UploadedImage {
+        file: Arc<UploadedImageFile>,
+        mime_type: &'static str,
         size_bytes: u64,
     },
     /// Exact embedded content retained by Queue ownership and returned to Composer.
@@ -60,7 +68,24 @@ pub(crate) struct FileBrowserEntryHandle {
 }
 
 impl PreSendAttachmentHandle {
-    pub(super) fn chat_attachment(&self) -> Attachment {
+    /// The Chat and Agent forms Send commits for this handle.
+    pub(super) fn send_projections(
+        &self,
+    ) -> Result<(Attachment, Attachment), AttachmentRuntimeError> {
+        if let AttachmentTarget::UploadedImage {
+            file,
+            mime_type,
+            size_bytes,
+        } = &self.target
+        {
+            // Read once: both projections of an Image carry the same bytes.
+            let attachment = file.read_attachment(&self.label, mime_type, *size_bytes)?;
+            return Ok((attachment.clone(), attachment));
+        }
+        Ok((self.chat_attachment(), self.agent_attachment()?))
+    }
+
+    fn chat_attachment(&self) -> Attachment {
         if let AttachmentTarget::QueuedSnapshot {
             chat_attachment, ..
         } = &self.target
@@ -90,7 +115,9 @@ impl PreSendAttachmentHandle {
             | AttachmentTarget::EmbeddedSnapshot { path, .. } => {
                 Some(path.to_string_lossy().to_string())
             }
-            AttachmentTarget::PastedImage { .. } | AttachmentTarget::QueuedSnapshot { .. } => None,
+            AttachmentTarget::PastedImage { .. }
+            | AttachmentTarget::UploadedImage { .. }
+            | AttachmentTarget::QueuedSnapshot { .. } => None,
         };
         Attachment {
             kind: self.kind_name().to_string(),
@@ -100,7 +127,7 @@ impl PreSendAttachmentHandle {
         }
     }
 
-    pub(super) fn agent_attachment(&self) -> Result<Attachment, AttachmentRuntimeError> {
+    fn agent_attachment(&self) -> Result<Attachment, AttachmentRuntimeError> {
         match &self.target {
             AttachmentTarget::QueuedSnapshot {
                 agent_attachment, ..
@@ -148,6 +175,11 @@ impl PreSendAttachmentHandle {
                     "sizeBytes": size_bytes,
                 })),
             }),
+            AttachmentTarget::UploadedImage {
+                file,
+                mime_type,
+                size_bytes,
+            } => file.read_attachment(&self.label, mime_type, *size_bytes),
         }
     }
 
@@ -155,7 +187,9 @@ impl PreSendAttachmentHandle {
         match &self.target {
             AttachmentTarget::FileReference { .. } => "file_reference",
             AttachmentTarget::EmbeddedSnapshot { .. } => "embedded_snapshot",
-            AttachmentTarget::PastedImage { .. } => "image",
+            AttachmentTarget::PastedImage { .. } | AttachmentTarget::UploadedImage { .. } => {
+                "image"
+            }
             AttachmentTarget::QueuedSnapshot { .. } => "embedded_snapshot",
         }
     }

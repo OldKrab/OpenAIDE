@@ -6,7 +6,6 @@ use std::{
 
 use crate::protocol::host::HostRequest;
 use crate::tasks::product_api::ResolvedSentFile;
-use openaide_app_server_protocol::attachment::PreSendAttachment;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::methods::{
@@ -40,6 +39,8 @@ use super::{
 /// A client request waiting this long for the protocol lock is user-visible latency:
 /// every request and publication on this gateway is serialized behind one mutex.
 const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
+
+mod uploads;
 
 #[derive(Clone)]
 pub struct SharedRpcGateway {
@@ -542,35 +543,6 @@ impl SharedRpcGateway {
             .client_hub
             .client_by_instance(client_instance_id)
             .is_some()
-    }
-
-    /// Converts a completed Web upload into an opaque draft attachment handle.
-    pub(crate) fn create_uploaded_file_reference(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        task_id: TaskId,
-        path: String,
-        label: String,
-    ) -> Result<PreSendAttachment, ProtocolError> {
-        let gateway = self.lock();
-        if gateway
-            .client_hub
-            .client_by_instance(client_instance_id)
-            .is_none()
-        {
-            return Err(ProtocolError {
-                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotInitialized,
-                message: "client connection is not initialized".to_string(),
-                recoverable: true,
-                target: None,
-            });
-        }
-        gateway.attachments.create_uploaded_file_reference(
-            client_instance_id,
-            &task_id,
-            path,
-            label,
-        )
     }
 
     /// Resolves only a file already persisted in a Task message visible to this client.

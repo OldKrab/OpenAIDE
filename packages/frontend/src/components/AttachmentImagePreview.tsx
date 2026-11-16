@@ -82,7 +82,10 @@ export function storedChatImageReference(attachment: Attachment): StoredChatImag
 /** An image the client still holds itself, such as a local preview before App Server stores it. */
 export function chatImagePreview(attachment: Attachment): AttachmentImagePreviewSource | undefined {
   const previewUrl = payloadString(attachment.payload, "preview_url") ?? payloadString(attachment.payload, "previewUrl");
-  if (previewUrl && previewUrl.startsWith("data:image/")) return { label: attachment.label, url: previewUrl };
+  // `blob:` URLs name a file this page picked (uploaded Composer Images); they cannot reach out.
+  if (previewUrl && (previewUrl.startsWith("data:image/") || previewUrl.startsWith("blob:"))) {
+    return { label: attachment.label, url: previewUrl };
+  }
 
   const data = payloadString(attachment.payload, "data");
   const mimeType = payloadString(attachment.payload, "mimeType") ?? payloadString(attachment.payload, "mime");

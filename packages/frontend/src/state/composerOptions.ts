@@ -130,6 +130,22 @@ export function appServerAttachment(
   };
 }
 
+/**
+ * A Composer Image the App Server already holds through the upload route. Send carries only
+ * its handle; the thumbnail reads the picked file through an object URL instead of a copy.
+ */
+// TODO: Revoke the object URL when the row leaves the draft and its sent Chat image has
+// loaded; removal spans several draft owners today, so the URL lives as long as the page.
+export function uploadedImageAttachment(attachment: PreSendAttachment, file: File): ComposerAttachment {
+  return {
+    kind: "image",
+    label: attachment.label,
+    local_id: `image_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    app_server_handle_id: attachment.handleId,
+    preview_url: typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : undefined,
+  };
+}
+
 /** Moves one draft row to `targetIndex`; row order is the order Send delivers within each content kind. */
 export function moveAttachment(
   attachments: ComposerAttachment[],
@@ -203,6 +219,22 @@ export function localImageAttachment(file: File, data: string): ComposerAttachme
     preview_url: `data:${mimeType};base64,${data}`,
     payload: { data, mimeType } satisfies ComposerImagePayload,
   };
+}
+
+/**
+ * Splits a draft into what `task/send` carries: inline Images and App Server handles.
+ * Uploaded Images travel as handles beside File Attachments; Images that only the client
+ * holds (VS Code, or restored from the Queue) travel inline. Undefined while any row is
+ * not sendable, such as one whose handle the App Server no longer recognizes.
+ */
+export function composerMessageContent(
+  attachments: ComposerAttachment[],
+): { images: ComposerImage[]; attachments: AttachmentHandleId[] } | undefined {
+  const inlineImages = attachments.filter((attachment) => attachment.kind === "image" && !attachment.app_server_handle_id);
+  const handled = attachments.filter((attachment) => attachment.kind !== "image" || attachment.app_server_handle_id);
+  const images = appServerComposerImages(inlineImages);
+  const handles = appServerAttachmentHandles(handled);
+  return images && handles ? { images, attachments: handles } : undefined;
 }
 
 /** Converts only valid client-owned Images into the inline task/send representation. */

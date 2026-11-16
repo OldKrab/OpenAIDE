@@ -100,6 +100,21 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         })
     }
 
+    fn create_uploaded_image(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _path: String,
+        _label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Image uploads are unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn create_pasted_image(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -284,6 +299,23 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
                 AttachmentOwner::new(client_instance_id, task_id),
                 path,
                 Some(label),
+            )
+            .map_err(protocol_error_from_attachment_runtime)
+    }
+
+    fn create_uploaded_image(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        path: String,
+        label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        self.read_task_for_client(task_id.as_str(), client_instance_id)?;
+        self.attachments
+            .create_uploaded_image(
+                AttachmentOwner::new(client_instance_id, task_id),
+                path,
+                label,
             )
             .map_err(protocol_error_from_attachment_runtime)
     }
@@ -576,6 +608,9 @@ fn protocol_error_from_attachment_runtime(error: AttachmentRuntimeError) -> Prot
         AttachmentRuntimeError::TooLarge => validation_error("data", "Attachment is too large"),
         AttachmentRuntimeError::InvalidImage => {
             validation_error("data", "Pasted image payload is invalid")
+        }
+        AttachmentRuntimeError::UnsupportedImage => {
+            validation_error("data", "Images must be PNG, JPEG, GIF, or WebP")
         }
         AttachmentRuntimeError::ReadFailed(message) => ProtocolError {
             code: ProtocolErrorCode::Internal,
