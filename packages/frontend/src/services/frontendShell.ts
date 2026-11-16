@@ -130,11 +130,13 @@ export type FileViewerContent = {
 export type FrontendFileAcquisition =
   | {
       kind: "webUpload";
+      /** Copies one file to the App Server; `image` registers it as a Composer Image handle. */
       upload(
         taskId: string,
         file: File,
         onProgress: (progress: FileUploadProgress) => void,
         signal: AbortSignal,
+        options?: { kind?: import("./fileUploadHttp").FileUploadKind },
       ): Promise<PreSendAttachment>;
     }
   | {

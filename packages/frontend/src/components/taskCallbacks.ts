@@ -44,7 +44,9 @@ import { requestComposerHistory } from "../intents/taskReadIntents";
 import { requestChatImage } from "../intents/chatImageIntents";
 import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
-import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
+import { appServerAttachment, localImageAttachment, uploadedImageAttachment } from "../state/composerOptions";
+import type { FileUploadKind } from "../services/fileUploadHttp";
+import { uploadComposerFile } from "../services/composerUploads";
 import { mapProtocolConfigOptions } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
@@ -442,12 +444,12 @@ function createTaskFileBrowserCallbacks(
     ...(currentFrontendShell()?.photoCapture ? { photoCapture: true as const } : {}),
     ...(files ? { attachmentMode: files.kind, attachFiles: async (
       selectedFiles: File[],
-      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number },
+      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number; kind?: FileUploadKind },
     ) => {
       const attachments = files.kind === "nativePicker"
         ? await files.pick(taskId)
         : selectedFiles.length === 1
-          ? [await files.upload(taskId, selectedFiles[0], options.onProgress, options.signal)]
+          ? [await uploadComposerFile(files, backendConnection, taskId, selectedFiles[0], options)]
           : [];
       const release = (attachment: (typeof attachments)[number]) => {
         if (attachmentResources) {
@@ -470,7 +472,9 @@ function createTaskFileBrowserCallbacks(
         dispatch({
           type: "taskInput:attachment:addAppServer",
           taskId,
-          attachment: appServerAttachment(attachment),
+          attachment: options.kind === "image" && selectedFiles[0]
+            ? uploadedImageAttachment(attachment, selectedFiles[0])
+            : appServerAttachment(attachment),
         });
       }
       attachments.slice(options.maxFiles).forEach(release);

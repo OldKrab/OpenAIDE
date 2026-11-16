@@ -175,8 +175,9 @@ impl AttachmentRuntime {
                 return Err(handle_access_error(&handle.owner, &owner));
             }
             fingerprint_handles.push(id.to_string());
-            chat_attachments.push(handle.chat_attachment());
-            agent_attachments.push(handle.agent_attachment()?);
+            let (chat_attachment, agent_attachment) = handle.send_projections()?;
+            chat_attachments.push(chat_attachment);
+            agent_attachments.push(agent_attachment);
         }
 
         Ok(ResolvedSendAttachments {
@@ -218,8 +219,9 @@ impl AttachmentRuntime {
                 return Err(handle_access_error(&handle.owner, &owner));
             }
             fingerprint_handles.push(id.to_string());
-            chat_attachments.push(handle.chat_attachment());
-            agent_attachments.push(handle.agent_attachment()?);
+            let (chat_attachment, agent_attachment) = handle.send_projections()?;
+            chat_attachments.push(chat_attachment);
+            agent_attachments.push(agent_attachment);
         }
 
         let expires_at = self.expires_at();
@@ -276,6 +278,7 @@ impl AttachmentRuntime {
             }
             AttachmentTarget::EmbeddedSnapshot { .. }
             | AttachmentTarget::PastedImage { .. }
+            | AttachmentTarget::UploadedImage { .. }
             | AttachmentTarget::QueuedSnapshot { .. } => Err(AttachmentRuntimeError::NotFile),
         }
     }

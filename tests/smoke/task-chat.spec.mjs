@@ -1537,6 +1537,33 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   });
 }
 
+test("uploads Images larger than the inline limits and sends them by handle", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await page.getByRole("button", { name: "Add context" }).click();
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByRole("menuitem", { name: /Attach images/ }).click(),
+  ]);
+  // Bytes after a PNG's end chunk are ignored by decoders; they make each photo-sized, together
+  // past the 5 MiB per-Image and 8 MiB per-message inline limits.
+  const photo = (width) => Buffer.concat([encodedPng(width, 100), Buffer.alloc(6 * 1024 * 1024, 7)]);
+  await chooser.setFiles([
+    { name: "first.png", mimeType: "image/png", buffer: photo(400) },
+    { name: "second.png", mimeType: "image/png", buffer: photo(200) },
+  ]);
+
+  const attached = page.getByLabel("Attached context");
+  await expect(attached.getByLabel("Open first.png")).toBeVisible();
+  await expect(attached.getByLabel("Open second.png")).toBeVisible();
+  await expect(attached.getByLabel("Open first.png").locator("img")).toHaveAttribute("src", /^blob:/);
+  await page.getByRole("textbox", { name: "Message" }).fill("Two photos");
+  await expect(page.getByLabel("Send message")).toBeEnabled();
+  await page.getByLabel("Send message").click();
+  await expect(page).toHaveURL(/\/task\/task_/);
+  await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toHaveCount(2);
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+});
+
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);
   await page.getByRole("button", { name: "Add context" }).click();

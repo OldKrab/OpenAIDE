@@ -45,7 +45,7 @@ An unleased, ready Prepared Task eligible for reuse by a client selecting the sa
 _Avoid_: Orphan Task, idle visible Task
 
 **Image**:
-Visual content added to a message through paste, drag and drop, or the image picker; those input methods do not create different content kinds.
+Visual content added to a message through paste, drag and drop, the image picker, or Take photo; those input methods do not create different content kinds. Where the App Shell uploads files, an unsent Image is uploaded when attached and sent by handle.
 _Avoid_: PastedImage, treating Image as a workspace-file attachment
 
 **Diagram**:

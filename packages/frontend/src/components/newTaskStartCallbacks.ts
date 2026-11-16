@@ -9,8 +9,7 @@ import {
 import { openNewTaskSurface, openTaskSurface } from "../services/hostBridge";
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
 import {
-  appServerAttachmentHandles,
-  appServerComposerImages,
+  composerMessageContent,
 } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import {
@@ -133,11 +132,8 @@ async function submitNewTask({
     return;
   }
   const draftInput = newTaskDraftInput(state, draft);
-  const imageAttachments = draftInput.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = draftInput.context.filter((attachment) => attachment.kind !== "image");
-  const images = appServerComposerImages(imageAttachments);
-  const attachments = appServerAttachmentHandles(resourceAttachments);
-  if (!images || !attachments) {
+  const content = composerMessageContent(draftInput.context);
+  if (!content) {
     dispatch({ type: "submit:error", message: "Reselect attachments from the file browser before sending." });
     return;
   }
@@ -246,8 +242,8 @@ async function submitNewTask({
 
     const message = {
       text: draftInput.prompt,
-      ...(images.length ? { images } : {}),
-      ...(attachments.length ? { attachments } : {}),
+      ...(content.images.length ? { images: content.images } : {}),
+      ...(content.attachments.length ? { attachments: content.attachments } : {}),
     };
     dispatch({
       type: "taskInput:submit",

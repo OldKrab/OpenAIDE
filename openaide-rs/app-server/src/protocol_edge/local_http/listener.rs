@@ -111,6 +111,8 @@ pub(crate) struct LocalHttpRequest {
     pub upload_offset: Option<usize>,
     pub upload_size: Option<usize>,
     pub upload_cancel: bool,
+    /// `image` registers the upload as a Composer Image; absent means a general File Attachment.
+    pub upload_kind: Option<String>,
     pub session_id: Option<String>,
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
@@ -239,6 +241,7 @@ fn handle_stream_with_socket_route(
             upload_offset: request.upload_offset,
             upload_size: request.upload_size,
             upload_cancel: request.upload_cancel,
+            upload_kind: request.upload_kind,
             session_id: request.session_id,
             after_header_present: request.after_header_present,
             after_sequence: request.after_sequence,
