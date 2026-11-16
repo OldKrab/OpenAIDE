@@ -16,6 +16,8 @@ mod client;
 mod gateway;
 #[cfg(feature = "pairing")]
 mod pairing_code;
+#[cfg(feature = "pairing")]
+mod relay_limits;
 mod ssh;
 
 use std::sync::Arc;
@@ -34,6 +36,8 @@ pub use gateway::Gateway;
 pub use iroh::{Endpoint, PublicKey, SecretKey};
 #[cfg(feature = "pairing")]
 pub use pairing_code::{clamp_label, InviteCode, PairingCodeError};
+#[cfg(feature = "pairing")]
+pub use relay_limits::watch_relay_rate_limits;
 #[cfg(feature = "release-archive")]
 pub use ssh::archive;
 pub use ssh::{

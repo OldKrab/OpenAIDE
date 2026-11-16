@@ -465,3 +465,33 @@ fn connection_failures_keep_a_stable_kind() {
         "version_mismatch"
     );
 }
+
+#[test]
+fn a_handshake_failure_names_its_route_and_only_a_relayed_sender() {
+    let root = tempfile::tempdir().unwrap();
+    let devices = RemoteDevices::open(root.path());
+    let sender = SecretKey::from_bytes(&[7; 32]).public();
+
+    let relayed = IncomingAddr::Relay {
+        url: "https://relay.example".parse().unwrap(),
+        endpoint_id: sender,
+    };
+    assert_eq!(
+        IncomingOrigin::of(&relayed, &devices),
+        IncomingOrigin {
+            route: "relayed",
+            device: Some(sender.fmt_short().to_string()),
+            trusted: Some(false),
+        }
+    );
+
+    let direct = IncomingAddr::Ip("192.0.2.1:4433".parse().unwrap());
+    assert_eq!(
+        IncomingOrigin::of(&direct, &devices),
+        IncomingOrigin {
+            route: "direct",
+            device: None,
+            trusted: None
+        }
+    );
+}
