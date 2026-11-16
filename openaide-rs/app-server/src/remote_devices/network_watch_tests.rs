@@ -1,3 +1,4 @@
+// timing-file: data — the route tally takes explicit instants; nothing waits.
 use std::time::{Duration, Instant};
 
 use iroh::unstable_net_report::NetReport;
