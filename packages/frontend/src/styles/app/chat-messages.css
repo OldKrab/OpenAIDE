@@ -471,14 +471,14 @@
   100% { opacity: 0; transform: translate(-50%, 0); }
 }
 
+/* Code keeps its source lines and scrolls sideways: wrapping scrambles column-aligned diagrams. */
 :is(.chat-agent, .file-viewer-markdown) pre {
   max-width: 100%;
   overflow: auto;
-  overflow-wrap: anywhere;
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-panel) 82%, var(--oa-bg));
   padding: 8px 9px;
-  white-space: pre-wrap;
+  white-space: pre;
 }
 
 :is(.chat-agent, .file-viewer-markdown) pre code {
