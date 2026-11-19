@@ -48,7 +48,7 @@ typography:
     lineHeight: 1.3
     letterSpacing: "normal"
   mono:
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'OpenAIDE Mono', monospace"
     fontSize: "12.5px"
     fontWeight: 400
     lineHeight: 1.5
@@ -184,7 +184,7 @@ Desktop implementation uses OpenAIDE semantic tokens as its shared vocabulary. A
 
 ## 4. Typography
 
-The system UI stack provides native text rendering on macOS and Windows. One sans family carries the interface. Monospace is reserved for paths, commands, revisions, terminal output, and other code-like values.
+The system UI stack provides native text rendering on macOS and Windows. One sans family carries the interface. Monospace is reserved for paths, commands, revisions, terminal output, and other code-like values. Platforms without one of the named monospace fonts, such as Android and Linux, use the bundled OpenAIDE Mono, a JetBrains Mono subset. Their system monospace fonts can lack box-drawing glyphs, which misaligns diagrams. Code blocks keep their source lines and scroll sideways instead of wrapping, so column-aligned text stays aligned.
 
 ### Hierarchy
 
