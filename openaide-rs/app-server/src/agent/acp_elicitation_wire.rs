@@ -67,6 +67,8 @@ pub(super) struct ElicitationSchema {
     pub(super) properties: BTreeMap<String, PropertySchema>,
     #[serde(default)]
     pub(super) required: Vec<String>,
+    #[serde(default, rename = "_meta")]
+    pub(super) meta: AcpMeta,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
@@ -193,6 +195,11 @@ pub(super) struct EnumOption {
     pub(super) title: String,
     #[serde(default)]
     pub(super) description: Option<String>,
+    /// ACP extension data, e.g. Claude Code's AskUserQuestion `preview` under
+    /// `_claude/askUserQuestionOption`. Accepted so strict decoding does not reject the question.
+    // TODO: Render the AskUserQuestion option preview in the question form; it is dropped today.
+    #[serde(default, rename = "_meta")]
+    pub(super) meta: AcpMeta,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonRpcResponse)]
