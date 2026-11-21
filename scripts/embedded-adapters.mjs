@@ -31,7 +31,11 @@ export function loadAdapters(root = repositoryRoot) {
     if (!Array.isArray(adapter.build) || adapter.build.length === 0) {
       throw new Error(`adapter ${adapter.id} is missing its build command`);
     }
-    return adapter;
+    const buildScripts = adapter.buildScripts ?? [];
+    if (!Array.isArray(buildScripts) || !buildScripts.every((name) => typeof name === "string" && name.length > 0)) {
+      throw new Error(`adapter ${adapter.id} buildScripts must list package names`);
+    }
+    return { ...adapter, buildScripts };
   });
 }
 

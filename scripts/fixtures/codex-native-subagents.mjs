@@ -1,14 +1,16 @@
 #!/usr/bin/env node
-// Native Codex restores model/approval history, but derives the resumed sandbox
-// from current config. A separate history fixture exposes that distinction.
+// A native Codex app-server stand-in for `scripts/smoke-codex-subagents.mjs`. It
+// answers the requests the adapter sends while loading and prompting one session,
+// and every turn spawns one child agent, so the smoke exercises the adapter's real
+// Codex-to-ACP native and legacy Subagent paths without a model or credentials.
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-const fixture = JSON.parse(readFileSync(process.env.OPENAIDE_CODEX_RECOVERY_FIXTURE, "utf8"));
+const fixture = JSON.parse(readFileSync(process.env.OPENAIDE_CODEX_SUBAGENTS_FIXTURE, "utf8"));
 const thread = {
   id: "native-session", sessionId: "native-session", preview: "Fixture session",
   createdAt: 1, updatedAt: 1, cwd: fixture.cwd, modelProvider: "openai",
-  path: fixture.historyPath ?? null, turns: [], historyMode: "legacy", status: { type: "idle" }, source: "appServer",
+  path: fixture.historyPath, turns: [], historyMode: "legacy", status: { type: "idle" }, source: "appServer",
 };
 const childThread = { ...thread, id: "child-fixture", sessionId: "child-fixture", path: null, turns: [] };
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
@@ -17,9 +19,8 @@ const model = (id, isDefault) => ({
   supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Medium" }],
   defaultReasoningEffort: "medium", inputModalities: ["text"], supportsPersonality: false,
 });
+const policy = { approvalPolicy: "never", approvalsReviewer: "user", sandbox: { type: "dangerFullAccess" } };
 let turnNumber = 0;
-let steeringTurn;
-let activePolicy = { ...fixture.policy, sandbox: fixture.globalSandbox ?? { type: "dangerFullAccess" } };
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
   appendFileSync(fixture.calls, `${JSON.stringify(request)}\n`);
@@ -31,43 +32,12 @@ for await (const line of createInterface({ input: process.stdin })) {
     case "config/read": result = { config: { model_provider: "openai" }, origins: {}, layers: [] }; break;
     case "skills/list": result = { data: [] }; break;
     case "skills/extraRoots/set": result = {}; break;
-    case "model/list": result = { data: [model("native-luna", false), model("native-astra", true)], nextCursor: null }; break;
-    case "thread/list": result = {
-      data: request.params.cursor ? [] : [thread], nextCursor: request.params.cursor ? null : "next-index-page",
+    case "permissionProfile/list": result = { data: [], nextCursor: null }; break;
+    case "model/list": result = { data: [model("native-luna", true)], nextCursor: null }; break;
+    case "thread/resume": result = {
+      thread, model: "native-luna", modelProvider: "openai", reasoningEffort: "medium",
+      serviceTier: null, cwd: fixture.cwd, ...policy,
     }; break;
-    case "thread/resume": {
-      const params = request.params;
-      activePolicy = {
-        approvalPolicy: params.approvalPolicy ?? fixture.policy.approvalPolicy,
-        approvalsReviewer: params.approvalsReviewer ?? fixture.policy.approvalsReviewer,
-        sandbox: params.permissions ? fixture.policy.sandbox
-          : params.sandbox === "read-only" ? { type: "readOnly", networkAccess: false }
-            : fixture.globalSandbox ?? { type: "dangerFullAccess" },
-      };
-      result = {
-        thread, model: params.modelProvider ? "native-astra" : "native-luna",
-        modelProvider: params.modelProvider ?? "openai", reasoningEffort: "medium",
-        serviceTier: null, cwd: fixture.cwd, ...activePolicy,
-      };
-      break;
-    }
-    case "thread/settings/update": {
-      result = {};
-      const params = request.params;
-      // ACK admits the change; only the later notification commits it. A prompt
-      // sent before that event observes the read-only staging policy.
-      setTimeout(() => {
-        activePolicy = { approvalPolicy: params.approvalPolicy,
-          approvalsReviewer: params.approvalsReviewer, sandbox: params.sandboxPolicy };
-        appendFileSync(fixture.calls, `${JSON.stringify({ method: "fixture/settingsCommitted" })}\n`);
-        send({ method: "thread/settings/updated", params: { threadId: thread.id,
-          threadSettings: { approvalPolicy: params.approvalPolicy, approvalsReviewer: params.approvalsReviewer,
-            sandboxPolicy: params.sandboxPolicy, collaborationMode: { mode: "default", settings: {
-              model: "native-luna", reasoning_effort: "medium", developer_instructions: null,
-            } } } } });
-      }, 20);
-      break;
-    }
     case "thread/read": result = { thread: request.params.threadId === childThread.id ? childThread : thread }; break;
     case "thread/items/list": {
       const selected = request.params.threadId === childThread.id ? childThread : thread;
@@ -79,36 +49,10 @@ for await (const line of createInterface({ input: process.stdin })) {
     case "thread/goal/get": result = { goal: null }; break;
     case "thread/unsubscribe": result = {}; break;
     case "turn/start": {
-      const params = request.params;
-      appendFileSync(fixture.calls, `${JSON.stringify({ method: "fixture/turnPolicy", params: {
-        approvalPolicy: params.approvalPolicy ?? activePolicy.approvalPolicy,
-        approvalsReviewer: params.approvalsReviewer ?? activePolicy.approvalsReviewer,
-        sandboxPolicy: params.sandboxPolicy ?? activePolicy.sandbox,
-      } })}\n`);
       const turn = { id: `turn-fixture-${++turnNumber}`, items: [], status: "inProgress", error: null };
       result = { turn };
-      if (fixture.subagents) {
-        setImmediate(() => emitSubagentTurn(turn));
-        break;
-      }
-      if (params.input.some((item) => item.text === "Steering race fixture")) {
-        steeringTurn = turn;
-        break;
-      }
-      setImmediate(() => send({ method: "turn/completed", params: {
-        threadId: thread.id, turn: { ...turn, status: "completed" },
-      } }));
+      setImmediate(() => emitSubagentTurn(turn));
       break;
-    }
-    case "turn/steer": {
-      // Complete exactly after the adapter selected the active turn, before
-      // native injection. This is the production late-delivery race.
-      send({ method: "turn/completed", params: {
-        threadId: thread.id, turn: { ...steeringTurn, status: "completed" },
-      } });
-      steeringTurn = undefined;
-      send({ id: request.id, error: { code: -32600, message: "no active turn to steer" } });
-      continue;
     }
     default:
       send({ id: request.id, error: { code: -32601, message: `Unsupported fixture method: ${request.method}` } });

@@ -10009,7 +10009,6 @@ impl AgentRuntime for RecordingAgent {
             }
         }
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor: None,
@@ -10333,7 +10332,6 @@ impl AgentRuntime for BoundedGlobalSessionAgent {
             _ => None,
         };
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,
@@ -10398,7 +10396,6 @@ impl AgentRuntime for ArchivedFirstPageAgent {
             _ => (Vec::new(), None),
         };
         Ok(AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,
@@ -10451,7 +10448,6 @@ impl AgentRuntime for CyclingEmptySessionAgent {
             _ => None,
         };
         Ok(crate::protocol::model::AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions: Vec::new(),
             next_cursor,
@@ -10509,7 +10505,6 @@ impl AgentRuntime for PagedSessionAgent {
             _ => None,
         };
         Ok(crate::protocol::model::AgentListSessionsResult {
-            authoritative: true,
             agent_id: request.agent_id,
             sessions,
             next_cursor,

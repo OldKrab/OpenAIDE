@@ -8,55 +8,54 @@ use std::ffi::OsStr;
 use std::fs;
 
 #[test]
-fn built_in_codex_uses_the_product_pinned_adapter() {
-    let config = AcpAgentConfig::codex_managed_package();
-
-    assert_eq!(config.agent_id, "codex");
-    assert_eq!(config.command, "npx");
-    assert_eq!(config.args.len(), 2);
-    assert_eq!(config.args[0], "-y");
-    let version = config.args[1].strip_prefix("@openaide/codex-acp@").unwrap();
-    assert_eq!(version.split('.').count(), 3);
-    assert!(version
-        .split('.')
-        .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())));
-    assert_eq!(config.managed_runtime(), Some(ManagedAcpRuntime::Codex));
-    assert!(config.env.is_empty());
-}
-
-#[test]
-fn built_in_claude_declares_the_embedded_adapter_build() {
-    let config = AcpAgentConfig::claude_code();
-    assert_eq!(config.agent_id, "claude-code");
-    // The embedded adapter has no npm release for npx to fetch (ADR-0079).
-    assert_eq!(
-        std::path::Path::new(&config.command)
-            .file_stem()
-            .and_then(OsStr::to_str),
-        Some("node")
-    );
-    assert_eq!(config.args.len(), 1);
-    let (version, commit) = config.args[0]
-        .strip_prefix("@openaide/claude-agent-acp@")
-        .expect("the built-in must use the OpenAIDE-maintained Claude ACP package")
-        .split_once('+')
-        .expect("the declaration names the fork commit as build metadata");
-    assert_eq!(commit.len(), 12);
-    assert!(commit.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    let components: Vec<_> = version.split('.').collect();
-    assert_eq!(
-        components.len(),
-        3,
-        "the launch policy must pin an exact version"
-    );
-    for component in components {
-        assert!(!component.is_empty());
-        assert!(component.bytes().all(|byte| byte.is_ascii_digit()));
-        assert!(component == "0" || !component.starts_with('0'));
+fn built_in_agents_declare_the_embedded_adapter_build() {
+    for (config, agent_id, package) in [
+        (
+            AcpAgentConfig::codex_managed_package(),
+            "codex",
+            "@openaide/codex-acp@",
+        ),
+        (
+            AcpAgentConfig::claude_code(),
+            "claude-code",
+            "@openaide/claude-agent-acp@",
+        ),
+    ] {
+        assert_eq!(config.agent_id, agent_id);
+        // The embedded adapter has no npm release for npx to fetch (ADR-0079).
+        assert_eq!(
+            std::path::Path::new(&config.command)
+                .file_stem()
+                .and_then(OsStr::to_str),
+            Some("node")
+        );
+        assert_eq!(config.args.len(), 1);
+        let (version, commit) = config.args[0]
+            .strip_prefix(package)
+            .expect("the built-in must use the OpenAIDE-maintained ACP package")
+            .split_once('+')
+            .expect("the declaration names the fork commit as build metadata");
+        assert_eq!(commit.len(), 12);
+        assert!(commit.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let components: Vec<_> = version.split('.').collect();
+        assert_eq!(
+            components.len(),
+            3,
+            "the launch policy must pin an exact version"
+        );
+        for component in components {
+            assert!(!component.is_empty());
+            assert!(component.bytes().all(|byte| byte.is_ascii_digit()));
+            assert!(component == "0" || !component.starts_with('0'));
+        }
+        assert!(config.env.is_empty());
+        assert!(config.secret_env.is_empty());
+        assert_eq!(
+            config.managed_runtime(),
+            ManagedAcpRuntime::for_agent(agent_id)
+        );
+        assert!(config.managed_runtime().is_some());
     }
-    assert!(config.env.is_empty());
-    assert!(config.secret_env.is_empty());
-    assert_eq!(config.managed_runtime(), Some(ManagedAcpRuntime::Claude));
 }
 
 #[test]
@@ -71,6 +70,12 @@ fn replaced_built_in_launch_is_not_managed() {
 
     let mut config = AcpAgentConfig::claude_code();
     config.agent_id = "custom".to_string();
+    assert_eq!(config.managed_runtime(), None);
+
+    // The npm form the Codex built-in declared before it was embedded.
+    let mut config = AcpAgentConfig::codex();
+    config.command = "npx".to_string();
+    config.args = vec!["-y".to_string(), "@openaide/codex-acp@2.2.4".to_string()];
     assert_eq!(config.managed_runtime(), None);
 }
 

@@ -3,16 +3,16 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { RUNTIME, adapterRepository, git } from "./adapter-repository-fixture.mjs";
+import { ADAPTER_ID, RUNTIME, SUBMODULE, adapterRepository, git } from "./adapter-repository-fixture.mjs";
 
 function outputs(file) {
   return Object.fromEntries(readFileSync(file, "utf8").trim().split("\n").map((line) => line.split("=")));
 }
 
-async function update(fixture, target) {
+async function update(fixture, target, id = ADAPTER_ID) {
   const output = path.join(fixture.root, `output-${Math.random().toString(16).slice(2)}`);
   writeFileSync(output, "");
-  await fixture.run("update-claude-acp.mjs", [], { GITHUB_OUTPUT: output, CLAUDE_ACP_TARGET_COMMIT: target ?? "" });
+  await fixture.run("update-adapter.mjs", id ? [id] : [], { GITHUB_OUTPUT: output, ADAPTER_TARGET_COMMIT: target ?? "" });
   return outputs(output);
 }
 
@@ -24,6 +24,7 @@ test("the submodule follows the fork main and its runtime lockfile is regenerate
 
   assert.deepEqual(result, {
     changed: "true", current: fixture.first, target: second, short: second.slice(0, 12), version: "1.1.0",
+    submodule: SUBMODULE, runtime_package: RUNTIME, fork_url: fixture.fork,
   });
   assert.equal(fixture.recorded(), second);
   const manifest = JSON.parse(readFileSync(path.join(fixture.repo, RUNTIME, "package.json"), "utf8"));
@@ -56,4 +57,12 @@ test("a requested commit is pinned only when it is a full commit on the fork mai
   assert.equal(result.target, second);
   assert.equal(result.version, "1.1.0");
   assert.equal(fixture.recorded(), second);
+});
+
+test("the adapter must be named and listed in adapters.json", async (t) => {
+  const fixture = adapterRepository(t);
+
+  await assert.rejects(update(fixture, undefined, ""), /usage: update-adapter\.mjs <adapter-id>/);
+  await assert.rejects(update(fixture, undefined, "missing-acp"), /unknown adapter missing-acp/);
+  assert.equal(fixture.recorded(), fixture.first);
 });

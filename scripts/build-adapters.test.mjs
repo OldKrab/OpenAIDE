@@ -82,3 +82,17 @@ test("a linked worktree initializes its own submodule and stage", async (t) => {
 
   assert.equal(manifest(worktree).commit, fixture.first);
 });
+
+test("buildScripts must name packages the fork installs", async (t) => {
+  const fixture = adapterRepository(t);
+  const config = path.join(fixture.repo, "adapters/adapters.json");
+  const adapters = JSON.parse(readFileSync(config, "utf8"));
+
+  adapters.adapters[0].buildScripts = "esbuild";
+  writeFileSync(config, JSON.stringify(adapters));
+  await assert.rejects(fixture.run("build-adapters.mjs"), /buildScripts must list package names/);
+
+  adapters.adapters[0].buildScripts = ["esbuild"];
+  writeFileSync(config, JSON.stringify(adapters));
+  await assert.rejects(fixture.run("build-adapters.mjs"), /buildScripts names esbuild, which the fork does not install/);
+});

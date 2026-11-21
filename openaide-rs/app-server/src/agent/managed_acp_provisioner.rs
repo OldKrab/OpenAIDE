@@ -3,9 +3,9 @@
 //! One provisioner serves every [`ManagedAcpRuntime`]. Each runtime owns its own
 //! directory under `agent-runtimes/`, so their install locks, leases, and pruning are
 //! independent. An installation is staged with `npm ci` from the embedded lockfile,
-//! receives the embedded adapter package when the runtime has one (ADR-0079), is
-//! validated, marked, and published by rename; a launch then holds a shared lease on
-//! it so a newer App Server cannot prune a version still running.
+//! receives the adapter package embedded from its fork (ADR-0079), is validated,
+//! marked, and published by rename; a launch then holds a shared lease on it so a
+//! newer App Server cannot prune a version still running.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -26,10 +26,8 @@ use crate::protocol::errors::RuntimeError;
 
 mod embedded;
 mod runtime;
-mod runtime_patch;
 use embedded::AdapterFault;
 pub(crate) use runtime::ManagedAcpRuntime;
-use runtime_patch::ArtifactDigests;
 const MANAGED_MARKER: &str = ".openaide-managed";
 
 #[derive(Debug)]
@@ -50,8 +48,6 @@ pub(crate) struct ManagedAcpProvisioner {
     timeout: Option<Duration>,
     statuses: AgentStatusCache,
     windows: bool,
-    /// Expected digests of the patched Codex files.
-    artifacts: ArtifactDigests,
 }
 
 impl ManagedAcpProvisioner {
@@ -62,7 +58,6 @@ impl ManagedAcpProvisioner {
             timeout: None,
             statuses,
             windows: cfg!(windows),
-            artifacts: ArtifactDigests::default(),
         }
     }
 
@@ -77,7 +72,6 @@ impl ManagedAcpProvisioner {
             timeout: None,
             statuses: AgentStatusCache::default(),
             windows: cfg!(windows),
-            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -93,7 +87,6 @@ impl ManagedAcpProvisioner {
             timeout: Some(timeout),
             statuses: AgentStatusCache::default(),
             windows: cfg!(windows),
-            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -109,7 +102,6 @@ impl ManagedAcpProvisioner {
             timeout: None,
             statuses,
             windows: cfg!(windows),
-            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -125,7 +117,6 @@ impl ManagedAcpProvisioner {
             timeout: None,
             statuses: AgentStatusCache::default(),
             windows,
-            artifacts: ArtifactDigests::for_fixture(tests::INDEX_FIXTURE, tests::HELPER_FIXTURE),
         }
     }
 
@@ -309,9 +300,6 @@ impl ManagedAcpProvisioner {
     ) -> Result<(), RuntimeError> {
         validate_embedded_adapter(runtime, version_root, check)?;
         validate_package(runtime, version_root)?;
-        if runtime.has_runtime_patch() {
-            self.artifacts.validate(version_root)?;
-        }
         validate_platform_runtime(runtime, version_root, self.windows)
     }
 }
@@ -343,8 +331,8 @@ fn adapter_fields(runtime: ManagedAcpRuntime, extra: serde_json::Value) -> serde
         "agent_id": runtime.agent_id(),
         "version": package.version,
         "runtime_id": package.runtime_id,
-        "commit": runtime.embedded().map(|adapter| adapter.short_commit()),
-        "file_count": runtime.embedded().map(|adapter| adapter.files.len()),
+        "commit": runtime.embedded().short_commit(),
+        "file_count": runtime.embedded().files.len(),
     });
     if let (Some(fields), serde_json::Value::Object(extra)) = (fields.as_object_mut(), extra) {
         fields.extend(extra);
@@ -374,9 +362,7 @@ fn adapter_fault_error(runtime: ManagedAcpRuntime, fault: AdapterFault) -> Runti
 /// Writes the embedded adapter into a staging installation, after npm installed
 /// its dependencies. The adapter never comes from npm (ADR-0079).
 fn unpack_embedded_adapter(runtime: ManagedAcpRuntime, staging: &Path) -> Result<(), RuntimeError> {
-    let Some(adapter) = runtime.embedded() else {
-        return Ok(());
-    };
+    let adapter = runtime.embedded();
     let started_at = Instant::now();
     crate::logging::info(
         &runtime.event("adapter_unpack_started"),
@@ -414,9 +400,7 @@ fn validate_embedded_adapter(
     version_root: &Path,
     check: Check,
 ) -> Result<(), RuntimeError> {
-    let Some(adapter) = runtime.embedded() else {
-        return Ok(());
-    };
+    let adapter = runtime.embedded();
     let started_at = Instant::now();
     if let Some(stage) = check.stage() {
         crate::logging::info(
@@ -500,9 +484,6 @@ impl ManagedAcpInstaller for NpmManagedAcpInstaller {
                 }
             }
         }
-        if runtime.has_runtime_patch() {
-            runtime_patch::apply(destination, deadline)?;
-        }
         Ok(())
     }
 }
@@ -517,11 +498,7 @@ fn write_installer_manifest(runtime: ManagedAcpRuntime, destination: &Path) -> R
     let mut lock = File::create(destination.join("package-lock.json"))
         .map_err(|_| "installer lockfile could not be created".to_string())?;
     lock.write_all(package_lock.as_bytes())
-        .map_err(|_| "installer lockfile could not be written".to_string())?;
-    if runtime.has_runtime_patch() {
-        runtime_patch::write_assets(destination)?;
-    }
-    Ok(())
+        .map_err(|_| "installer lockfile could not be written".to_string())
 }
 
 fn managed_marker(runtime: ManagedAcpRuntime) -> String {

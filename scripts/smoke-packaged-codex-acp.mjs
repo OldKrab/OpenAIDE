@@ -2,8 +2,6 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { smokeCodexSessionRecovery } from "./smoke-codex-session-recovery.mjs";
-import { smokeCodexNativeRecovery } from "./smoke-codex-native-recovery.mjs";
 import { observeSmokeProcess, shutdownSmokeProcess } from "./packaged-smoke-shutdown.mjs";
 import { smokeCodexSubagents } from "./smoke-codex-subagents.mjs";
 
@@ -165,24 +163,19 @@ try {
     console.log("Verified packaged App Server Task persistence and Codex ACP initialization through the authentication boundary.");
   }
 
-  // The release/bootstrap path already provisions the locked adapter. Reuse
-  // those installed bytes so this wire regression needs no unit-CI download.
+  // The App Server provisioned the embedded adapter above (ADR-0079). Reuse those
+  // installed bytes so this wire regression needs no separate download.
   if (process.platform !== "win32") {
     const runtimesRoot = path.join(stateRoot, "agent-runtimes", "codex-acp");
     const runtimes = (await readdir(runtimesRoot, { withFileTypes: true }))
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
     if (runtimes.length !== 1) throw new Error("Expected one freshly provisioned Codex runtime");
-    const modules = path.join(runtimesRoot, runtimes[0].name, "node_modules");
-    const adapter = path.join(modules, "@openaide", "codex-acp", "dist", "index.js");
-    await smokeCodexSessionRecovery(adapter);
+    const adapter = path.join(runtimesRoot, runtimes[0].name, "node_modules", "@openaide", "codex-acp", "dist", "index.js");
     await smokeCodexSubagents(adapter);
-    // The managed package's launcher selects its pinned platform binary. This
-    // covers native policy persistence as well as the adapter's wire requests.
-    await smokeCodexNativeRecovery(path.join(modules, "@openai", "codex", "bin", "codex.js"), adapter);
   } else {
     // The native fixture is a POSIX executable. Windows keeps the real native
     // bootstrap checks above until this additional fixture has a tested launcher.
-    console.log("Skipped recovery wire fixture on Windows: POSIX fixture launcher required.");
+    console.log("Skipped the Subagent wire fixture on Windows: POSIX fixture launcher required.");
   }
 } catch (error) {
   // The diagnostic log is metadata-only, and it records lifecycle events that

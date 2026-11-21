@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
 
-const native = fileURLToPath(new URL("./fixtures/codex-session-recovery-native.mjs", import.meta.url));
+const native = fileURLToPath(new URL("./fixtures/codex-native-subagents.mjs", import.meta.url));
 
 /** Uses the installed adapter bytes and an isolated native fixture, with no model or caller credentials. */
 export async function smokeCodexSubagents(adapter) {
@@ -17,16 +17,15 @@ async function checkSubagents(adapter, enabled) {
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-codex-subagents-"));
   const fixture = path.join(root, "fixture.json");
   const history = path.join(root, "history.jsonl");
-  const policy = { approvalPolicy: "never", approvalsReviewer: "user", sandbox: { type: "dangerFullAccess" } };
   await writeFile(history, [
     { type: "session_meta", payload: { id: "native-session" } },
     { type: "turn_context", payload: { cwd: root, approval_policy: "never", approvals_reviewer: "user", sandbox_policy: { type: "danger-full-access" } } },
   ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-  await writeFile(fixture, JSON.stringify({ cwd: root, calls: path.join(root, "calls.jsonl"), policy, historyPath: history, subagents: true }));
+  await writeFile(fixture, JSON.stringify({ cwd: root, calls: path.join(root, "calls.jsonl"), historyPath: history }));
   const env = {
     ...process.env, CODEX_PATH: native, CODEX_HOME: root, CODEX_SQLITE_HOME: root,
     CODEX_CONFIG: JSON.stringify({ cli_auth_credentials_store: "file" }),
-    APP_SERVER_LOGS: root, OPENAIDE_CODEX_RECOVERY_FIXTURE: fixture,
+    APP_SERVER_LOGS: root, OPENAIDE_CODEX_SUBAGENTS_FIXTURE: fixture,
   };
   for (const name of ["MODEL_PROVIDER", "INITIAL_AGENT_MODE", "DEFAULT_AUTH_REQUEST", "CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"]) delete env[name];
   const child = spawn(process.execPath, [path.resolve(adapter)], {

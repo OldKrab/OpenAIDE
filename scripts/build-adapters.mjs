@@ -43,7 +43,8 @@ function staleReason(adapter, commit, root = repositoryRoot) {
   }
   if (manifest.schema !== MANIFEST_SCHEMA) return "staging recipe changed";
   if (manifest.commit !== commit) return "submodule moved";
-  if (JSON.stringify(manifest.build) !== JSON.stringify(adapter.build)) return "build command changed";
+  if (JSON.stringify(manifest.build) !== JSON.stringify(adapter.build)
+    || JSON.stringify(manifest.buildScripts ?? []) !== JSON.stringify(adapter.buildScripts)) return "build command changed";
   const expected = new Map(manifest.files.map((file) => [file.path, file.sha256]));
   const present = listFiles(staged.packageDirectory);
   if (present.length !== expected.size) return "staged file set changed";
@@ -69,6 +70,23 @@ function packedFiles(source) {
   return pack.files.map((file) => file.path.split(path.sep).join("/")).sort();
 }
 
+/**
+ * Runs the install scripts of the build tools `adapters.json` names in `buildScripts`,
+ * and no others. A tool such as esbuild ships its native binary as an optional
+ * dependency, which the install above omits with the native agents; its own install
+ * script fetches the binary for this host.
+ */
+// TODO(npm allowScripts): npm 11 runs a rebuilt package's scripts with a warning until
+// a project allowScripts policy covers it; if a later npm blocks them by default,
+// pass the names through that policy here instead.
+function runBuildScripts(adapter, source) {
+  if (adapter.buildScripts.length === 0) return;
+  // `npm rebuild` silently ignores a package that is not installed.
+  const missing = adapter.buildScripts.filter((name) => !existsSync(path.join(source, "node_modules", name, "package.json")));
+  if (missing.length > 0) throw new Error(`${adapter.id} buildScripts names ${missing.join(", ")}, which the fork does not install`);
+  npm(["rebuild", ...adapter.buildScripts, "--no-audit", "--no-fund"], source, `${adapter.id} build tool install scripts`);
+}
+
 function buildAdapter(adapter, root = repositoryRoot) {
   const started = Date.now();
   const commit = recordedCommit(adapter, root);
@@ -87,6 +105,7 @@ function buildAdapter(adapter, root = repositoryRoot) {
   // Optional dependencies are the native agent binaries; compiling the adapter
   // does not need them. Lifecycle scripts stay off as in the runtime install.
   npm(["ci", "--ignore-scripts", "--omit=optional", "--no-audit", "--no-fund"], source, `${adapter.id} dependency install`);
+  runBuildScripts(adapter, source);
   run(adapter.build, source, `${adapter.id} build`);
   const pkg = JSON.parse(readFileSync(path.join(source, "package.json"), "utf8"));
   const files = packedFiles(source);
@@ -110,6 +129,7 @@ function buildAdapter(adapter, root = repositoryRoot) {
     version: pkg.version,
     commit,
     build: adapter.build,
+    buildScripts: adapter.buildScripts,
     files: entries,
   };
   writeFileSync(`${staged.manifest}.tmp`, formatJson(manifest));
