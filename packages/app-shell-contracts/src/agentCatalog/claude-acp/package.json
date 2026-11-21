@@ -5,7 +5,7 @@
   "openaideAdapter": {
     "name": "@openaide/claude-agent-acp",
     "version": "1.11.0",
-    "commit": "6b3dbe9a7109dcf9375febf1615184433708dde9"
+    "commit": "f1f33439922a83fb8d4e75ccc49d8ba2786b7173"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "2.8.0",
