@@ -1,9 +1,13 @@
 import {
   TASK_CANCEL,
   TASK_SEND,
+  type AttachmentHandleId,
+  type BackendConnection,
   type TaskId,
 } from "@openaide/app-server-client";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import {
+  diagnosticErrorKind,
   releaseComposerAttachments,
 } from "../services/attachmentResources";
 import { openNewTaskSurface, openTaskSurface } from "../services/hostBridge";
@@ -153,8 +157,9 @@ async function submitNewTask({
     if (newTaskStartAttempt.current === attempt) dispatch({ type: "submit:error", message });
     else if (createdTaskId) dispatch({ type: "taskInput:error", taskId: createdTaskId, message });
   };
-  const discardNewTask = (taskId: TaskId) => newTaskController.discard({
+  const discardNewTask = (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => newTaskController.discard({
     attachmentResources,
+    carryDraftHandles,
     dispatch,
     lease: newTaskController.currentLease(taskId),
     request,
@@ -207,7 +212,7 @@ async function submitNewTask({
       const pendingPreparation = pendingPreparedNewTask(preparationKey);
       const pendingTask = pendingPreparation ? (await pendingPreparation).task : undefined;
       const prepared = await prepareNewTask(
-        { backendConnection, dispatch, onPreparedTask: stagePreparedTask, state },
+        { attachmentResources, backendConnection, dispatch, newTaskController, onPreparedTask: stagePreparedTask, state },
         {
           acceptPreparedTask: () => !attempt.cancelled,
           discardPreparedTask: discardNewTask,
@@ -284,6 +289,14 @@ async function submitNewTask({
     if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
   } catch (error) {
     attempt.sendInFlight = false;
+    // The App Server logs only the rejected request; this names the stage and the draft.
+    recordFrontendLifecycleEvent(backendConnection as Pick<BackendConnection, "request">, "new_task_send_failed", {
+      task_id: createdTaskId,
+      stage: sendStarted ? "send" : "prepare",
+      cancelled: attempt.cancelled,
+      attachment_count: draftInput.context.length,
+      error_kind: diagnosticErrorKind(error),
+    });
     if (attempt.cancelled) {
       if (createdTaskId) {
         dispatch({ type: "taskInput:sendError", taskId: createdTaskId, message: submitErrorMessage(error) });

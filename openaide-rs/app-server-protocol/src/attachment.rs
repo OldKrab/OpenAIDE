@@ -189,6 +189,46 @@ pub enum AttachmentReleaseStatus {
     Forbidden,
 }
 
+/// Moves pre-Send handles from a replaced Prepared Task to its successor.
+///
+/// A New Task context change (Agent, Project, or worktree) swaps the Prepared Task under an
+/// unsent draft. The handles keep their ids and resolved content; only their Task scope
+/// changes, so the draft never uploads the same file twice. The caller needs access to
+/// `to_task_id` only: the source lease is usually already released, and each handle's own
+/// client-and-Task owner proves it may be moved.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentTransferParams {
+    pub from_task_id: TaskId,
+    pub to_task_id: TaskId,
+    pub handles: Vec<AttachmentHandleId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentTransferResult {
+    /// Contains exactly one outcome per requested handle, preserving request order.
+    pub outcomes: Vec<AttachmentTransferOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentTransferOutcome {
+    pub handle_id: AttachmentHandleId,
+    pub status: AttachmentTransferStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AttachmentTransferStatus {
+    /// The handle now belongs to `to_task_id`, including one that already did.
+    Transferred,
+    /// The handle was absent, expired, consumed, or reserved by an in-flight Send.
+    Missing,
+    /// The handle belongs to another client or to a Task other than `from_task_id`.
+    Forbidden,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentRevealParams {

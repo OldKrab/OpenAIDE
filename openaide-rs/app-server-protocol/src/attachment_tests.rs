@@ -5,7 +5,8 @@ use super::{
     AttachmentCreateFileReferenceParams, AttachmentCreatePastedImageParams,
     AttachmentListDirectoryParams, AttachmentListRootsParams, AttachmentReleaseOutcome,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
-    AttachmentResourceId, AttachmentRevealParams,
+    AttachmentResourceId, AttachmentRevealParams, AttachmentTransferOutcome,
+    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
 };
 
 #[test]
@@ -146,6 +147,52 @@ fn attachment_release_wire_shape_is_tagged_and_ordered() {
                     "resource": { "kind": "handle", "id": "attachment-handle-2" },
                     "status": "forbidden"
                 }
+            ]
+        })
+    );
+}
+
+#[test]
+fn attachment_transfer_wire_shape_names_both_tasks_and_orders_outcomes() {
+    let transfer = serde_json::to_value(AttachmentTransferParams {
+        from_task_id: "task-old".into(),
+        to_task_id: "task-new".into(),
+        handles: vec!["attachment-handle-1".into(), "attachment-handle-2".into()],
+    })
+    .unwrap();
+    assert_eq!(
+        transfer,
+        json!({
+            "fromTaskId": "task-old",
+            "toTaskId": "task-new",
+            "handles": ["attachment-handle-1", "attachment-handle-2"]
+        })
+    );
+
+    let transferred = serde_json::to_value(AttachmentTransferResult {
+        outcomes: vec![
+            AttachmentTransferOutcome {
+                handle_id: "attachment-handle-1".into(),
+                status: AttachmentTransferStatus::Transferred,
+            },
+            AttachmentTransferOutcome {
+                handle_id: "attachment-handle-2".into(),
+                status: AttachmentTransferStatus::Missing,
+            },
+            AttachmentTransferOutcome {
+                handle_id: "attachment-handle-3".into(),
+                status: AttachmentTransferStatus::Forbidden,
+            },
+        ],
+    })
+    .unwrap();
+    assert_eq!(
+        transferred,
+        json!({
+            "outcomes": [
+                { "handleId": "attachment-handle-1", "status": "transferred" },
+                { "handleId": "attachment-handle-2", "status": "missing" },
+                { "handleId": "attachment-handle-3", "status": "forbidden" }
             ]
         })
     );

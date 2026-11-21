@@ -36,6 +36,7 @@ import {
   disposableNewTaskControllerId,
   type NewTaskController,
 } from "./newTaskController";
+import { draftAttachmentHandleIds } from "./newTaskDraftCarry";
 import { currentFrontendShell } from "../services/frontendShell";
 
 type NewTaskBrowserDependencies = Pick<
@@ -110,8 +111,9 @@ function createFileBrowserCallbacks({
   const assertOperationCurrent = () => {
     if (!operationIsCurrent()) throw new SupersededNewTaskFileBrowserOperation();
   };
-  const discardNewTask = (taskId: TaskId) => newTaskController.discard({
+  const discardNewTask = (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => newTaskController.discard({
     attachmentResources,
+    carryDraftHandles,
     dispatch,
     lease: newTaskController.currentLease(taskId),
     request,
@@ -162,11 +164,11 @@ function createFileBrowserCallbacks({
     // controller. Validate it before discarding anything; releasing first makes
     // the subsequent upload target an ID that App Server has already deleted.
     if (staleTaskId && staleTaskId !== pendingResult?.taskId) {
-      await discardNewTask(staleTaskId);
+      await discardNewTask(staleTaskId, draftAttachmentHandleIds(state, staleTaskId));
     }
     assertOperationCurrent();
     const prepared = await prepareNewTask(
-      { backendConnection, dispatch, state },
+      { attachmentResources, backendConnection, dispatch, newTaskController, state },
       {
         acceptPreparedTask: (task) =>
           operationIsCurrent()

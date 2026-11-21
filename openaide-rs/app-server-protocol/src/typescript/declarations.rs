@@ -31,7 +31,9 @@ use crate::attachment::{
     AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult, AttachmentReleaseOutcome,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
     AttachmentResourceId, AttachmentRevealParams, AttachmentRevealResult,
-    AttachmentRevealSentParams, AttachmentRevealSentResult, EmbeddedAttachmentCandidate,
+    AttachmentRevealSentParams, AttachmentRevealSentResult, AttachmentTransferOutcome,
+    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
+    EmbeddedAttachmentCandidate,
     FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind, FileBrowserRoot,
     PreSendAttachment,
 };
@@ -480,6 +482,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachmentReleaseOutcome>(output, config);
     push_decl::<AttachmentReleaseParams>(output, config);
     push_decl::<AttachmentReleaseResult>(output, config);
+    push_decl::<AttachmentTransferStatus>(output, config);
+    push_decl::<AttachmentTransferOutcome>(output, config);
+    push_decl::<AttachmentTransferParams>(output, config);
+    push_decl::<AttachmentTransferResult>(output, config);
     push_decl::<AttachmentRevealParams>(output, config);
     push_decl::<AttachmentRevealResult>(output, config);
     push_decl::<AttachmentRevealSentParams>(output, config);

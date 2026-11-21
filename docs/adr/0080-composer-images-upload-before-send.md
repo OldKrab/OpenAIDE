@@ -23,7 +23,7 @@ On Web, Desktop, and Android, an unsent Image is uploaded through the App Server
 
 - An uploaded Image counts toward the 20-attachment limit of a message.
 - No protocol type changes. The upload kind is a new HTTP header introduced with App Server Protocol 3.1, and an App Server older than 3.1 refuses a 3.1 client, so a client that uploads Images never meets an App Server that would store them as plain files.
-- A lost handle (App Server restart, Prepared Task change, expiry) leaves the row visible with an error, as for files; the user attaches the Image again.
+- A Prepared Task change (Agent, Project, or Task Workspace) does not lose handles: Frontend holds the draft's handles across the release and `attachment/transfer` moves them, with the same ids, to the next Prepared Task before Send can use it. A lost handle (App Server restart, expiry, or a handle the transfer could not move) leaves the row visible with an error, as for files; the user attaches the Image again.
 - **Edit in Composer** on a Queued Message still returns Images inline, so they meet the inline limits again when resent.
 - Uploads log start and end on both sides: `attachment_upload_*` in App Server and `frontend_composer_upload_*` forwarded from Frontend, with kind, size, outcome, and duration. A refused inline Send logs `send_inline_images_rejected` with the Image count and size.
 

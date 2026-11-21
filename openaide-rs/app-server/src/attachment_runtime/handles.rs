@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use openaide_app_server_protocol::attachment::{
     AttachmentRefreshHandlesResult, AttachmentReleaseOutcome, AttachmentReleaseResult,
-    AttachmentReleaseStatus, AttachmentResourceId, PreSendAttachment,
+    AttachmentReleaseStatus, AttachmentResourceId, AttachmentTransferOutcome,
+    AttachmentTransferResult, AttachmentTransferStatus, PreSendAttachment,
 };
 use openaide_app_server_protocol::ids::AttachmentHandleId;
 
@@ -107,6 +108,54 @@ impl AttachmentRuntime {
             })
             .collect();
         AttachmentReleaseResult { outcomes }
+    }
+
+    /// Re-scopes pre-Send handles from a replaced Prepared Task to its successor in place.
+    ///
+    /// Handle ids, resolved targets, and labels are unchanged, so a draft keeps its rows and
+    /// never re-uploads. Each handle moves independently; a handle already owned by `to` is
+    /// reported as moved so a retried or duplicated request stays idempotent. A handle that
+    /// an in-flight Send reserved stays where it is.
+    pub(crate) fn transfer_handles(
+        &self,
+        from: impl Into<AttachmentOwner>,
+        to: impl Into<AttachmentOwner>,
+        handles: &[AttachmentHandleId],
+    ) -> AttachmentTransferResult {
+        let from = from.into();
+        let to = to.into();
+        let mut state = self
+            .state
+            .lock()
+            .expect("attachment runtime mutex poisoned");
+        state.prune_expired(Instant::now());
+        let expires_at = self.expires_at();
+        let outcomes = handles
+            .iter()
+            .map(|handle_id| {
+                let id = handle_id.as_str();
+                let reserved = state.reserved_handles.contains(id);
+                let status = match state.handles.get_mut(id) {
+                    None => AttachmentTransferStatus::Missing,
+                    Some(_) if reserved => AttachmentTransferStatus::Missing,
+                    Some(handle) if handle.owner.belongs_to(&to) => {
+                        handle.expires_at = expires_at;
+                        AttachmentTransferStatus::Transferred
+                    }
+                    Some(handle) if handle.owner.belongs_to(&from) => {
+                        handle.owner = to.clone();
+                        handle.expires_at = expires_at;
+                        AttachmentTransferStatus::Transferred
+                    }
+                    Some(_) => AttachmentTransferStatus::Forbidden,
+                };
+                AttachmentTransferOutcome {
+                    handle_id: handle_id.clone(),
+                    status,
+                }
+            })
+            .collect();
+        AttachmentTransferResult { outcomes }
     }
 
     #[cfg(test)]
@@ -294,3 +343,7 @@ fn handle_access_error(
         AttachmentRuntimeError::WrongTask
     }
 }
+
+#[cfg(test)]
+#[path = "transfer_tests.rs"]
+mod transfer_tests;

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ATTACHMENT_RELEASE,
+  ATTACHMENT_TRANSFER,
   type AttachmentCandidateId,
   type AttachmentHandleId,
   type BackendConnection,
@@ -11,6 +12,7 @@ import {
   composerAttachmentResourceFrame,
   ComposerAttachmentResourceOwner,
   releaseAttachmentResources,
+  transferAttachmentHandles,
   type ComposerAttachmentResourceFrame,
 } from "./attachmentResources";
 import { createInitialState, type AppState } from "../state/store";
@@ -265,6 +267,76 @@ describe("composer attachment resource ownership", () => {
 
     expect(adopted).toBe(false);
     expect(release).toHaveBeenCalledWith("task-a", ["late-handle"]);
+  });
+  it("keeps held draft handles through a Prepared Task discard and re-keys moved ones", () => {
+    const release = vi.fn();
+    const owner = new ComposerAttachmentResourceOwner({ release });
+    owner.reconcile(frame({ retained: [resource("task-a", "moved"), resource("task-a", "lost")] }));
+
+    owner.holdForTransfer("task-a", ["moved", "lost"] as AttachmentHandleId[]);
+    owner.releaseTask("task-a");
+    owner.reconcile(frame());
+    expect(release).not.toHaveBeenCalled();
+
+    owner.completeTransfer("task-a", "task-b", ["moved", "lost"] as AttachmentHandleId[], ["moved"] as AttachmentHandleId[]);
+    owner.reconcile(frame({ retained: [resource("task-b", "moved")] }));
+    expect(release).toHaveBeenCalledWith("task-a", ["lost"]);
+    expect(release).not.toHaveBeenCalledWith("task-b", ["moved"]);
+
+    owner.reconcile(frame());
+    expect(release).toHaveBeenCalledWith("task-b", ["moved"]);
+  });
+
+  it("reports only unmoved handles lost and records a metadata-only transfer", async () => {
+    const request = vi.fn(async () => ({
+      outcomes: [
+        { handleId: "handle-1", status: "transferred" },
+        { handleId: "handle-2", status: "missing" },
+      ],
+    }));
+    const record = vi.fn();
+
+    const outcome = await transferAttachmentHandles(
+      { request: request as unknown as BackendConnection["request"] },
+      "task-a",
+      "task-b",
+      ["handle-1", "handle-2"] as AttachmentHandleId[],
+      record,
+    );
+
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_TRANSFER, {
+      fromTaskId: "task-a",
+      toTaskId: "task-b",
+      handles: ["handle-1", "handle-2"],
+    });
+    expect(outcome).toEqual({ transferred: ["handle-1"], lost: ["handle-2"] });
+    expect(record).toHaveBeenLastCalledWith("draft_attachments_transfer_completed", expect.objectContaining({
+      outcome: "partial",
+      transferred_count: 1,
+      lost_count: 1,
+    }));
+  });
+
+  it("reports every handle lost when the transfer request fails", async () => {
+    const request = vi.fn(async () => {
+      throw Object.assign(new Error("secret detail"), { protocolError: { code: "NotFound" } });
+    });
+    const record = vi.fn();
+
+    const outcome = await transferAttachmentHandles(
+      { request: request as unknown as BackendConnection["request"] },
+      "task-a",
+      "task-b",
+      ["handle-1"] as AttachmentHandleId[],
+      record,
+    );
+
+    expect(outcome).toEqual({ transferred: [], lost: ["handle-1"] });
+    expect(record).toHaveBeenLastCalledWith("draft_attachments_transfer_completed", expect.objectContaining({
+      outcome: "failure",
+      error_kind: "NotFound",
+    }));
+    expect(JSON.stringify(record.mock.calls)).not.toContain("secret detail");
   });
 });
 

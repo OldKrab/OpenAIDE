@@ -7,6 +7,7 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
+    ATTACHMENT_TRANSFER,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
     CLIENT_REPLACEMENT_IMPACT, CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT,
     CLIENT_UPDATE_SHUTDOWN_PREPARE, DIAGNOSTICS_CREATE_SUPPORT_EXPORT, DIAGNOSTICS_GET_RUNTIME,
@@ -340,6 +341,7 @@ impl RpcGateway {
                 self.handle_attachment_refresh_handles(connection_id, id, params, meta)
             }
             ATTACHMENT_RELEASE => self.handle_attachment_release(connection_id, id, params, meta),
+            ATTACHMENT_TRANSFER => self.handle_attachment_transfer(connection_id, id, params, meta),
             ATTACHMENT_REVEAL => {
                 self.handle_attachment_reveal(connection_id, id, params, meta, now)
             }
