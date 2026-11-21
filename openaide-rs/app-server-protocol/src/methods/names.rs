@@ -63,6 +63,7 @@ pub const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE: &str = "attachment/createEmbedde
 pub const ATTACHMENT_CONFIRM_EMBEDDED: &str = "attachment/confirmEmbedded";
 pub const ATTACHMENT_REFRESH_HANDLES: &str = "attachment/refreshHandles";
 pub const ATTACHMENT_RELEASE: &str = "attachment/release";
+pub const ATTACHMENT_TRANSFER: &str = "attachment/transfer";
 pub const ATTACHMENT_REVEAL: &str = "attachment/reveal";
 pub const ATTACHMENT_REVEAL_SENT: &str = "attachment/revealSent";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
@@ -187,6 +188,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     ATTACHMENT_CONFIRM_EMBEDDED,
     ATTACHMENT_REFRESH_HANDLES,
     ATTACHMENT_RELEASE,
+    ATTACHMENT_TRANSFER,
     ATTACHMENT_REVEAL,
     ATTACHMENT_REVEAL_SENT,
     SHELL_RESOLVE_FILE_REVEAL,

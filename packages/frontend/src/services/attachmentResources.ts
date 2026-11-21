@@ -1,5 +1,6 @@
 import {
   ATTACHMENT_RELEASE,
+  ATTACHMENT_TRANSFER,
   type AttachmentCandidateId,
   type AttachmentHandleId,
   type AttachmentResourceId,
@@ -63,6 +64,16 @@ export function composerAttachmentResourceFrame(
   }
 
   if (!taskSurfaceMounted || !snapshotTaskId || !state.snapshot) {
+    if (taskSurfaceMounted && newTaskId && !state.taskInputs[newTaskId]) {
+      // An Agent, Project, or worktree change moves the draft out of its Prepared Task's
+      // input before the preparation effect can hold its handles for `attachment/transfer`.
+      // Retaining the draft under the still-mounted Task keeps this layout pass from
+      // releasing files the successor Task is about to own.
+      const draft = state.newTask.submitting ? state.newTask.pending?.context ?? [] : state.newTask.context;
+      for (const resource of resourcesFromAttachments(newTaskId, draft)) {
+        retainedResources.set(resourceKey(resource), resource);
+      }
+    }
     return {
       acceptedUserMessageIds,
       acceptsAdoptions: taskSurfaceMounted && !state.newTask.submitting,
@@ -106,6 +117,8 @@ export class ComposerAttachmentResourceOwner {
   private adoptionsLocked = true;
   private disposed = false;
   private readonly foreignResources = new Set<string>();
+  /** Handles a replaced Prepared Task's draft carries while App Server moves them. */
+  private readonly heldForTransfer = new Set<string>();
   private mountedTaskId: string | undefined;
   private readonly owned = new Map<string, OwnedAttachmentResource>();
   private stateRootGeneration = 0;
@@ -183,6 +196,7 @@ export class ComposerAttachmentResourceOwner {
 
   /** Forgets resolver ids without issuing release requests against a replacement process. */
   replaceReplica() {
+    this.heldForTransfer.clear();
     this.stateRootGeneration += 1;
     this.adoptionGeneration += 1;
     this.acceptedUserMessageIds.clear();
@@ -203,6 +217,37 @@ export class ComposerAttachmentResourceOwner {
     this.adoptionsLocked = true;
   }
 
+  /**
+   * Keeps a replaced Prepared Task's draft handles alive until `attachment/transfer`
+   * settles. Releasing them first would delete files the successor Task is about to own.
+   */
+  holdForTransfer(taskId: string, handleIds: readonly AttachmentHandleId[]) {
+    for (const handleId of handleIds) this.heldForTransfer.add(attachmentResourceKey(taskId, handleId));
+  }
+
+  /**
+   * Ends a hold. Moved handles are re-keyed to the successor Task so later cleanup targets
+   * their new owner; the rest return to normal reconciliation, which releases them once
+   * the draft no longer shows them.
+   */
+  completeTransfer(
+    fromTaskId: string,
+    toTaskId: string,
+    held: readonly AttachmentHandleId[],
+    transferred: readonly AttachmentHandleId[],
+  ) {
+    for (const handleId of held) this.heldForTransfer.delete(attachmentResourceKey(fromTaskId, handleId));
+    if (this.disposed) return;
+    for (const handleId of transferred) {
+      this.owned.delete(attachmentResourceKey(fromTaskId, handleId));
+      this.owned.set(attachmentResourceKey(toTaskId, handleId), {
+        taskId: toTaskId,
+        handleId,
+        acceptedUserMessageId: this.acceptedUserMessageIds.get(toTaskId),
+      });
+    }
+  }
+
   release(resource: ComposerAttachmentResource) {
     this.releaseAll([resource]);
   }
@@ -216,6 +261,7 @@ export class ComposerAttachmentResourceOwner {
     const releases = new Map<string, Set<AttachmentHandleId>>();
     for (const resource of resources) {
       if (this.foreignResources.has(resourceKey(resource))) continue;
+      if (this.heldForTransfer.has(resourceKey(resource))) continue;
       if (this.dependencies.isProtected?.(resource) === true) continue;
       this.owned.delete(resourceKey(resource));
       const handles = releases.get(resource.taskId) ?? new Set<AttachmentHandleId>();
@@ -263,6 +309,7 @@ export class ComposerAttachmentResourceOwner {
       if (
         retainedKeys.has(key)
         || frame.protected.has(key)
+        || this.heldForTransfer.has(key)
         || this.dependencies.isProtected?.(resource) === true
       ) continue;
       const acceptedUserMessageId = frame.acceptedUserMessageIds.get(resource.taskId);
@@ -321,6 +368,65 @@ export function releaseAttachmentResources(
     taskId: taskId as TaskId,
     resources,
   }).catch(() => undefined);
+}
+
+export type AttachmentTransferOutcome = {
+  transferred: AttachmentHandleId[];
+  lost: AttachmentHandleId[];
+};
+
+/**
+ * Moves draft handles from a replaced Prepared Task to its successor, so a context change
+ * never uploads the same file again. A failed request, including one an older App Server
+ * does not recognize, reports every handle lost instead of throwing.
+ */
+export async function transferAttachmentHandles(
+  backendConnection: Pick<BackendConnection, "request">,
+  fromTaskId: string,
+  toTaskId: string,
+  handleIds: readonly AttachmentHandleId[],
+  record: (event: string, fields: Record<string, string | number>) => void,
+): Promise<AttachmentTransferOutcome> {
+  const startedAt = performance.now();
+  const fields = { from_task_id: fromTaskId, to_task_id: toTaskId, requested_count: handleIds.length };
+  record("draft_attachments_transfer_started", fields);
+  try {
+    const result = await backendConnection.request(ATTACHMENT_TRANSFER, {
+      fromTaskId: fromTaskId as TaskId,
+      toTaskId: toTaskId as TaskId,
+      handles: [...handleIds],
+    });
+    const transferred = result.outcomes
+      .filter((outcome) => outcome.status === "transferred")
+      .map((outcome) => outcome.handleId);
+    const moved = new Set<string>(transferred);
+    const lost = handleIds.filter((handleId) => !moved.has(handleId));
+    record("draft_attachments_transfer_completed", {
+      ...fields,
+      outcome: lost.length ? "partial" : "transferred",
+      transferred_count: transferred.length,
+      lost_count: lost.length,
+      duration_ms: Math.round(performance.now() - startedAt),
+    });
+    return { transferred, lost };
+  } catch (error) {
+    record("draft_attachments_transfer_completed", {
+      ...fields,
+      outcome: "failure",
+      transferred_count: 0,
+      lost_count: handleIds.length,
+      duration_ms: Math.round(performance.now() - startedAt),
+      error_kind: diagnosticErrorKind(error),
+    });
+    return { transferred: [], lost: [...handleIds] };
+  }
+}
+
+/** A protocol error code or exception class name; never the free-form message. */
+export function diagnosticErrorKind(error: unknown) {
+  const protocolCode = (error as { protocolError?: { code?: unknown } } | undefined)?.protocolError?.code;
+  if (typeof protocolCode === "string") return protocolCode;
+  return error instanceof Error ? error.name : typeof error;
 }
 
 export function attachmentHandleResource(id: AttachmentHandleId): AttachmentResourceId {

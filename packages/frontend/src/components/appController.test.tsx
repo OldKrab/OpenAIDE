@@ -6,6 +6,7 @@ import {
   AGENT_PROBE,
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_RELEASE,
+  ATTACHMENT_TRANSFER,
   AppServerProtocolError,
   TransportLinkError,
   createAppServerSession,
@@ -3137,6 +3138,90 @@ describe("app controller mounted lifecycle", () => {
       agent_id: "opencode",
       has_messages: false,
     });
+  });
+
+  it.each([
+    { status: "transferred", lost: false },
+    { status: "missing", lost: true },
+  ] as const)("moves an uploaded draft handle to the new Agent's Prepared Task ($status)", async ({ status, lost }) => {
+    const request = vi.fn(async (method: string, params?: { agentId?: string; taskId?: string; handles?: string[] }) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: params?.agentId, projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE) {
+        const agentId = params?.agentId ?? "codex";
+        const prepared = protocolTaskSnapshot(`task_${agentId}`, "New task", { hasMessages: false });
+        return {
+          task: {
+            ...prepared,
+            task: { ...prepared.task, agentId },
+            agentConfig: { ...prepared.agentConfig, agentId },
+            agentCommands: { ...prepared.agentCommands, agentId },
+          },
+        };
+      }
+      if (method === TASK_RELEASE) return { discardedTaskId: params?.taskId };
+      if (method === ATTACHMENT_RELEASE) return { outcomes: [] };
+      if (method === ATTACHMENT_TRANSFER) {
+        return { outcomes: (params?.handles ?? []).map((handleId) => ({ handleId, status })) };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({
+          includeActiveTask: false,
+          agents: [
+            { agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" },
+            { agentId: "opencode" as never, label: "OpenCode", icon: "opencode", status: "connected" },
+          ],
+        }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.dispatch({
+        type: "taskInput:attachment:addAppServer",
+        taskId: "task_codex",
+        attachment: { kind: "image", label: "pasted.png", local_id: "image-1", app_server_handle_id: "handle-1" as never },
+      });
+      await Promise.resolve();
+    });
+    request.mockClear();
+
+    await act(async () => {
+      latestController?.dispatch({ type: "newTask:agent", agentId: "opencode", agentLabel: "OpenCode" });
+      for (let tick = 0; tick < 6; tick += 1) await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === ATTACHMENT_TRANSFER)).toEqual([
+      [ATTACHMENT_TRANSFER, { fromTaskId: "task_codex", toTaskId: "task_opencode", handles: ["handle-1"] }],
+    ]);
+    // Releasing before the move would delete the file the new Task is about to own; a
+    // handle App Server reports lost may be cleaned up afterwards.
+    const methods = request.mock.calls.map(([method]) => method);
+    const firstRelease = methods.indexOf(ATTACHMENT_RELEASE);
+    if (lost) expect(firstRelease).toBeGreaterThan(methods.indexOf(ATTACHMENT_TRANSFER));
+    else expect(firstRelease).toBe(-1);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_opencode");
+    const [row] = latestController?.state.newTask.context ?? [];
+    expect(row?.label).toBe("pasted.png");
+    if (lost) {
+      expect(row?.validation_error).toBeTruthy();
+      expect(row?.app_server_handle_id).toBeUndefined();
+    } else {
+      expect(row).toMatchObject({ app_server_handle_id: "handle-1" });
+      expect(row?.validation_error).toBeUndefined();
+    }
   });
 
   it("waits for a late Prepared Task acquire to release before replacing its context", async () => {

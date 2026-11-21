@@ -88,6 +88,7 @@ fn attachment_methods_use_attachment_namespace() {
         "attachment/refreshHandles"
     );
     assert_eq!(AttachmentRelease::METHOD, "attachment/release");
+    assert_eq!(AttachmentTransfer::METHOD, "attachment/transfer");
     assert_eq!(AttachmentReveal::METHOD, "attachment/reveal");
 }
 

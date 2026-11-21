@@ -3,12 +3,15 @@ import {
   TASK_ACQUIRE,
   TASK_ACQUIRE_IN_WORKTREE,
   TASK_RELEASE,
+  type AttachmentHandleId,
+  type BackendConnection,
   type TaskId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { AppState } from "../state/store";
-import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
+import { diagnosticErrorKind, type ComposerAttachmentResourceOwner } from "../services/attachmentResources";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppControllerBackendConnection } from "./appControllerBackendLifecycle";
 import type { PendingNewTaskPreparationResult } from "./appControllerCallbackTypes";
@@ -19,6 +22,7 @@ import {
   taskAcquireParams,
 } from "../state/newTaskPreparationContext";
 import type { NewTaskController } from "./newTaskController";
+import { draftAttachmentHandleIds } from "./newTaskDraftCarry";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import {
   readRetainedPreparedTaskLease,
@@ -146,12 +150,26 @@ export function useNewTaskPreparation({
     const staleTaskId = retainedSnapshot && !preparedTaskMatches
       ? retainedSnapshot.task.task_id as TaskId
       : undefined;
-    const discard = (taskId: TaskId) => newTaskController.discard({
+    const discard = (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => newTaskController.discard({
       attachmentResources,
+      carryDraftHandles,
       dispatch,
       lease: newTaskController.currentLease(taskId),
       request,
       taskId,
+    });
+    // The session object keys the diagnostics batch shared with the request log.
+    const diagnostics = backendConnection as Pick<BackendConnection, "request">;
+    const startedAt = performance.now();
+    const carriedDraftHandles = staleTaskId && staleTaskId !== replacementTaskId
+      ? draftAttachmentHandleIds(state, staleTaskId)
+      : [];
+    recordFrontendLifecycleEvent(diagnostics, "new_task_preparation_started", {
+      reason: replacementTaskId ? "replacement" : staleTaskId ? "context_changed" : "initial",
+      agent_id: state.newTask.selection.agentId,
+      stale_task_id: staleTaskId,
+      carried_attachment_count: carriedDraftHandles.length + newTaskController.carriedAttachmentCount(),
+      chained: previousPreparation !== undefined,
     });
     const promise = (previousPreparation
       ? previousPreparation.catch(() => undefined)
@@ -160,7 +178,7 @@ export function useNewTaskPreparation({
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
-      if (staleTaskId && staleTaskId !== replacementTaskId) await discard(staleTaskId);
+      if (staleTaskId && staleTaskId !== replacementTaskId) await discard(staleTaskId, carriedDraftHandles);
       if (!staleTaskId && retainedLease && retainedLease.preparationKey !== preparationKey) {
         // Reload can preserve the stable client and selected context while losing the
         // in-memory snapshot. Release the retained lease before acquiring another key.
@@ -200,6 +218,22 @@ export function useNewTaskPreparation({
         throw new SupersededPreparation();
       }
 
+      if (newTaskController.carriedAttachmentCount() > 0) {
+        // Publish the successor only after the draft's handles belong to it, so a Send
+        // waiting on this preparation never names a handle of the discarded Task.
+        await newTaskController.transferCarriedAttachments({
+          attachmentResources,
+          backendConnection: diagnostics,
+          dispatch,
+          toTaskId: taskId,
+        });
+        if (!asyncOperations.owns(operation)) {
+          // The handles now belong to this superseded Task; hold them for the next one.
+          await discard(taskId, draftAttachmentHandleIds(state, taskId));
+          throw new SupersededPreparation();
+        }
+      }
+
       const snapshot = mapProtocolTaskSnapshot(task).snapshot;
       const lease = replacementTaskId
         ? newTaskController.retainReplacement({
@@ -228,6 +262,19 @@ export function useNewTaskPreparation({
     // immediately instead of rendering a false-empty options slot.
     dispatch({ type: "newTask:configOptions:start" });
 
+    void promise.then(({ taskId }) => {
+      recordFrontendLifecycleEvent(diagnostics, "new_task_preparation_completed", {
+        outcome: "prepared",
+        task_id: taskId,
+        duration_ms: Math.round(performance.now() - startedAt),
+      });
+    }, (error) => {
+      recordFrontendLifecycleEvent(diagnostics, "new_task_preparation_completed", {
+        outcome: error instanceof SupersededPreparation ? "superseded" : "failure",
+        duration_ms: Math.round(performance.now() - startedAt),
+        ...(error instanceof SupersededPreparation ? {} : { error_kind: diagnosticErrorKind(error) }),
+      });
+    });
     void promise.catch((error) => {
       if (error instanceof SupersededPreparation) return;
       if (!asyncOperations.owns(operation)) return;

@@ -13,10 +13,10 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CONFIRM_EMBEDDED, ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
-    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_RESTORE,
-    SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
-    TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
-    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
+    ATTACHMENT_TRANSFER, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE,
+    NATIVE_SESSION_RESTORE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
+    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
+    TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -555,6 +555,79 @@ fn attachment_lease_follows_owner_heartbeat_and_silent_client_expiry() {
         silent_refresh.error.code,
         ProtocolErrorCode::ValidationFailed
     );
+}
+
+#[test]
+fn attachment_transfer_moves_only_the_callers_handles_into_an_accessible_task() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    for task_id in ["task-1", "task-2"] {
+        let mut task = task_record(task_id);
+        task.workspace_root = temp.path().to_string_lossy().to_string();
+        store.write_task(&task).unwrap();
+    }
+    let mut leased = task_record("task-leased");
+    leased.workspace_root = temp.path().to_string_lossy().to_string();
+    leased.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
+        lease: Some("client-other".into()),
+    };
+    store.write_task(&leased).unwrap();
+    drop(store);
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let gateway = dispatcher.shared_gateway();
+    let owner = ConnectionId::new("conn-owner");
+    let other = ConnectionId::new("conn-other");
+    for (connection, client, now) in [(&owner, "client-owner", 1), (&other, "client-other", 2)] {
+        gateway_result(gateway.handle_inbound(
+            connection.clone(),
+            gateway_request("initialize", CLIENT_INITIALIZE, initialize_params(client)),
+            AppServerTime(now),
+        ));
+    }
+    let handle_id = create_pasted_image_handle(&gateway, &owner, "create", 3);
+    let transfer = |connection: &ConnectionId, to: &str, now: u64| {
+        gateway.handle_inbound(
+            connection.clone(),
+            gateway_request(
+                "transfer",
+                ATTACHMENT_TRANSFER,
+                json!({ "fromTaskId": "task-1", "toTaskId": to, "handles": [handle_id] }),
+            ),
+            AppServerTime(now),
+        )
+    };
+
+    let denied = gateway_result(transfer(&other, "task-2", 4));
+    assert_eq!(denied["outcomes"][0]["status"], json!("forbidden"));
+    let inaccessible = gateway_error(transfer(&owner, "task-leased", 5));
+    assert_eq!(inaccessible.error.code, ProtocolErrorCode::NotFound);
+
+    let moved = gateway_result(transfer(&owner, "task-2", 6));
+    assert_eq!(
+        moved["outcomes"],
+        json!([{ "handleId": handle_id, "status": "transferred" }])
+    );
+    let refreshed = gateway_result(gateway.handle_inbound(
+        owner.clone(),
+        gateway_request(
+            "refresh-new",
+            ATTACHMENT_REFRESH_HANDLES,
+            json!({ "taskId": "task-2", "handles": [handle_id] }),
+        ),
+        AppServerTime(7),
+    ));
+    assert_eq!(refreshed["attachments"][0]["label"], json!("image.png"));
+    let stale = gateway_error(gateway.handle_inbound(
+        owner,
+        gateway_request(
+            "refresh-old",
+            ATTACHMENT_REFRESH_HANDLES,
+            json!({ "taskId": "task-1", "handles": [handle_id] }),
+        ),
+        AppServerTime(8),
+    ));
+    assert_eq!(stale.error.code, ProtocolErrorCode::ValidationFailed);
 }
 
 #[test]

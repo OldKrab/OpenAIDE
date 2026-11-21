@@ -256,6 +256,22 @@ function isComposerImagePayload(payload: unknown): payload is ComposerImagePaylo
   return typeof candidate.data === "string" && typeof candidate.mimeType === "string";
 }
 
+/** Like `invalidateAppServerAttachments`, for only the rows whose handles are in `handleIds`. */
+export function invalidateAttachmentHandles(
+  attachments: ComposerAttachment[],
+  handleIds: ReadonlySet<string>,
+  message: string,
+): ComposerAttachment[] {
+  if (!attachments.some((attachment) => attachment.app_server_handle_id && handleIds.has(attachment.app_server_handle_id))) {
+    return attachments;
+  }
+  return attachments.map((attachment) => (
+    attachment.app_server_handle_id && handleIds.has(attachment.app_server_handle_id)
+      ? invalidateAppServerAttachments([attachment], message)[0]!
+      : attachment
+  ));
+}
+
 /** Preserves the visible draft while removing resolver ids the App Server no longer recognizes. */
 export function invalidateAppServerAttachments(
   attachments: ComposerAttachment[],
