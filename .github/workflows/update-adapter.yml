@@ -18,16 +18,6 @@ on:
         description: Full fork commit to embed (defaults to the fork's main branch)
         required: false
         type: string
-  # TODO(ADR-0079 PR 3): drop this trigger with update-claude-acp.yml, its only caller.
-  workflow_call:
-    inputs:
-      adapter:
-        required: true
-        type: string
-      commit:
-        required: false
-        type: string
-        default: ""
 
 permissions:
   actions: read
