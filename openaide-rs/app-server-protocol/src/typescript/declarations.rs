@@ -33,9 +33,8 @@ use crate::attachment::{
     AttachmentResourceId, AttachmentRevealParams, AttachmentRevealResult,
     AttachmentRevealSentParams, AttachmentRevealSentResult, AttachmentTransferOutcome,
     AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
-    EmbeddedAttachmentCandidate,
-    FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind, FileBrowserRoot,
-    PreSendAttachment,
+    EmbeddedAttachmentCandidate, FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind,
+    FileBrowserRoot, PreSendAttachment,
 };
 use crate::client::{
     AttachedClientSummary, ClientCapabilities, ClientCapabilitiesChangedParams,

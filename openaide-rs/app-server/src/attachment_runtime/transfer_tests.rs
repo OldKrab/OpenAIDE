@@ -68,19 +68,31 @@ fn transfer_refuses_another_clients_or_another_tasks_handle() {
     let old = AttachmentOwner::from(TaskId::from("task-old"));
     let new = AttachmentOwner::from(TaskId::from("task-new"));
     let other_task = AttachmentOwner::from(TaskId::from("task-other"));
-    let other_client = AttachmentOwner::new(&ClientInstanceId::from("other-client"), &TaskId::from("task-old"));
+    let other_client = AttachmentOwner::new(
+        &ClientInstanceId::from("other-client"),
+        &TaskId::from("task-old"),
+    );
     let unrelated = pasted(&runtime, &other_task);
     let foreign = pasted(&runtime, &other_client);
 
     assert_eq!(
-        statuses(&runtime, &old, &new, &[unrelated.handle_id.clone(), foreign.handle_id.clone()]),
+        statuses(
+            &runtime,
+            &old,
+            &new,
+            &[unrelated.handle_id.clone(), foreign.handle_id.clone()]
+        ),
         [
             AttachmentTransferStatus::Forbidden,
             AttachmentTransferStatus::Forbidden
         ]
     );
-    assert!(runtime.resolve_for_send(&other_task, &[unrelated.handle_id]).is_ok());
-    assert!(runtime.resolve_for_send(&other_client, &[foreign.handle_id]).is_ok());
+    assert!(runtime
+        .resolve_for_send(&other_task, &[unrelated.handle_id])
+        .is_ok());
+    assert!(runtime
+        .resolve_for_send(&other_client, &[foreign.handle_id])
+        .is_ok());
 }
 
 #[test]
@@ -98,7 +110,10 @@ fn transfer_reports_released_expired_and_reserved_handles_missing() {
             &runtime,
             &old,
             &new,
-            &[reserved.handle_id, AttachmentHandleId::from("attachment-handle-unknown")],
+            &[
+                reserved.handle_id,
+                AttachmentHandleId::from("attachment-handle-unknown")
+            ],
         ),
         [
             AttachmentTransferStatus::Missing,

@@ -7,7 +7,8 @@ use openaide_app_server_protocol::attachment::{
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentResourceId, AttachmentRevealParams,
-    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus, PreSendAttachment,
+    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
+    PreSendAttachment,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
@@ -402,7 +403,8 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         let started = std::time::Instant::now();
         // Only the destination needs a live lease: the replaced Prepared Task was usually
         // released first, and each handle's client-and-Task owner proves it may move.
-        if let Err(error) = self.read_task_for_client(params.to_task_id.as_str(), client_instance_id)
+        if let Err(error) =
+            self.read_task_for_client(params.to_task_id.as_str(), client_instance_id)
         {
             logging::warn(
                 "attachment_transfer_completed",

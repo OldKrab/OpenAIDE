@@ -24,8 +24,8 @@ use crate::attachment::{
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
-    AttachmentTransferParams, AttachmentTransferResult,
     AttachmentRevealResult, AttachmentRevealSentParams, AttachmentRevealSentResult,
+    AttachmentTransferParams, AttachmentTransferResult,
 };
 use crate::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
