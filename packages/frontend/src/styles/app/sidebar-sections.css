@@ -337,7 +337,7 @@ body[data-shell="web"] .task-list {
   color: var(--oa-text);
 }
 
-.project-task-group-toggle span {
+.project-task-group-toggle > span {
   min-width: 0;
   display: grid;
   gap: 1px;

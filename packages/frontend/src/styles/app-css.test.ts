@@ -478,7 +478,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.project-task-group-toggle strong\s*{[^}]*color:\s*var\(--oa-text\);[^}]*font-size:\s*13px;[^}]*font-weight:\s*600;/);
     expect(appCss).toMatch(/\.project-task-group-counts\s*{[^}]*font-size:\s*11px;[^}]*color:\s*var\(--oa-muted\);/);
     expect(appCss).toMatch(/\.project-task-more\s*{[^}]*min-height:\s*32px;[^}]*background:\s*transparent;[^}]*justify-self:\s*stretch;[^}]*font-size:\s*13px;/);
-    expect(appCss).toMatch(/\.project-task-group-toggle span\s*{[^}]*display:\s*grid;/);
+    expect(appCss).toMatch(/\.project-task-group-toggle > span\s*{[^}]*display:\s*grid;/);
   });
 
   it("keeps the Settings navigation fixed while page content scrolls", () => {
