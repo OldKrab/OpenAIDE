@@ -5,7 +5,7 @@
   "openaideAdapter": {
     "name": "@openaide/codex-acp",
     "version": "2.2.4",
-    "commit": "4cffde978757cd0332f6c3a57e167207bfafc62d"
+    "commit": "bf26223dfa824b13ceda9d2d100046ce6693618b"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "~2.4.0",
