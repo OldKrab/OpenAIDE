@@ -10,7 +10,7 @@ import {
   ComposerAttachments,
   type ComposerFileUpload,
 } from "./ComposerAttachments";
-import { ComposerControls, type ComposerMenu } from "./ComposerMenus";
+import { ComposerControls, type ComposerMenu, type ComposerUploadSelection } from "./ComposerMenus";
 import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import {
   composerErrorMessage,
@@ -141,7 +141,9 @@ export function Composer({
   const editorRef = useRef<ComposerEditorHandle | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const configMutationSequenceRef = useRef(0);
-  const fileDropHandlerRef = useRef<((files: File[]) => void) | undefined>(undefined);
+  const fileDropHandlerRef = useRef<((uploads: ComposerUploadSelection[]) => void) | undefined>(undefined);
+  // Upload shells send Images through the same upload route as files; VS Code keeps them inline.
+  const imagesUpload = fileBrowser?.attachmentMode === "webUpload" && Boolean(fileBrowser.attachFiles);
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
@@ -410,11 +412,14 @@ export function Composer({
     onFiles: (dropped) => {
       const images = dropped.filter((file) => file.type.startsWith("image/"));
       const files = dropped.filter((file) => !file.type.startsWith("image/"));
+      const uploads: ComposerUploadSelection[] = files.map((file) => ({ file, kind: "file" }));
       if (images.length > 0) {
         if (!imageAttachmentsAllowed) {
           onUnsupportedImageAttachment?.("This Agent does not accept images.");
         } else if (!fileBrowser?.attachImage) {
           onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
+        } else if (imagesUpload) {
+          uploads.unshift(...images.map((file) => ({ file, kind: "image" as const })));
         } else {
           const draft = { prompt: draftRef.current, context: attachments };
           void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
@@ -422,8 +427,8 @@ export function Composer({
           });
         }
       }
-      if (files.length > 0) {
-        if (fileDropHandlerRef.current) fileDropHandlerRef.current(files);
+      if (uploads.length > 0) {
+        if (fileDropHandlerRef.current) fileDropHandlerRef.current(uploads);
         else onUnsupportedImageAttachment?.("Files can be attached after the Task is open.");
       }
     },
@@ -481,6 +486,10 @@ export function Composer({
             }
             if (!fileBrowser?.attachImage) {
               onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
+              return;
+            }
+            if (imagesUpload && fileDropHandlerRef.current) {
+              fileDropHandlerRef.current(images.map((file) => ({ file, kind: "image" })));
               return;
             }
             const draft = { prompt: draftRef.current, context: attachments };

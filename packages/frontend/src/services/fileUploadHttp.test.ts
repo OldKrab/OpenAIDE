@@ -248,6 +248,21 @@ describe("file upload transport", () => {
     expect(FakeXMLHttpRequest.requests[2].headers.get("X-OpenAIDE-Upload-Cancel")).toBe("true");
   });
 
+  it("marks every request of an Image upload with the image kind, and only those", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    FakeXMLHttpRequest.planned = [
+      { kind: "error" },
+      { kind: "load", status: 200, body: '{"attachment":{"handleId":"attachment-image"}}' },
+      { kind: "load", status: 200, body: '{"attachment":{"handleId":"attachment-file"}}' },
+    ];
+
+    await upload(new File(["data"], "photo.jpg"), { kind: "image" });
+    await upload(new File(["data"], "notes.md"));
+
+    expect(FakeXMLHttpRequest.requests.map((request) => request.headers.get("X-OpenAIDE-Upload-Kind")))
+      .toEqual(["image", "image", undefined]);
+  });
+
   it("logs one metadata-only lifecycle across the chunk fallback", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
     FakeXMLHttpRequest.planned = [
@@ -260,12 +275,13 @@ describe("file upload transport", () => {
 
     const operationId = log.mock.calls[0][2].operation_id;
     expect(log.mock.calls).toEqual([
-      ["info", "file_upload_started", { operation_id: operationId, mode: "single", bytes: 4 }],
+      ["info", "file_upload_started", { operation_id: operationId, mode: "single", kind: "file", bytes: 4 }],
       ["info", "file_upload_chunk_fallback", { operation_id: operationId, reason: "transportError" }],
       ["info", "file_upload_completed", {
         operation_id: operationId,
         outcome: "success",
         mode: "chunked",
+        kind: "file",
         attempt_count: 2,
         duration_ms: expect.any(Number),
       }],

@@ -440,7 +440,7 @@ describe("Composer view behavior", () => {
     })).toHaveLength(0);
   });
 
-  it("keeps dropped Images native and routes other dropped files through file attachment", async () => {
+  it("uploads dropped Images and files together on an upload shell, Images first", async () => {
     const image = new File(["image"], "diagram.png", { type: "image/png" });
     const file = new File(["data"], "model.bin");
     const fileBrowser: TaskFileBrowserCallbacks = {
@@ -477,8 +477,37 @@ describe("Composer view behavior", () => {
     expect(renderer.root.findByProps({ className: "composer" }).props["data-file-drop"]).toBeUndefined();
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(fileBrowser.attachImage).toHaveBeenCalledWith(image, expect.objectContaining({ prompt: "Inspect" }));
-    expect(fileBrowser.attachFiles).toHaveBeenCalledWith([file], expect.objectContaining({ maxFiles: 1 }));
+    expect(fileBrowser.attachImage).not.toHaveBeenCalled();
+    expect(fileBrowser.attachFiles).toHaveBeenNthCalledWith(1, [image], expect.objectContaining({ maxFiles: 1, kind: "image" }));
+    expect(fileBrowser.attachFiles).toHaveBeenNthCalledWith(2, [file], expect.objectContaining({ maxFiles: 1, kind: "file" }));
+  });
+
+  it("uploads pasted Images on an upload shell instead of carrying them inline", async () => {
+    const first = new File(["first"], "first.png", { type: "image/png" });
+    const second = new File(["second"], "second.png", { type: "image/png" });
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(async () => undefined),
+    };
+    const preventDefault = vi.fn();
+    const renderer = renderComposer({ fileBrowser });
+
+    paste(textarea(renderer.root), {
+      clipboardData: {
+        items: [
+          { kind: "file", type: "image/png", getAsFile: () => first },
+          { kind: "file", type: "image/png", getAsFile: () => second },
+        ],
+      },
+      preventDefault,
+    });
+    await settleRenderer();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(fileBrowser.attachImage).not.toHaveBeenCalled();
+    expect(fileBrowser.attachFiles).toHaveBeenNthCalledWith(1, [first], expect.objectContaining({ kind: "image" }));
+    expect(fileBrowser.attachFiles).toHaveBeenNthCalledWith(2, [second], expect.objectContaining({ kind: "image" }));
   });
 
   it("attaches every pasted image through the App Server file browser callbacks", async () => {

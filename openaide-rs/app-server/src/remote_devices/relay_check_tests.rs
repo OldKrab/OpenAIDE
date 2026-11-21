@@ -71,3 +71,13 @@ async fn a_check_does_not_reach_an_edge_the_relay_no_longer_carries() {
 fn network_check(network: &EdgeNetwork) -> RelayCheck {
     network.relay_check().expect("a relay network is checked")
 }
+
+#[test]
+fn only_growth_in_the_throttled_count_is_reported() {
+    let mut seen = 0;
+
+    assert_eq!(throttled_since(&mut seen, 0), None);
+    assert_eq!(throttled_since(&mut seen, 2), Some(2));
+    assert_eq!(throttled_since(&mut seen, 2), None);
+    assert_eq!(throttled_since(&mut seen, 3), Some(1));
+}

@@ -179,6 +179,8 @@ export type TaskFileBrowserCallbacks = {
       onProgress: (progress: { loaded: number; total: number }) => void;
       signal: AbortSignal;
       maxFiles: number;
+      /** `image` uploads Composer Images (`webUpload` only); a native picker ignores it. */
+      kind?: import("../services/fileUploadHttp").FileUploadKind;
     },
   ) => Promise<void>;
   listDirectory: (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => Promise<AttachmentListDirectoryResult>;

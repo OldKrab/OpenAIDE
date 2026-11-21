@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use iroh::endpoint::{
-    presets, ConnectError, ConnectWithOptsError, Connection, ConnectionError, RecvStream,
-    SendStream,
+    presets, ConnectError, ConnectWithOptsError, Connection, ConnectionError, QuicTransportConfig,
+    RecvStream, SendStream,
 };
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher};
 use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
@@ -103,9 +103,19 @@ pub fn device_key_from_text(text: &str) -> Option<SecretKey> {
 pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
     let endpoint = Endpoint::builder(presets::N0)
         .secret_key(key)
+        // Phones on mobile data lose the direct path as soon as a bulk send starts while
+        // segmentation offload is on, and fall back to the relay (iroh issue #4647).
+        // TODO: re-enable once iroh detects networks that drop segmented datagrams.
+        .transport_config(
+            QuicTransportConfig::builder()
+                .enable_segmentation_offload(false)
+                .build(),
+        )
         .bind()
         .await
         .map_err(|_| Failure::Unreachable)?;
+    crate::watch_relay_rate_limits(&endpoint, log.clone(), "remote_endpoint_relay_rate_limited");
+    crate::watch_net_report(&endpoint, log.clone(), "remote_endpoint_network_changed");
     let mut statuses = endpoint.home_relay_status();
     tokio::spawn(async move {
         let mut connected = None;

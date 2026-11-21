@@ -17,6 +17,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
         title: None,
         description: None,
         required: vec!["name".to_string()],
+        meta: None,
         properties: BTreeMap::from([
             (
                 "name".to_string(),
@@ -98,6 +99,7 @@ fn response_validation_rejects_wrong_types_unknown_fields_and_constraints() {
         title: None,
         description: None,
         required: vec!["name".to_string()],
+        meta: None,
         properties: BTreeMap::from([(
             "name".to_string(),
             PropertySchema::String {
@@ -156,6 +158,7 @@ fn schema_budgets_reject_oversized_forms() {
         description: None,
         properties,
         required: Vec::new(),
+        meta: None,
     };
 
     assert!(normalize_form("Too many".to_string(), schema).is_err());
