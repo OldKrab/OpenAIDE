@@ -167,11 +167,15 @@ impl RpcGateway {
                         | TaskStatus::Completed
                 ))
         );
-        if !pending_requests.is_empty() || clears_transient_requests {
+        // A request can open and resolve between two Task updates without a client response,
+        // as auto-approval does. If an update in that window exposed it, this one withdraws it.
+        let withdraws_visible_requests = self.tasks_with_visible_requests.contains(&task_id);
+        if !pending_requests.is_empty() || clears_transient_requests || withdraws_visible_requests {
             // Permission/question opening precedes the Task mutation that marks
             // it waiting, while Task termination closes requests before its durable
             // status update is published. Project both edges through the same ordered
             // Task stream so live clients cannot retain stale request controls.
+            self.record_published_task_requests(&task_id, &pending_requests, "task_update");
             events.extend(self.publish_task_payload(
                 &task_id,
                 AppServerEventPayload::TaskRequestsUpdated {

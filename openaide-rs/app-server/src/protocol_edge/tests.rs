@@ -2417,6 +2417,170 @@ fn stopping_task_publishes_empty_request_set_after_pending_question_is_interrupt
 }
 
 #[test]
+fn auto_approved_permission_seen_by_task_stream_is_cleared_by_next_task_update() {
+    // A Task update published between opening and auto-approving a permission exposes it;
+    // the update committed by the resolution must withdraw it while the Task keeps running.
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    subscribe_to_task(&mut gateway, "task-1");
+    let request_id = gateway
+        .server_requests
+        .open_permission_request(
+            "task-1",
+            &auto_approvable_permission("agent-request-1"),
+            Vec::new(),
+            AppServerTime(3),
+        )
+        .expect("open permission")
+        .expect("permission opened");
+    let exposed = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            1,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(4),
+    );
+    assert!(published_request_sets(&exposed)
+        .iter()
+        .any(|requests| requests.contains(&request_id.as_str().to_string())));
+    assert!(gateway.server_requests.auto_approve_permission(
+        &request_id,
+        "allow",
+        AppServerTime(5)
+    ));
+
+    let deliveries = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            2,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(6),
+    );
+
+    assert_eq!(
+        published_request_sets(&deliveries),
+        vec![Vec::<String>::new()]
+    );
+}
+
+#[test]
+fn auto_approved_permission_seen_in_subscription_snapshot_is_cleared_by_next_task_update() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    let request_id = gateway
+        .server_requests
+        .open_permission_request(
+            "task-1",
+            &auto_approvable_permission("agent-request-1"),
+            Vec::new(),
+            AppServerTime(2),
+        )
+        .expect("open permission")
+        .expect("permission opened");
+    subscribe_to_task(&mut gateway, "task-1");
+    assert!(gateway.server_requests.auto_approve_permission(
+        &request_id,
+        "allow",
+        AppServerTime(4)
+    ));
+
+    let deliveries = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            1,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(5),
+    );
+
+    assert_eq!(
+        published_request_sets(&deliveries),
+        vec![Vec::<String>::new()]
+    );
+}
+
+#[test]
+fn task_update_without_exposed_requests_publishes_no_request_set() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    subscribe_to_task(&mut gateway, "task-1");
+
+    let deliveries = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            1,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(3),
+    );
+
+    assert!(published_request_sets(&deliveries).is_empty());
+}
+
+fn subscribe_to_task(gateway: &mut RpcGateway, task_id: &str) {
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "subscribe-task",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from(task_id),
+                },
+                known_revision: None,
+            },
+        ),
+        AppServerTime(2),
+    );
+}
+
+fn published_request_sets(deliveries: &[GatewayEventDelivery]) -> Vec<Vec<String>> {
+    deliveries
+        .iter()
+        .filter_map(|delivery| match &delivery.event.payload {
+            AppServerEventPayload::TaskRequestsUpdated { requests, .. } => Some(
+                requests
+                    .iter()
+                    .map(|request| request.request_id.as_str().to_string())
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+fn auto_approvable_permission(request_id: &str) -> crate::agent::events::AgentPermissionRequest {
+    use crate::agent::events::{
+        AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest, AgentToolCallRef,
+    };
+    AgentPermissionRequest {
+        request_id: request_id.to_string(),
+        title: "Allow action?".to_string(),
+        description: None,
+        scope: None,
+        risk: None,
+        tool_call: AgentToolCallRef {
+            tool_call_id: "tool-1".to_string(),
+            title: "Tool".to_string(),
+            kind: Some("execute".to_string()),
+        },
+        subagent_native_session_id: None,
+        options: vec![AgentPermissionOption {
+            option_id: "allow".to_string(),
+            name: "Allow".to_string(),
+            kind: AgentPermissionOptionKind::AllowOnce,
+        }],
+    }
+}
+
+#[test]
 fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(
