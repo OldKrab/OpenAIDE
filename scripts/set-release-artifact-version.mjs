@@ -17,6 +17,8 @@ export function setReleaseArtifactVersion(repoRoot, version) {
 
   setJsonVersion(path.join(repoRoot, "apps/vscode-extension/package.json"), version);
   setJsonVersion(path.join(repoRoot, "apps/desktop/package.json"), version);
+  // The shared Frontend bakes this in to name its own version (packages/frontend/appBuildVersion.ts).
+  setJsonVersion(path.join(repoRoot, "packages/frontend/package.json"), version);
   setJsonVersion(path.join(repoRoot, "apps/desktop/src-tauri/tauri.conf.json"), version);
   for (const relativePath of [
     "openaide-rs/app-server/Cargo.toml",

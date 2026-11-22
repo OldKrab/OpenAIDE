@@ -41,14 +41,20 @@ describe("ConnectionProblemView", () => {
     expect(container.querySelector("h2, p")?.textContent).not.toContain("open_timeout");
   });
 
-  it("marks the side to update with its app version and keeps protocols behind Details", () => {
-    act(() => root.render(<ConnectionProblemView device="phone" message="Update OpenAIDE on your computer" computer={oldPc} problem={outdated} />));
+  it("names both app versions, marks the side to update, and keeps protocols behind Details", () => {
+    act(() => root.render(<ConnectionProblemView appVersion="0.41.0-g22c4bc0" device="phone" message="Update OpenAIDE on your computer" computer={oldPc} problem={outdated} />));
     expect(container.querySelector("h2")?.textContent).toBe("OLD-PC needs an update");
     expect(container.querySelector("p")?.textContent).toBe("Update OpenAIDE on OLD-PC, then try again.");
-    expect(container.querySelector(".connection-link-mismatch")?.textContent).toBe("This phone≠OLD-PC0.40.0");
+    expect(container.querySelector(".connection-link-mismatch")?.textContent).toBe("This phone0.41.0-g22c4bc0≠OLD-PC0.40.0");
     expect(container.querySelector(".connection-end-note.stale")?.textContent).toBe("0.40.0");
-    expect(container.querySelector("dl")?.textContent).toContain("Protocol 2.3");
+    expect([...container.querySelectorAll("dt")].map((term) => term.textContent)).toEqual(["This app", "OLD-PC"]);
+    expect(container.querySelector("dl")?.textContent).toContain("OpenAIDE 0.41.0-g22c4bc0 · protocol 2.3");
     expect(container.querySelector("dl")?.textContent).toContain("OpenAIDE 0.40.0 · protocol 2.2");
+  });
+
+  it("marks this app's version stale when the computer runs a newer OpenAIDE", () => {
+    act(() => root.render(<ConnectionProblemView appVersion="0.39.0" message="x" computer={oldPc} problem={{ ...outdated, update: "app" }} />));
+    expect(container.querySelector(".connection-end-note.stale")?.textContent).toBe("0.39.0");
   });
 
   it("offers trying again and the other computers right on the page", () => {

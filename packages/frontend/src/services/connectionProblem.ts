@@ -5,6 +5,7 @@ import {
   type ClientProbeResult,
   type ProtocolVersion,
 } from "@openaide/app-server-client";
+import { APP_VERSION } from "./appVersion";
 
 /**
  * Why the Frontend has no usable App Server, in the terms the connection page shows.
@@ -117,6 +118,8 @@ export async function probeRefusingServer(
       duration_ms: Date.now() - startedAt,
       server_protocol_version: result.protocolVersion,
       client_protocol_version: problem.clientProtocol,
+      server_app_version: result.appVersion,
+      client_app_version: APP_VERSION ?? "unknown",
       update: probed.kind === "incompatible" ? probed.update : "unknown",
     });
     return probed;

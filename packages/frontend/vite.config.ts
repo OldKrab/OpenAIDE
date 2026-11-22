@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { appBuildVersion } from "./appBuildVersion";
 
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(packageRoot, "../..");
@@ -21,6 +22,7 @@ function allowedHostsFromEnv() {
 export default defineConfig({
   plugins: [react()],
   cacheDir: process.env.OPENAIDE_VITE_CACHE_DIR ?? "node_modules/.vite",
+  define: { "import.meta.env.OPENAIDE_APP_VERSION": JSON.stringify(appBuildVersion(repoRoot)) },
   // Local Driver/Target bundles favor profiler readability without enabling React's dev runtime.
   esbuild: debugBuild ? { keepNames: true } : undefined,
   resolve: {

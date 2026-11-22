@@ -12,6 +12,7 @@ test("stamps the exact release version into every packaged artifact manifest", (
 
   assert.equal(packageJson(repoRoot, "apps/vscode-extension/package.json").version, "0.0.1-alpha.9");
   assert.equal(packageJson(repoRoot, "apps/desktop/package.json").version, "0.0.1-alpha.9");
+  assert.equal(packageJson(repoRoot, "packages/frontend/package.json").version, "0.0.1-alpha.9");
   assert.equal(
     packageJson(repoRoot, "apps/desktop/src-tauri/tauri.conf.json").version,
     "0.0.1-alpha.9",
@@ -65,6 +66,11 @@ function fixtureRepo(lineEnding = "\n") {
   });
   writeFixture(repoRoot, "apps/desktop/package.json", {
     name: "desktop",
+    private: true,
+    version: "0.0.0",
+  });
+  writeFixture(repoRoot, "packages/frontend/package.json", {
+    name: "frontend",
     private: true,
     version: "0.0.0",
   });

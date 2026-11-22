@@ -2,12 +2,14 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { appBuildVersion } from "../../packages/frontend/appBuildVersion";
 
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(packageRoot, "../..");
 
 export default defineConfig({
   plugins: [react()],
+  define: { "import.meta.env.OPENAIDE_APP_VERSION": JSON.stringify(appBuildVersion(repositoryRoot)) },
   resolve: {
     alias: {
       "@openaide/app-server-client": path.resolve(repositoryRoot, "packages/app-server-client/src/index.ts"),
