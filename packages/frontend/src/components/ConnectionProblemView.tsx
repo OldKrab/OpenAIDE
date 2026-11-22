@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Monitor, MonitorSmartphone, Smartphone } from "lucide-react";
 import { computerName, currentComputer, type ComputersSnapshot } from "../services/computers";
+import { APP_VERSION } from "../services/appVersion";
 import type { ConnectionProblem } from "../services/connectionProblem";
 import { ConnectionPage, thisDevice, type ConnectionEnd } from "./ConnectionPage";
 
@@ -25,7 +26,9 @@ type Incompatible = Extract<ConnectionProblem, { kind: "incompatible" }>;
  * and protocol versions sit behind Details (DESIGN.md: troubleshooting behind an explicit
  * affordance). Shared by every shell; switching is offered only where the shell has other computers.
  */
-export function ConnectionProblemView({ device, message, onRetry, onUse, computer, computers = [], problem }: {
+export function ConnectionProblemView({ appVersion = APP_VERSION, device, message, onRetry, onUse, computer, computers = [], problem }: {
+  /** This app's OpenAIDE version; the build's own unless a test sets it. */
+  appVersion?: string;
   /** The device this Frontend runs on; a computer when the shell does not say. */
   device?: "phone" | "computer";
   message: string;
@@ -39,7 +42,7 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, compute
 }) {
   const copy = problemCopy(problem, computer);
   const versions = problem?.kind === "incompatible" ? problem : undefined;
-  const [here, there] = linkEnds(device, computer, versions);
+  const [here, there] = linkEnds(device, computer, versions, appVersion);
   return (
     <ConnectionPage
       actions={onRetry ? <button className="connection-primary" onClick={onRetry} type="button">Try again</button> : undefined}
@@ -72,14 +75,16 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, compute
         <dl>
           {versions ? (
             <>
-              <div><dt>This app</dt><dd>Protocol {versions.clientProtocol}</dd></div>
+              <div><dt>This app</dt><dd>{appVersion ? `OpenAIDE ${appVersion} · protocol ${versions.clientProtocol}` : `Protocol ${versions.clientProtocol}`}</dd></div>
               <div>
                 <dt>{computerLabel(computer)}</dt>
                 <dd>{versions.server ? `OpenAIDE ${versions.server.appVersion} · protocol ${versions.server.protocol}` : "Version unknown"}</dd>
               </div>
             </>
-          ) : null}
-          <div><dt>Error</dt><dd>{message}</dd></div>
+          ) : (
+            // A refusal's message only repeats the headline; the versions above are its detail.
+            <div><dt>Error</dt><dd>{message}</dd></div>
+          )}
         </dl>
       </details>
     </ConnectionPage>
@@ -87,15 +92,14 @@ export function ConnectionProblemView({ device, message, onRetry, onUse, compute
 }
 
 /**
- * The picture's two ends. A version mismatch marks the side to update; the computer's app
- * version shows when the probe read it.
- * TODO: show this app's version on the near end too. No shell passes the Frontend its own
- * app version yet, and setting this app's protocol beside the computer's app version would mislead.
+ * The picture's two ends. A version mismatch names each side's app version where known and
+ * marks the side to update.
  */
-function linkEnds(device: "phone" | "computer" | undefined, computer: ConnectionComputer | undefined, versions: Incompatible | undefined): [ConnectionEnd, ConnectionEnd] {
+function linkEnds(device: "phone" | "computer" | undefined, computer: ConnectionComputer | undefined, versions: Incompatible | undefined, appVersion: string | undefined): [ConnectionEnd, ConnectionEnd] {
   const here: ConnectionEnd = computer?.self ? { label: "This app", kind: "app" } : thisDevice(device);
   const there: ConnectionEnd = { label: computerLabel(computer), kind: computer?.self ?? "computer" };
-  if (versions?.update === "app") Object.assign(here, { note: "Update needed", stale: true });
+  if (versions && appVersion) here.note = appVersion;
+  if (versions?.update === "app") Object.assign(here, { note: here.note ?? "Update needed", stale: true });
   if (versions?.server) there.note = versions.server.appVersion;
   if (versions?.update === "computer") Object.assign(there, { note: there.note ?? "Update needed", stale: true });
   return [here, there];

@@ -147,8 +147,12 @@ jobs:
           node scripts/package-app-server-archive.mjs "$RUNNER_TEMP/linux-app-server/openaide-app-server" "$version" "$RUNNER_TEMP/ssh-archive"
           echo "SSH_APP_SERVER=-PopenaideSshAppServerArchive=$RUNNER_TEMP/ssh-archive/openaide-app-server-linux-x64-$version.tar.gz" >> "$GITHUB_ENV"
       - name: Build the Frontend shipped in the APK
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
           npm ci
+          # The Frontend names its version on the connection page; a release names the release.
+          if [ "$RELEASE" = "true" ]; then node scripts/set-release-artifact-version.mjs "$(node -p 'require("./package.json").version')"; fi
           npm run build:typescript-deps
           npm run build --workspace openaide-frontend
       - name: Stage the signing key
