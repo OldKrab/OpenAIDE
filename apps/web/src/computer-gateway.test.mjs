@@ -231,6 +231,30 @@ test("a connection handed out while the computer is forgotten is not kept", asyn
   assert.equal((await gateway.connect(COMPUTER)).url.port, "4402", "the gateway is asked again");
 });
 
+test("reaching a computer asks the gateway even when an endpoint is kept", async () => {
+  let port = 4500;
+  const spawned = [];
+  const gateway = createComputerGateway({
+    logger: recordingLogger().logger,
+    spawnGateway: () => {
+      const child = fakeProcess(answering({
+        connect: (request, child) => child.send({
+          id: request.id,
+          result: { kind: "localHttp", endpointUrl: `http://127.0.0.1:${++port}/probe`, authToken: "t" },
+        }),
+      }));
+      spawned.push(child);
+      return child;
+    },
+  });
+
+  assert.equal((await gateway.connect(COMPUTER)).url.port, "4501");
+  assert.equal((await gateway.connect(COMPUTER)).url.port, "4501", "requests use the endpoint kept");
+  assert.equal((await gateway.reach(COMPUTER)).url.port, "4502");
+  assert.equal((await gateway.connect(COMPUTER)).url.port, "4502", "the answer is kept for the requests after it");
+  assert.equal(spawned[0].requests.filter((request) => request.method === "connect").length, 2);
+});
+
 test("stopping as the server leaves is logged as expected", async () => {
   let child;
   const { events, logger } = recordingLogger();

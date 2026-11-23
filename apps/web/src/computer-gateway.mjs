@@ -142,6 +142,25 @@ export function createComputerGateway({ spawnGateway, logger, callTimeoutMs = DE
     }
   }
 
+  /**
+   * The endpoint that carries requests to a paired computer, `{url, authToken}`.
+   * The computer is reached before the first endpoint is handed out.
+   */
+  function connect(id) {
+    let connecting = connections.get(id);
+    if (!connecting) {
+      connecting = call("connect", { computer: id }).then((connection) => ({
+        url: new URL(connection.endpointUrl),
+        authToken: connection.authToken,
+      }));
+      connections.set(id, connecting);
+      connecting.catch(() => {
+        if (connections.get(id) === connecting) connections.delete(id);
+      });
+    }
+    return connecting;
+  }
+
   return {
     /** The paired computers, `{id, name}`, in the order they were added. */
     async computers() {
@@ -164,23 +183,15 @@ export function createComputerGateway({ spawnGateway, logger, callTimeoutMs = DE
       return computer;
     },
 
+    connect,
+
     /**
-     * The endpoint that carries requests to a paired computer, `{url, authToken}`.
-     * The computer is reached before the first endpoint is handed out.
+     * Like `connect`, but asks the gateway even when an endpoint is kept: a browser
+     * about to move to the computer must learn whether it answers now (ADR-0070).
      */
-    connect(id) {
-      let connecting = connections.get(id);
-      if (!connecting) {
-        connecting = call("connect", { computer: id }).then((connection) => ({
-          url: new URL(connection.endpointUrl),
-          authToken: connection.authToken,
-        }));
-        connections.set(id, connecting);
-        connecting.catch(() => {
-          if (connections.get(id) === connecting) connections.delete(id);
-        });
-      }
-      return connecting;
+    reach(id) {
+      connections.delete(id);
+      return connect(id);
     },
 
     /** Drops an endpoint that stopped answering, so the next request asks for a new one. */

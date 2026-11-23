@@ -30,6 +30,11 @@ function fakeGateway({ computers = [{ id: DESK, name: "Desk" }], unreachable = n
       if (unreachable.has(id)) throw new ComputerRefusal("unreachable", "That computer is unreachable.");
       return { url: new URL("http://127.0.0.1:1/probe"), authToken: "t" };
     },
+    async reach(id) {
+      calls.push(["reach", id]);
+      if (unreachable.has(id)) throw new ComputerRefusal("unreachable", "That computer is unreachable.");
+      return { url: new URL("http://127.0.0.1:1/probe"), authToken: "t" };
+    },
     release() {},
     async forget(id) {
       calls.push(["forget", id]);
@@ -56,7 +61,7 @@ async function serve(t, computers) {
     : { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 }
 
-test("using a computer reaches it first, then keeps the choice in a cookie", async (t) => {
+test("using a computer reaches it now, then keeps the choice in a cookie", async (t) => {
   const gateway = fakeGateway({ unreachable: new Set([LAPTOP]) });
   const { events, logger } = recordingLogger();
   const request = await serve(t, createWebComputers({ gateway, logger, cookieName: COOKIE }));
@@ -65,7 +70,8 @@ test("using a computer reaches it first, then keeps the choice in a cookie", asy
   assert.equal(used.status, 200);
   const cookie = used.headers.get("set-cookie");
   assert.match(cookie, new RegExp(`^${COOKIE}=${DESK}; Path=/; HttpOnly; SameSite=Strict; Max-Age=\\d+$`));
-  assert.deepEqual(gateway.calls.at(-1), ["connect", DESK]);
+  // A switch asks the gateway itself rather than an endpoint kept from before.
+  assert.deepEqual(gateway.calls.at(-1), ["reach", DESK]);
 
   // A computer that does not answer leaves the browser where it was.
   const refused = await request("use", { computer: LAPTOP });

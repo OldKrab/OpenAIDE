@@ -93,7 +93,7 @@ export function createWebComputers({ gateway, logger, cookieName, pageChoiceWait
             if (computer === null) {
               setCookie = clearedCookie(req, cookieName);
             } else {
-              await gateway.connect(requireComputerId(computer));
+              await gateway.reach(requireComputerId(computer));
               setCookie = chosenCookie(req, cookieName, computer);
             }
             break;

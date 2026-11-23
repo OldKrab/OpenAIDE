@@ -66,6 +66,8 @@ enum Reached {
 
 struct Running {
     gateway: Gateway,
+    /// The gateway's client, asked for its connection before the gateway is handed out again.
+    client: Arc<RemoteClient>,
     /// Set by the gateway when the Computer refuses this connection.
     refused: Arc<OnceLock<Failure>>,
 }
@@ -172,22 +174,38 @@ impl ComputerGateway {
                 "This pairing is damaged. Pair with the computer again.",
             )
         })?;
-        if let Some(current) = slot.running.as_ref() {
-            match current.refused.get().copied() {
-                None => return Ok(connection_of(&current.gateway)),
-                // The refusal is kept; a version mismatch is asked again, so an
-                // update on that side is found.
-                Some(failure) => {
-                    slot.refused = Some(failure);
-                    if let Some(previous) = slot.running.take() {
-                        previous.gateway.stop().await;
-                    }
-                }
-            }
-        }
         let unusable = |failure: Failure| {
             Refusal::new(failure.class(), messages::unusable(failure, &computer.name))
         };
+        if let Some(current) = slot.running.as_ref() {
+            let failure = match current.refused.get().copied() {
+                // A connection that ended since is opened again before the gateway
+                // is handed out, so a browser only moves to a Computer that answers
+                // (ADR-0070).
+                // TODO: a Computer that stopped without closing the connection (a
+                // crash, or its network dropping) still looks connected here until
+                // QUIC's idle timeout ends it, 15 to 30 s with iroh's defaults, so a
+                // switch then moves the page onto it and the page reports it not
+                // responding. One request over the reused connection, such as the
+                // App Server's probe, would find it now; that needs a RemoteClient
+                // round trip the Desktop and Android would share, so agree on it first.
+                None => match current.client.connection().await {
+                    Ok(_) => return Ok(connection_of(&current.gateway)),
+                    Err(failure) => failure,
+                },
+                Some(failure) => failure,
+            };
+            if let Some(previous) = slot.running.take() {
+                previous.gateway.stop().await;
+            }
+            // Opening it again was this connect's attempt.
+            if failure == Failure::Unreachable {
+                return Err(unusable(failure));
+            }
+            // The refusal is kept; a version mismatch is asked again, so an
+            // update on that side is found.
+            slot.refused = Some(failure);
+        }
         // A removed device stays removed until it pairs again, which drops this
         // refusal, so asking that Computer again could only wait to be refused.
         if slot.refused == Some(Failure::NotTrusted) {
@@ -239,8 +257,12 @@ impl ComputerGateway {
             }
         };
         Ok(
-            match Gateway::start(client, self.log.clone(), on_failure).await {
-                Ok(gateway) => Reached::Running(Running { gateway, refused }),
+            match Gateway::start(client.clone(), self.log.clone(), on_failure).await {
+                Ok(gateway) => Reached::Running(Running {
+                    gateway,
+                    client,
+                    refused,
+                }),
                 Err(_) => Reached::NoPort,
             },
         )
