@@ -51,6 +51,10 @@ fn main() {
     if arguments.first().map(String::as_str) == Some("keep") {
         std::process::exit(run_keeper_command(&arguments[1..], &storage_root));
     }
+    // Started by the Web App's server to use other Computers (ADR-0082), not by a person.
+    if arguments.first().map(String::as_str) == Some("gateway") {
+        std::process::exit(run_gateway_command(&arguments[1..]));
+    }
 
     match protocol_mode().as_deref() {
         Ok(APP_SERVER_PROTOCOL_MODE) => {
@@ -151,6 +155,19 @@ fn run_remote_command(arguments: &[String], storage_root: &std::path::Path) -> i
     with_roots(storage_root, |state_root, runtime_root| {
         remote_command::run(arguments, state_root, runtime_root)
     })
+}
+
+/// `gateway --state <folder>`: the folder belongs to the App Shell, not to this App Server.
+fn run_gateway_command(arguments: &[String]) -> i32 {
+    match arguments {
+        [flag, state] if flag == "--state" && !state.is_empty() => {
+            openaide_app_server::computer_gateway::run_stdio(std::path::Path::new(state))
+        }
+        _ => {
+            eprintln!("usage: openaide-app-server gateway --state <folder>");
+            2
+        }
+    }
 }
 
 fn run_keeper_command(arguments: &[String], storage_root: &std::path::Path) -> i32 {

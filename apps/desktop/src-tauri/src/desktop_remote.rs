@@ -295,16 +295,13 @@ pub(crate) async fn desktop_remote_pair(
     operation_id: Option<String>,
 ) -> Result<&'static str, String> {
     let invite = remote::InviteCode::decode(&code).map_err(|error| {
-        let (reason, message) = wrong_code_message(error);
+        let (reason, message) = remote::messages::refused_code(error);
         desktop_log!("desktop_remote_pair_refused reason={reason}");
         message.to_string()
     })?;
     if let Some(in_use) = in_use.filter(|in_use| invite.is_from(&in_use.key)) {
         desktop_log!("desktop_remote_pair_refused reason=own_code");
-        let name = in_use.name;
-        return Err(format!(
-            "This is {name}'s own code. Enter it on the device that should use {name}."
-        ));
+        return Err(remote::messages::own_code(&in_use.name));
     }
     let endpoint = remote_state.endpoint().await?;
     let paired = remote::redeem(
@@ -315,13 +312,7 @@ pub(crate) async fn desktop_remote_pair(
         &logger(),
     )
     .await
-    .map_err(|failure| match failure {
-        remote::Failure::NotTrusted => {
-            "This code was already used or has expired. Make a new one on the other computer."
-                .to_string()
-        }
-        other => message(other, "The other computer"),
-    })?;
+    .map_err(remote::messages::pairing_failed)?;
     let id = paired.id.to_string();
     {
         let mut preferences = state
@@ -341,21 +332,6 @@ pub(crate) async fn desktop_remote_pair(
     }
     desktop_log!("desktop_remote_computer_paired");
     outcome_name(switch(&app, Some(id), &operation_id_or_new(operation_id)).await)
-}
-
-/// What the user is told about text that is not a usable code, and the reason
-/// logged for it. The wording follows ADR-0081 and matches the other App Shells.
-fn wrong_code_message(error: remote::PairingCodeError) -> (&'static str, &'static str) {
-    match error {
-        remote::PairingCodeError::FromOlderOpenAide => (
-            "from_older_openaide",
-            "This code comes from an older OpenAIDE. Update OpenAIDE on that device, then make a code on the computer it should use: Settings › Remote › Add a device.",
-        ),
-        remote::PairingCodeError::Malformed => {
-            ("malformed", "The code is incomplete. Copy it again.")
-        }
-        remote::PairingCodeError::NotAPairingCode => ("not_a_code", "This isn't an OpenAIDE code."),
-    }
 }
 
 /// Switches the window to a paired computer, or to this computer when `id` is
@@ -461,17 +437,7 @@ fn report_failure(app: &tauri::AppHandle, name: &str, failure: remote::Failure) 
 }
 
 fn message(failure: remote::Failure, name: &str) -> String {
-    match failure {
-        remote::Failure::Unreachable => format!(
-            "{name} is unreachable. Make sure OpenAIDE is open on it and both computers are online."
-        ),
-        remote::Failure::NotTrusted => {
-            format!("This computer was removed from {name}. Pair with it again in Settings.")
-        }
-        remote::Failure::Incompatible => format!(
-            "OpenAIDE on this computer and on {name} are different versions. Update both, then try again."
-        ),
-    }
+    remote::messages::unusable(failure, name)
 }
 
 /// Prints the client's metadata-only events in this shell's log format.

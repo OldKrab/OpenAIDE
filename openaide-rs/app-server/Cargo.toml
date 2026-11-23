@@ -17,6 +17,8 @@ agent-client-protocol.workspace = true
 base64.workspace = true
 openaide-app-server-protocol.workspace = true
 openaide-remote-core.workspace = true
+# The client side, for the gateway the Web App runs (ADR-0082).
+openaide-remote-client = { workspace = true, features = ["pairing"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -57,8 +59,6 @@ tauri-winres = "=0.3.7"
 [dev-dependencies]
 # A relay run in the test, for the edge's relay check.
 iroh = { workspace = true, features = ["test-utils"] }
-# The Rust client of Remote Devices is proven against the real edge.
-openaide-remote-client = { path = "../remote-client" }
 # Tests bind on in-memory addresses or on a relay they run.
 openaide-remote-core = { workspace = true, features = ["test-network"] }
 # Paused time lets deadline contracts run on a controlled clock.
