@@ -40,16 +40,30 @@ pub struct ComputerGateway {
     /// uses another Computer never contacts the public relays (ADR-0062).
     endpoint: tokio::sync::OnceCell<Endpoint>,
     name: String,
-    running: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Option<Running>>>>>,
+    slots: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Slot>>>>,
     events: mpsc::UnboundedSender<Event>,
     log: Logger,
 }
 
+/// One per Computer some browser reached; pairing again or forgetting drops it.
+#[derive(Default)]
+struct Slot {
+    running: Option<Running>,
+    /// Why the Computer last refused this device for good. It stands until the
+    /// Computer is reached again: an App Server that removed its last device stops
+    /// listening, so later attempts would only find it unreachable.
+    refused: Option<Failure>,
+}
+
+enum Reached {
+    Running(Running),
+    /// The Computer answered, but no loopback port could be opened for it.
+    NoPort,
+}
+
 struct Running {
     gateway: Gateway,
-    /// Why the Computer refused this device for good. Only this connection knows:
-    /// an App Server that removed its last device stops listening, so a new attempt
-    /// would only find it unreachable.
+    /// Set by the gateway when the Computer refuses this connection.
     refused: Arc<OnceLock<Failure>>,
 }
 
@@ -87,7 +101,7 @@ impl ComputerGateway {
             key,
             endpoint,
             name,
-            running: Mutex::new(HashMap::new()),
+            slots: Mutex::new(HashMap::new()),
             events,
             log,
         };
@@ -128,7 +142,7 @@ impl ComputerGateway {
         self.folder
             .remember(computer.clone())
             .map_err(storage_refusal)?;
-        // A connection kept from before a removal would refuse the new trust.
+        // A connection or a refusal kept from before a removal belongs to the old trust.
         self.stop(&computer.id).await;
         Ok(computer)
     }
@@ -147,27 +161,54 @@ impl ComputerGateway {
                 "This pairing is damaged. Pair with the computer again.",
             )
         })?;
-        let unusable = |failure: Failure| {
-            Refusal::new(failure.class(), messages::unusable(failure, &computer.name))
-        };
         let slot = self.slot(id);
-        let mut running = slot.lock().await;
-        if let Some(current) = running.as_ref() {
+        let mut slot = slot.lock().await;
+        if let Some(current) = slot.running.as_ref() {
             match current.refused.get().copied() {
                 None => return Ok(connection_of(&current.gateway)),
-                // Said once, with the way back; the next attempt starts over, so an
-                // update or a new pairing on that side is found.
+                // This attempt starts over, so an update on that side is found.
                 Some(failure) => {
-                    if let Some(previous) = running.take() {
+                    slot.refused = Some(failure);
+                    if let Some(previous) = slot.running.take() {
                         previous.gateway.stop().await;
                     }
-                    return Err(unusable(failure));
                 }
             }
         }
-        let endpoint = self.endpoint().await.map_err(unusable)?;
+        let failure = match self.reach(id, server).await {
+            Ok(Reached::Running(running)) => {
+                let connection = connection_of(&running.gateway);
+                slot.running = Some(running);
+                slot.refused = None;
+                return Ok(connection);
+            }
+            Ok(Reached::NoPort) => {
+                return Err(Refusal::new(
+                    "gateway_failed",
+                    "OpenAIDE could not open a local port for the other computer. Try again.",
+                ));
+            }
+            Err(failure) => failure,
+        };
+        // While a refusal stands, not finding the Computer is still that refusal.
+        let failure = match (failure, slot.refused) {
+            (Failure::Unreachable, Some(earlier)) => earlier,
+            _ => failure,
+        };
+        if failure != Failure::Unreachable {
+            slot.refused = Some(failure);
+        }
+        Err(Refusal::new(
+            failure.class(),
+            messages::unusable(failure, &computer.name),
+        ))
+    }
+
+    /// Reaches the Computer `server`, then starts the loopback gateway to it.
+    async fn reach(&self, id: &str, server: PublicKey) -> Result<Reached, Failure> {
+        let endpoint = self.endpoint().await?;
         let client = Arc::new(RemoteClient::new(endpoint, server, self.log.clone()));
-        client.connection().await.map_err(unusable)?;
+        client.connection().await?;
         let refused = Arc::new(OnceLock::new());
         let on_failure = {
             let refused = refused.clone();
@@ -182,17 +223,12 @@ impl ComputerGateway {
                 }
             }
         };
-        let gateway = Gateway::start(client, self.log.clone(), on_failure)
-            .await
-            .map_err(|_| {
-                Refusal::new(
-                    "gateway_failed",
-                    "OpenAIDE could not open a local port for the other computer. Try again.",
-                )
-            })?;
-        let connection = connection_of(&gateway);
-        *running = Some(Running { gateway, refused });
-        Ok(connection)
+        Ok(
+            match Gateway::start(client, self.log.clone(), on_failure).await {
+                Ok(gateway) => Reached::Running(Running { gateway, refused }),
+                Err(_) => Reached::NoPort,
+            },
+        )
     }
 
     /// Stops using `id` and removes it. Forgetting a Computer that is not paired succeeds.
@@ -204,18 +240,19 @@ impl ComputerGateway {
 
     /// Stops every gateway, as the App Shell leaves.
     pub async fn stop_all(&self) {
-        let slots: Vec<_> = self.lock_running().drain().map(|(_, slot)| slot).collect();
+        let slots: Vec<_> = self.lock_slots().drain().map(|(_, slot)| slot).collect();
         for slot in slots {
-            if let Some(running) = slot.lock().await.take() {
+            if let Some(running) = slot.lock().await.running.take() {
                 running.gateway.stop().await;
             }
         }
     }
 
+    /// Stops the gateway to `id` and drops what was learned about it.
     async fn stop(&self, id: &str) {
-        let slot = self.lock_running().remove(id);
+        let slot = self.lock_slots().remove(id);
         if let Some(slot) = slot {
-            if let Some(running) = slot.lock().await.take() {
+            if let Some(running) = slot.lock().await.running.take() {
                 running.gateway.stop().await;
             }
         }
@@ -232,17 +269,14 @@ impl ComputerGateway {
     }
 
     /// One slot per Computer, so connecting to one never waits for another.
-    fn slot(&self, id: &str) -> Arc<tokio::sync::Mutex<Option<Running>>> {
-        self.lock_running()
-            .entry(id.to_string())
-            .or_default()
-            .clone()
+    fn slot(&self, id: &str) -> Arc<tokio::sync::Mutex<Slot>> {
+        self.lock_slots().entry(id.to_string()).or_default().clone()
     }
 
-    fn lock_running(
+    fn lock_slots(
         &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<String, Arc<tokio::sync::Mutex<Option<Running>>>>> {
-        self.running
+    ) -> std::sync::MutexGuard<'_, HashMap<String, Arc<tokio::sync::Mutex<Slot>>>> {
+        self.slots
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }

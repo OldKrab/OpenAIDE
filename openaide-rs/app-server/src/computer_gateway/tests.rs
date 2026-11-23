@@ -212,7 +212,7 @@ fn text_that_is_not_a_usable_code_is_refused_without_the_network() {
 }
 
 #[test]
-fn a_removed_web_app_is_reported_once_and_cannot_connect_again() {
+fn a_removed_web_app_keeps_being_told_why() {
     let computer = remote_computer();
     let folder = tempfile::tempdir().unwrap();
     let (gateway, mut events) = computer.web_app(folder.path());
@@ -236,16 +236,32 @@ fn a_removed_web_app_is_reported_once_and_cannot_connect_again() {
     let refused = computer.run(gateway.connect(&paired.id)).unwrap_err();
     assert_eq!(refused.reason, "not_trusted");
     assert!(refused.message.contains("removed"));
-    // Told once per connection, not per refused request.
+    // The event comes once per connection, not per refused request.
     assert!(events.try_recv().is_err());
     // A later attempt starts over. That App Server removed its last device and no
-    // longer listens, so it is now unreachable.
+    // longer listens, which is still the removal, not an unreachable computer.
     assert_eq!(
         computer
             .run(gateway.connect(&paired.id))
             .unwrap_err()
             .reason,
-        "unreachable"
+        "not_trusted"
+    );
+
+    // That App Server forgot its identity with its last device, so pairing again
+    // makes a new Computer; the old one stays refused until the user forgets it.
+    let again = computer.run(gateway.pair(&computer.code(), None)).unwrap();
+    assert_ne!(again.id, paired.id);
+    let reconnected = computer.run(gateway.connect(&again.id)).unwrap();
+    assert!(computer
+        .run(through(&reconnected.endpoint_url, &reconnected.auth_token))
+        .starts_with("HTTP/1.1 200 OK"));
+    assert_eq!(
+        computer
+            .run(gateway.connect(&paired.id))
+            .unwrap_err()
+            .reason,
+        "not_trusted"
     );
 }
 
