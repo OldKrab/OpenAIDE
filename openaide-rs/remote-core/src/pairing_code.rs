@@ -63,6 +63,16 @@ impl InviteCode {
     pub fn secret_text(&self) -> String {
         BASE32_NOPAD.encode(&self.secret)
     }
+
+    /// Whether this code was made by the App Server whose key is `server_key`, in
+    /// the text form the devices snapshot carries. A device compares it with the
+    /// Computer it uses to tell the user they entered that Computer's own code
+    /// (ADR-0081). Text that is not a key matches nothing.
+    pub fn is_from(&self, server_key: &str) -> bool {
+        server_key
+            .parse::<PublicKey>()
+            .is_ok_and(|key| key == self.server)
+    }
 }
 
 /// Trims a self-reported label to what one row can show. The cut falls on a

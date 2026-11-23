@@ -27,6 +27,9 @@ internal object PairingCode {
         /** The secret as the App Server expects it in the pairing request. */
         val secretText: String get() = encodeBase32(secret)
         val serverId: String get() = server.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+        /** Whether the App Server with the paired id [serverId] made this code, as `InviteCode::is_from` in the crate. */
+        fun isFrom(serverId: String): Boolean = serverId.equals(this.serverId, ignoreCase = true)
     }
 
     fun parseInvite(text: String): Invite {

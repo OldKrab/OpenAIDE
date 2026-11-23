@@ -35,11 +35,12 @@ type Row = { id: string; label: string; current: boolean };
  * Switches the computer in use in place (ADR-0070). It appears only once
  * another computer exists, so a user who never pairs sees nothing new. The
  * trigger names the other computer in use, with the dot alone saying the link
- * is healthy; this device needs only the icon.
+ * is healthy; this device needs only the icon. The last item, "Use another
+ * computer", asks for a code (ADR-0081).
  */
-export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, switcher }: {
+export function ComputerSwitcher({ link, onUseAnotherComputer, openRequest = 0, snapshot, switcher }: {
   link: ComputerLink;
-  onManage: () => void;
+  onUseAnotherComputer: () => void;
   /** Increments when a shell command asks to open the list. */
   openRequest?: number;
   snapshot: ComputersSnapshot | undefined;
@@ -131,12 +132,12 @@ export function ComputerSwitcher({ link, onManage, openRequest = 0, snapshot, sw
           className="computer-switcher-manage"
           onClick={() => {
             setOpen(false);
-            onManage();
+            onUseAnotherComputer();
           }}
           role="menuitem"
           type="button"
         >
-          Pair or manage computers…
+          Use another computer…
         </button>
       </div>
     </PopupMenu>

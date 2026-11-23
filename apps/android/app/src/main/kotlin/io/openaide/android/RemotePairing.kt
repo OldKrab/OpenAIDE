@@ -20,11 +20,15 @@ internal object RemotePairing {
     fun interface Checked { fun done(ok: Boolean, message: String) }
 
     private val main = Handler(Looper.getMainLooper())
+    private val diagnostics = AndroidDiagnostics()
 
-    /** Pairs with the computer whose invite the user scanned or pasted, and selects it. */
+    /**
+     * Pairs with the computer whose invite the user scanned or pasted, and selects it.
+     * A code is checked before it is spent (ADR-0081), and a refusal says what to do.
+     */
     @JvmStatic fun redeem(context: Context, code: String, callback: Paired) {
         val invite = try { PairingCode.parseInvite(code) } catch (error: PairingCode.Invalid) {
-            callback.done(null, when (error.problem) {
+            refuse(error.problem.name.lowercase(), callback, when (error.problem) {
                 PairingCode.Problem.FROM_OLDER_OPENAIDE -> "This code comes from an older OpenAIDE. Update OpenAIDE on that device, then make a code on the computer it should use: Settings › Remote › Add a device."
                 PairingCode.Problem.MALFORMED -> "The code is incomplete. Scan or paste it again."
                 PairingCode.Problem.NOT_A_PAIRING_CODE -> "This isn’t an OpenAIDE code."
@@ -32,6 +36,15 @@ internal object RemotePairing {
             return
         }
         val application = context.applicationContext
+        // The code of the computer in use was made for another device; spending it here
+        // would only pair this phone with that computer again.
+        val store = ConnectionStore(application)
+        val inUse = store.pairedServer()?.takeIf { store.usesPaired() && invite.isFrom(it.id) }
+        if (inUse != null) {
+            val name = inUse.name.ifBlank { "your computer" }
+            refuse("own_code", callback, "This is $name’s own code. Enter it on the device that should use $name.")
+            return
+        }
         RemoteNode.scope.launch {
             try {
                 val server = RemoteNode.redeem(application, invite, deviceName(application), deviceModel())
@@ -154,6 +167,12 @@ internal object RemotePairing {
 
                 override fun replacePage() = replacePage.run()
             })
+    }
+
+    /** Answers a code that is not spent, and records which check refused it. */
+    private fun refuse(reason: String, callback: Paired, message: String) {
+        diagnostics.record("remote_pairing_code_refused", "failed", 0, 0, mapOf("reason" to reason))
+        callback.done(null, message)
     }
 
     /** A failure in words, naming the computer when it is known ("your computer" otherwise). */

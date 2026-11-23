@@ -23,6 +23,14 @@ class PairingCodeTest {
         assertEquals(PairingCode.encodeBase32(secret), invite.secretText)
     }
 
+    @Test fun aCodeIsRecognizedByTheIdOfTheComputerThatMadeIt() {
+        val invite = PairingCode.parseInvite("OAI1" + PairingCode.encodeBase32(ByteArray(32) { 0xab.toByte() } + ByteArray(16)))
+        assert(invite.isFrom("ab".repeat(32)))
+        assert(invite.isFrom("AB".repeat(32)))
+        assert(!invite.isFrom("cd".repeat(32)))
+        assert(!invite.isFrom(""))
+    }
+
     @Test fun namesWhatIsWrongWithACode() {
         fun problem(code: String) = assertThrows(PairingCode.Invalid::class.java) { PairingCode.parseInvite(code) }.problem
         assertEquals(PairingCode.Problem.FROM_OLDER_OPENAIDE, problem(oldJoinCode))

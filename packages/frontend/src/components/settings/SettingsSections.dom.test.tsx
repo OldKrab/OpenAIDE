@@ -276,7 +276,7 @@ it("names the computer whose devices are listed and removes one after confirmati
   const intents = deviceIntents();
   await mountSettings({ deviceIntents: intents, state: remoteState({ remoteAccess: "on", serverName: "workstation", devices: [phone] }) });
 
-  expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent)).toContain("Devices paired with workstation");
+  expect([...document.querySelectorAll("h2")].map((heading) => heading.textContent)).toContain("Devices using workstation");
   expect(row("Phone").textContent).toContain("Example 9");
 
   await click("Remove Phone");
@@ -287,20 +287,24 @@ it("names the computer whose devices are listed and removes one after confirmati
   expect(intents.remove).toHaveBeenCalledWith("device_1");
 });
 
-it("shows a single-use pairing code, reports the device that used it, and withdraws the code on close", async () => {
+it("adds a device with a single-use code, says where it goes, and withdraws the code on close", async () => {
   const intents = deviceIntents();
   const snapshot: DeviceCollectionSnapshot = { remoteAccess: "on", serverName: "workstation" };
   await mountSettings({ deviceIntents: intents, state: remoteState(snapshot) });
 
-  await click("Show code");
+  await click("Add a device");
   await settle();
 
   expect(intents.createInvite).toHaveBeenCalledOnce();
+  const adding = dialog("Add a device to workstation");
+  expect(adding?.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("a new device uses workstation");
   expect(document.querySelector('[aria-label="Pairing code as a QR code"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Pairing code text"]')?.textContent).toBe("OAI1 ABCD EFGH");
+  expect(adding?.querySelector(".settings-pairing-path")?.getAttribute("aria-label"))
+    .toBe("On the other device: Settings, then Remote, then Use another computer, or the first screen of a new phone.");
 
   await mountSettings({ deviceIntents: intents, state: remoteState({ ...snapshot, devices: [phone] }) });
-  expect(dialog("Pairing code")?.textContent).toContain("Phone can now use this OpenAIDE.");
+  expect(dialog("Add a device to workstation")?.textContent).toContain("Phone can use workstation");
 
   await click("Done");
   expect(intents.cancelInvite).toHaveBeenCalled();
@@ -364,21 +368,29 @@ it("forgets a paired computer only after saying what happens", async () => {
   expect(computers.forget).toHaveBeenCalledWith(studio.id);
 });
 
-it("pairs with a pasted code and shows the shell's reason when it is refused", async () => {
-  const computers = desktopComputers([]);
-  computers.pair.mockRejectedValue("This code has expired or was already used.");
+it("ends the computers with Use another computer, which spends a pasted code and shows the shell's refusal", async () => {
+  const computers = desktopComputers([studio]);
+  computers.pair.mockRejectedValue("This is workstation's own code. Enter it on the device that should use workstation.");
   useShell({ computers });
-  await mountSettings({ state: { activeTab: "remote", loading: false } });
+  const serverKey = "c".repeat(64);
+  await mountSettings({ state: remoteState({ remoteAccess: "on", serverName: "workstation", serverKey }) });
   await settle();
 
-  await click("Pair a computer");
-  expect((button("Pair") as HTMLButtonElement).disabled).toBe(true);
-  await type("Pairing code", "OAI1 ABCD");
-  await click("Pair");
+  const computerRows = [...document.querySelector('[aria-label="Open Use another computer"]')!.closest("ul")!.children];
+  expect(computerRows.at(-1)?.textContent).toContain("Use another computer");
+  await click("Open Use another computer");
+  const entering = dialog("Use another computer");
+  expect(entering?.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("This computer uses a computer");
+  expect(entering?.querySelector(".settings-pairing-path")?.getAttribute("aria-label"))
+    .toBe("Get the code on the computer: Settings, then Remote, then Add a device");
+  expect((button("Connect") as HTMLButtonElement).disabled).toBe(true);
+  await type("Code from the computer", "OAI1 ABCD");
+  await click("Connect");
   await settle();
 
-  expect(computers.pair).toHaveBeenCalledWith("OAI1 ABCD");
-  expect(dialog("Pair with another computer")?.textContent).toContain("already used");
+  // The shell is told which computer is in use, so it can refuse that computer's own code.
+  expect(computers.pair).toHaveBeenCalledWith("OAI1 ABCD", { key: serverKey, name: "workstation" });
+  expect(dialog("Use another computer")?.textContent).toContain("workstation's own code");
 });
 
 const devbox = { id: "b".repeat(64), name: "devbox", current: true, ssh: "me@devbox" };

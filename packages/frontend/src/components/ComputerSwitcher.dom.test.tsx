@@ -36,7 +36,7 @@ describe("ComputerSwitcher", () => {
     {
       link = "connected" as ComputerLink,
       onUse = vi.fn(async (_id?: string, _operationId?: string): Promise<ComputerSwitchResult> => "switched"),
-      onManage = vi.fn(),
+      onUseAnotherComputer = vi.fn(),
       openRequest = 0,
       cancel = undefined as (() => Promise<void>) | undefined,
     } = {},
@@ -50,11 +50,11 @@ describe("ComputerSwitcher", () => {
     });
     act(() => root.render(
       <>
-        <ComputerSwitcher link={link} onManage={onManage} openRequest={openRequest} snapshot={snapshot} switcher={switcher} />
+        <ComputerSwitcher link={link} onUseAnotherComputer={onUseAnotherComputer} openRequest={openRequest} snapshot={snapshot} switcher={switcher} />
         <ComputerSwitchConfirm snapshot={snapshot} switcher={switcher} />
       </>,
     ));
-    return { onUse, onManage };
+    return { onUse, onUseAnotherComputer };
   }
 
   const trigger = () => container.querySelector<HTMLButtonElement>("button.computer-switcher-trigger");
@@ -95,14 +95,14 @@ describe("ComputerSwitcher", () => {
       ["1This phone", "false"],
       ["2Studio", "true"],
       ["3Remote computer", "false"],
-      ["Pair or manage computers…", null],
+      ["Use another computer…", null],
     ]);
   });
 
   it("leaves out a phone not set up for its own workspace, unless it is in use", () => {
     render({ device: "phone", computers: [{ ...studio, current: true }, laptop], thisDeviceReady: false });
     open();
-    expect(menuItems().map((item) => item.textContent)).toEqual(["1Studio", "2Remote computer", "Pair or manage computers…"]);
+    expect(menuItems().map((item) => item.textContent)).toEqual(["1Studio", "2Remote computer", "Use another computer…"]);
     act(() => root.unmount());
     root = createRoot(container);
     render({ device: "phone", computers: [studio], thisDeviceReady: false });
@@ -122,7 +122,7 @@ describe("ComputerSwitcher", () => {
     expect(trigger()!.getAttribute("aria-busy")).toBe("true");
     open();
     expect(menuItems()[1].textContent).toContain("Connecting…");
-    expect(menuItems().every((item) => item.getAttribute("aria-disabled") === "true" || item.textContent === "Pair or manage computers…")).toBe(true);
+    expect(menuItems().every((item) => item.getAttribute("aria-disabled") === "true" || item.textContent === "Use another computer…")).toBe(true);
     await act(async () => accept("unchanged"));
   });
 
@@ -167,11 +167,11 @@ describe("ComputerSwitcher", () => {
     expect(onUse).not.toHaveBeenCalled();
   });
 
-  it("leads to Settings to pair or manage", () => {
-    const { onManage } = render({ device: "computer", computers: [studio] });
+  it("ends with Use another computer", () => {
+    const { onUseAnotherComputer } = render({ device: "computer", computers: [studio] });
     open();
     act(() => menuItems().at(-1)!.click());
-    expect(onManage).toHaveBeenCalledOnce();
+    expect(onUseAnotherComputer).toHaveBeenCalledOnce();
     expect(isOpen()).toBe(false);
   });
 

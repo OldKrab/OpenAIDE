@@ -78,10 +78,10 @@ describe("Desktop computers", () => {
     const reload = vi.fn(async () => undefined);
     const computers = createDesktopComputers(invoke as never, reload);
     await computers.forget(studio.id);
-    await computers.pair!("OAI1 CODE");
+    await computers.pair!("OAI1 CODE", { key: "a".repeat(64), name: "workstation" });
     expect(invoke.mock.calls.filter(([command]) => command !== "desktop_remote_snapshot")).toEqual([
       ["desktop_remote_forget", { id: studio.id, operationId: null }],
-      ["desktop_remote_pair", { code: "OAI1 CODE", operationId: null }],
+      ["desktop_remote_pair", { code: "OAI1 CODE", inUse: { key: "a".repeat(64), name: "workstation" }, operationId: null }],
     ]);
     expect(reload).toHaveBeenCalledOnce();
     expect(invoke.mock.calls.filter(([command]) => command === "desktop_remote_snapshot")).toHaveLength(2);

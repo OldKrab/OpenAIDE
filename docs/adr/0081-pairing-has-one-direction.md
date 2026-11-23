@@ -15,7 +15,7 @@ Status: accepted; replaces the join request of ADR-0062
   - the code dialog says: on the other device, Settings › Remote › Use another computer, or the first screen if the device is new;
   - the entry dialog says: get the code on the computer, Settings › Remote › Add a device.
 - **A wrong code says what to do.** The device that reads a code checks it before spending it:
-  - The code of the Computer this device runs itself: "This is <name>'s own code. Enter it on the device that should use <name>."
+  - The code of the Computer this device is using: "This is <name>'s own code. Enter it on the device that should use <name>."
   - A join-request code from an older OpenAIDE: update OpenAIDE on that device, then make a code on the computer it should use.
   - An invite that was used, was cancelled, or has expired: make a new code on the computer.
   - Anything else: "This isn't an OpenAIDE code."
@@ -39,4 +39,4 @@ Status: accepted; replaces the join request of ADR-0062
 
 - Every Remote Device must update together with the computers it uses. A device with the older protocol major is refused with the usual message to update.
 - The Mobile App loses "Show my code". The `remote pair` command keeps printing an invite, and its text now names the other side's action.
-- To recognize its own code, a device needs the public key of the App Server it runs. The App Server Protocol does not carry that key today. The change that implements the messages adds it.
+- To recognize the code of the Computer in use, a device needs that App Server's public key. The App Server Protocol carries it in the devices snapshot from version 4.0.
