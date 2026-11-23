@@ -16,6 +16,7 @@ LegalCopyright = "Copyright OpenAIDE contributors"
 agent-client-protocol.workspace = true
 base64.workspace = true
 openaide-app-server-protocol.workspace = true
+openaide-remote-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -33,7 +34,6 @@ nucleo-matcher.workspace = true
 tempfile.workspace = true
 zstd.workspace = true
 iroh.workspace = true
-data-encoding.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ctrlc = "3.4"
@@ -59,5 +59,7 @@ tauri-winres = "=0.3.7"
 iroh = { workspace = true, features = ["test-utils"] }
 # The Rust client of Remote Devices is proven against the real edge.
 openaide-remote-client = { path = "../remote-client" }
+# Tests bind on in-memory addresses or on a relay they run.
+openaide-remote-core = { workspace = true, features = ["test-network"] }
 # Paused time lets deadline contracts run on a controlled clock.
 tokio = { workspace = true, features = ["test-util"] }

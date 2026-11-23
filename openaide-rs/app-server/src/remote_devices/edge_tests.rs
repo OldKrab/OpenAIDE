@@ -5,9 +5,9 @@ use iroh::address_lookup::MemoryLookup;
 use openaide_app_server_protocol::devices::RemoteAccessState;
 
 use super::*;
-use crate::remote_devices::pairing_code::{InviteCode, JoinCode};
 use crate::remote_devices::RemoteDevicesWorkflow;
 use crate::test_sync::{wait_for, wait_until, WATCHDOG};
+use openaide_remote_core::{InviteCode, JoinCode, INVITE_SECRET_LEN};
 
 const LOCAL_TOKEN: &str = "local-token";
 
@@ -46,7 +46,7 @@ fn fixture() -> Fixture {
             address,
             auth_token: LOCAL_TOKEN.to_string(),
         },
-        EdgeNetwork::Local(lookup.clone()),
+        Network::Local(lookup.clone()),
     );
     Fixture {
         _root: root,
@@ -68,16 +68,16 @@ impl Fixture {
     }
 
     fn device_endpoint(&self, seed: u8, alpns: Vec<Vec<u8>>) -> Endpoint {
-        let lookup = self.lookup.clone();
+        let network = Network::Local(self.lookup.clone());
         self.run(async move {
-            let endpoint = Endpoint::builder(presets::Minimal)
+            let endpoint = network
+                .builder()
                 .secret_key(SecretKey::from_bytes(&[seed; 32]))
                 .alpns(alpns)
-                .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
-            lookup.add_endpoint_info(endpoint.addr());
+            network.on_bound(&endpoint);
             endpoint
         })
     }
@@ -91,11 +91,20 @@ impl Fixture {
     }
 }
 
-async fn redeem(endpoint: &Endpoint, invite: &InviteCode, secret: &[u8]) -> PairingResult {
+/// Presents `secret` to the App Server that `invite` names, as a device spending it would.
+async fn redeem(
+    endpoint: &Endpoint,
+    invite: &InviteCode,
+    secret: &[u8; INVITE_SECRET_LEN],
+) -> PairingResult {
     let connection = endpoint.connect(invite.server, PAIRING_ALPN).await.unwrap();
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
     let request = InviteRequest {
-        secret: data_encoding::BASE32_NOPAD.encode(secret),
+        secret: InviteCode {
+            server: invite.server,
+            secret: *secret,
+        }
+        .secret_text(),
         name: "Phone".to_string(),
         model: Some("Model X".to_string()),
     };

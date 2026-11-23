@@ -19,11 +19,12 @@ mod bridge;
 pub mod edge;
 mod host_name;
 mod network_watch;
-mod pairing_code;
 mod relay_check;
 mod store;
 
-use pairing_code::{clamp_label, InviteCode, JoinCode, PairingCodeError, INVITE_SECRET_LEN};
+use openaide_remote_core::{
+    clamp_label, InviteCode, JoinCode, PairingCodeError, INVITE_SECRET_LEN,
+};
 use store::{RemoteDeviceStore, StoredRemoteDevice, StoredRemoteDevices};
 
 /// An invite is refreshed by the client that shows it; this bounds one left open.
@@ -598,10 +599,18 @@ fn remote_access_unavailable() -> ProtocolError {
     }
 }
 
+/// Words a code error for a client reading a join request, the only code a client gives here.
 fn pairing_code_error(error: PairingCodeError) -> ProtocolError {
+    let message = match error {
+        PairingCodeError::NotAPairingCode => "this is not an OpenAIDE pairing code",
+        PairingCodeError::WrongKind => {
+            "this code adds a device to a computer; open it on the new device"
+        }
+        PairingCodeError::Malformed => "the pairing code is damaged; read it again",
+    };
     ProtocolError {
         code: ProtocolErrorCode::ValidationFailed,
-        message: error.to_string(),
+        message: message.to_string(),
         recoverable: true,
         target: None,
     }

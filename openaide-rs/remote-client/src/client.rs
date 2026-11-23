@@ -4,26 +4,20 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use iroh::endpoint::{
-    presets, ConnectError, ConnectWithOptsError, Connection, ConnectionError, QuicTransportConfig,
+    ConnectError, ConnectWithOptsError, Connection, ConnectionError, QuicTransportConfig,
     RecvStream, SendStream,
 };
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher};
-use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
-use serde::{Deserialize, Serialize};
+use openaide_remote_core::{
+    application_alpn, clamp_label, close, InviteCode, InviteRequest, Network, PairingResult,
+    PAIRING_ALPN, PAIRING_MESSAGE_LIMIT,
+};
 
-use crate::pairing_code::{clamp_label, InviteCode};
-
-const PAIRING_ALPN: &[u8] = b"openaide/pair/1";
-const PAIRING_MESSAGE_LIMIT: usize = 4096;
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(20);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// The App Server completes the handshake before it checks the key, so a removed
 /// device learns it from the close that follows.
 const REFUSAL_WAIT: Duration = Duration::from_millis(400);
-/// Close codes the App Server's edge uses.
-const CLOSE_UNTRUSTED: u32 = 1;
-const CLOSE_REMOVED: u32 = 2;
-const CLOSE_UNKNOWN_PROTOCOL: u32 = 3;
 
 pub use crate::Logger;
 
@@ -55,29 +49,6 @@ pub struct PairedServer {
     pub name: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InviteRequest<'a> {
-    secret: String,
-    name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PairingResult {
-    trusted: bool,
-    #[serde(default)]
-    server_name: Option<String>,
-}
-
-/// The major version is part of the name, so an incompatible App Server fails
-/// the handshake instead of a request.
-pub fn application_alpn() -> Vec<u8> {
-    format!("openaide/app-server/{}", APP_SERVER_PROTOCOL_VERSION.major).into_bytes()
-}
-
 pub fn new_device_key() -> SecretKey {
     SecretKey::generate()
 }
@@ -101,7 +72,8 @@ pub fn device_key_from_text(text: &str) -> Option<SecretKey> {
 /// Logs each time the endpoint gains or loses its home relay, for as long as it
 /// lives: without a relay a remote App Server can be reached only directly.
 pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
-    let endpoint = Endpoint::builder(presets::N0)
+    let endpoint = Network::Public
+        .builder()
         .secret_key(key)
         // Phones on mobile data lose the direct path as soon as a bulk send starts while
         // segmentation offload is on, and fall back to the relay (iroh issue #4647).
@@ -163,8 +135,8 @@ pub async fn redeem(
             let (mut send, mut recv) = connection.open_bi().await.ok()?;
             let request = InviteRequest {
                 secret: invite.secret_text(),
-                name: &name,
-                model: model.as_deref(),
+                name: name.clone(),
+                model: model.clone(),
             };
             send.write_all(&serde_json::to_vec(&request).ok()?)
                 .await
@@ -350,8 +322,8 @@ fn failure_of(reason: &ConnectionError) -> Failure {
         return Failure::Unreachable;
     };
     match u32::try_from(close.error_code.into_inner()) {
-        Ok(CLOSE_UNTRUSTED | CLOSE_REMOVED) => Failure::NotTrusted,
-        Ok(CLOSE_UNKNOWN_PROTOCOL) => Failure::Incompatible,
+        Ok(close::UNTRUSTED | close::REMOVED) => Failure::NotTrusted,
+        Ok(close::UNKNOWN_PROTOCOL) => Failure::Incompatible,
         _ => Failure::Unreachable,
     }
 }

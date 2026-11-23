@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use iroh::endpoint::{presets, Connection};
 use iroh::tls::CaTlsConfig;
 use iroh::{Endpoint, EndpointAddr, RelayMode, Watcher};
+use openaide_remote_core::Network;
 
 use crate::logging;
 
@@ -100,8 +101,12 @@ pub(crate) struct RelayCheck {
 }
 
 impl RelayCheck {
-    pub(crate) fn new(relay_mode: RelayMode, ca_tls: Option<CaTlsConfig>) -> Self {
-        Self { relay_mode, ca_tls }
+    /// The check for an edge on [`network`], or `None` where the network has no relay.
+    pub(crate) fn on(network: &Network) -> Option<Self> {
+        Some(Self {
+            relay_mode: network.relay_mode()?,
+            ca_tls: network.relay_tls(),
+        })
     }
 
     /// Dials the edge at [`edge`], its current address, through its home relay alone,
