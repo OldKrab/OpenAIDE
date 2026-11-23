@@ -191,6 +191,8 @@ export function createComputerGateway({ spawnGateway, logger, callTimeoutMs = DE
     async forget(id) {
       connections.delete(id);
       await call("forget", { computer: id });
+      // A connection handed out while the gateway forgot the computer was stopped by it.
+      connections.delete(id);
       computers = undefined;
     },
 

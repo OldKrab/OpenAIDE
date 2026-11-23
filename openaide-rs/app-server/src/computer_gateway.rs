@@ -45,7 +45,9 @@ pub struct ComputerGateway {
     log: Logger,
 }
 
-/// One per Computer some browser reached; pairing again or forgetting drops it.
+/// One per Computer paired or reached here, kept until this process stops, so a
+/// connect waiting for it waits on the slot that pairing again and forgetting
+/// empty.
 #[derive(Default)]
 struct Slot {
     running: Option<Running>,
@@ -140,30 +142,36 @@ impl ComputerGateway {
                 paired.name
             },
         };
-        self.folder
-            .remember(computer.clone())
-            .map_err(storage_refusal)?;
         // A connection or a refusal kept from before a removal belongs to the old trust.
-        self.stop(&computer.id).await;
+        self.reset(&computer.id, || self.folder.remember(computer.clone()))
+            .await?;
         Ok(computer)
     }
 
     /// The local endpoint for `id`, reaching the Computer before it is handed out,
     /// so a browser only moves to a Computer that answers (ADR-0070).
     pub async fn connect(&self, id: &str) -> Result<Connection, Refusal> {
+        let not_paired = || Refusal::new("not_paired", "That computer is no longer paired here.");
+        // Checked before a slot is made, so an id never paired gets none.
+        if self.folder.find(id).map_err(storage_refusal)?.is_none() {
+            return Err(not_paired());
+        }
+        let slot = self.slot(id);
+        let mut slot = slot.lock().await;
+        // Checked again while the slot is held: forgetting holds it while the
+        // Computer leaves the folder, so a Computer forgotten meanwhile is not
+        // reached again.
         let computer = self
             .folder
             .find(id)
             .map_err(storage_refusal)?
-            .ok_or_else(|| Refusal::new("not_paired", "That computer is no longer paired here."))?;
+            .ok_or_else(not_paired)?;
         let server: PublicKey = id.parse().map_err(|_| {
             Refusal::new(
                 "pairing_damaged",
                 "This pairing is damaged. Pair with the computer again.",
             )
         })?;
-        let slot = self.slot(id);
-        let mut slot = slot.lock().await;
         if let Some(current) = slot.running.as_ref() {
             match current.refused.get().copied() {
                 None => return Ok(connection_of(&current.gateway)),
@@ -240,9 +248,12 @@ impl ComputerGateway {
 
     /// Stops using `id` and removes it. Forgetting a Computer that is not paired succeeds.
     pub async fn forget(&self, id: &str) -> Result<(), Refusal> {
-        self.stop(id).await;
-        self.folder.forget(id).map_err(storage_refusal)?;
-        Ok(())
+        // A Computer not paired has no slot to wait for: a connect checks the
+        // folder again under its slot.
+        if self.folder.find(id).map_err(storage_refusal)?.is_none() {
+            return Ok(());
+        }
+        self.reset(id, || self.folder.forget(id).map(|_| ())).await
     }
 
     /// Stops every gateway, as the App Shell leaves.
@@ -255,14 +266,22 @@ impl ComputerGateway {
         }
     }
 
-    /// Stops the gateway to `id` and drops what was learned about it.
-    async fn stop(&self, id: &str) {
-        let slot = self.lock_slots().remove(id);
-        if let Some(slot) = slot {
-            if let Some(running) = slot.lock().await.running.take() {
-                running.gateway.stop().await;
-            }
+    /// Changes the folder for `id` while its slot is held, then stops its gateway
+    /// and drops what was learned about it. A connect under way finishes first and
+    /// is stopped here; a connect waiting for the slot then finds the folder changed.
+    async fn reset(
+        &self,
+        id: &str,
+        change: impl FnOnce() -> std::io::Result<()>,
+    ) -> Result<(), Refusal> {
+        let slot = self.slot(id);
+        let mut slot = slot.lock().await;
+        change().map_err(storage_refusal)?;
+        slot.refused = None;
+        if let Some(running) = slot.running.take() {
+            running.gateway.stop().await;
         }
+        Ok(())
     }
 
     async fn endpoint(&self) -> Result<Endpoint, Failure> {

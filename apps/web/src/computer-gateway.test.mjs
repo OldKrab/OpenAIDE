@@ -203,6 +203,34 @@ test("pairing and forgetting drop what was known about the computer", async () =
   assert.deepEqual(await gateway.computers(), []);
 });
 
+test("a connection handed out while the computer is forgotten is not kept", async () => {
+  let port = 4400;
+  let forgetReceived;
+  const received = new Promise((resolve) => { forgetReceived = resolve; });
+  let answerForget;
+  const gateway = createComputerGateway({
+    logger: recordingLogger().logger,
+    spawnGateway: () => fakeProcess(answering({
+      connect: (request, child) => child.send({
+        id: request.id,
+        result: { kind: "localHttp", endpointUrl: `http://127.0.0.1:${++port}/probe`, authToken: "t" },
+      }),
+      // The gateway answers a connect that came before the forget took the computer's slot.
+      forget: (request, child) => {
+        answerForget = () => child.send({ id: request.id, result: {} });
+        forgetReceived();
+      },
+    })),
+  });
+
+  const forgetting = gateway.forget(COMPUTER);
+  await received;
+  assert.equal((await gateway.connect(COMPUTER)).url.port, "4401");
+  answerForget();
+  await forgetting;
+  assert.equal((await gateway.connect(COMPUTER)).url.port, "4402", "the gateway is asked again");
+});
+
 test("stopping as the server leaves is logged as expected", async () => {
   let child;
   const { events, logger } = recordingLogger();
