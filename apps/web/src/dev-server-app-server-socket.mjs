@@ -12,15 +12,23 @@ const FORWARDED_HANDSHAKE_HEADERS = [
  * browser before this runs and substitutes its own App Server credential, so
  * the browser never holds the token; after the handshake it only moves bytes,
  * leaving sequencing and resume to the reliable session at both ends.
+ *
+ * `resolveEndpoint(computer)` gives `{url, authToken}` for this computer's App
+ * Server (no computer) or a paired one, or rejects; a rejection's `reason` is
+ * logged. `target` is the request's computer and path from `appServerTarget`.
+ * `releaseEndpoint(computer)` drops a paired computer's endpoint that refused the
+ * connection, so the next socket asks for a new one.
  */
-export function createAppServerSocketProxy({ startAppServer, currentEndpoint, logger }) {
+export function createAppServerSocketProxy({ resolveEndpoint, releaseEndpoint = () => {}, logger }) {
   let nextSocketNumber = 0;
-  return async function upgrade(req, socket, head, url) {
+  return async function upgrade(req, socket, head, url, target = { computer: undefined, pathname: url.pathname }) {
     const startedAt = Date.now();
+    const terminal = target.pathname === "/__openaide-app-server/terminal";
     const context = {
       socket_id: `web-socket-${Date.now()}-${++nextSocketNumber}`,
       connection_id: url.searchParams.get("connectionId") ?? undefined,
-      route: terminalRoute(url) ? "terminal" : "session",
+      route: terminal ? "terminal" : "session",
+      target: target.computer ? "computer" : "this_device",
     };
     let outcome;
     const finish = (reason, fields = {}) => {
@@ -37,14 +45,17 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
     logger.info("web_proxy_socket_started", context);
     // A browser that leaves while the App Server starts must not be relayed.
     socket.on("error", () => socket.destroy());
+    let endpoint;
     try {
-      await startAppServer();
+      endpoint = await resolveEndpoint(target.computer);
     } catch (error) {
-      finish("app_server_unavailable", { error_kind: errorKind(error) });
+      finish("app_server_unavailable", {
+        error_kind: errorKind(error),
+        ...(typeof error?.reason === "string" ? { reason: error.reason } : {}),
+      });
       reject(socket, 503, "Service Unavailable");
       return;
     }
-    const endpoint = currentEndpoint();
     if (!endpoint) {
       finish("app_server_unavailable");
       reject(socket, 503, "Service Unavailable");
@@ -69,7 +80,7 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
       port: Number(endpoint.url.port),
       // A Terminal byte stream (ADR-0071) sits beside the session socket; its
       // single-use attach token travels inside the stream, never in the URL.
-      path: endpoint.url.pathname + (terminalRoute(url) ? "/terminal" : "") + url.search,
+      path: endpoint.url.pathname + (terminal ? "/terminal" : "") + url.search,
       method: "GET",
       headers,
     });
@@ -113,6 +124,7 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
       reject(socket, proxyRes.statusCode ?? 502, proxyRes.statusMessage || "Bad Gateway");
     });
     proxyReq.on("error", (error) => {
+      if (target.computer && error?.code === "ECONNREFUSED") releaseEndpoint(target.computer);
       finish("app_server_unreachable", { error_kind: errorKind(error) });
       reject(socket, 502, "Bad Gateway");
     });
@@ -123,10 +135,6 @@ export function createAppServerSocketProxy({ startAppServer, currentEndpoint, lo
     });
     proxyReq.end();
   };
-}
-
-function terminalRoute(url) {
-  return url.pathname === "/__openaide-app-server/terminal";
 }
 
 function reject(socket, status, statusText) {

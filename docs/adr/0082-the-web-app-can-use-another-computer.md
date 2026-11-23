@@ -13,6 +13,10 @@ The Web App could use only the App Server of the machine that serves it. A user 
 - **The other Computer sees one Remote Device**, named after the machine that serves the Web App, however many browsers use it.
 - **Sharing works as in any App Shell.** A browser adds a device to the Computer it is using with **Add a device**. To share a different Computer, it switches to that Computer first.
 
+## Mechanism
+
+The browser's choice is a cookie on the Web App's origin. It decides which Computer a newly loaded page opens on. The page then addresses that Computer in all its App Server paths, so it keeps the Computer it opened on when another tab of the same browser switches. The tab that switches reloads, as the Desktop App's window does ([ADR-0070](0070-switching-computers-is-in-place-and-keeps-work-running.md)); other tabs move when they next load. The server never forwards the browser's cookies to an App Server.
+
 ## Considered Options
 
 - **iroh in the browser through WebAssembly.** Rejected:

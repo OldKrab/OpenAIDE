@@ -31,6 +31,16 @@ import { createWebSecretMessageHandler } from "./webSecrets";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
 const logger = createRuntimeLogger("openaide-webview");
+
+/**
+ * A path of this page's App Server. It sits beside the endpoint the server gave the
+ * page: this computer's, or the paired computer's the page opened on (ADR-0082).
+ */
+function appServerPath(route: string): string {
+  const connection = appServerConnection();
+  const endpoint = connection?.kind === "webProxy" ? connection.endpointUrl : "/__openaide-app-server/probe";
+  return `${endpoint.replace(/\/probe$/, "")}/${route}`;
+}
 function openWebExternal(url: string) {
   usableExternalWindow(window.open(url, "_blank", "noopener,noreferrer"));
 }
@@ -123,7 +133,7 @@ export function createWebAppShell(): FrontendShell {
           taskId,
         });
         const link = document.createElement("a");
-        link.href = `/__openaide-app-server/download?${search}`;
+        link.href = `${appServerPath("download")}?${search}`;
         link.download = label;
         link.click();
       },
@@ -135,7 +145,7 @@ export function createWebAppShell(): FrontendShell {
           fileHandleId,
         });
         const link = document.createElement("a");
-        link.href = `/__openaide-app-server/download?${search}`;
+        link.href = `${appServerPath("download")}?${search}`;
         link.download = label;
         link.click();
         return "saved";
@@ -145,7 +155,7 @@ export function createWebAppShell(): FrontendShell {
       kind: "webUpload",
       upload: (taskId, file, onProgress, signal, options) =>
         uploadFileOverHttp({
-          target: { url: "/__openaide-app-server/upload" },
+          target: { url: appServerPath("upload") },
           taskId,
           file,
           kind: options?.kind,
@@ -211,7 +221,7 @@ export function createWebAppShell(): FrontendShell {
     },
     terminals: {
       socketUrl() {
-        const url = new URL("/__openaide-app-server/terminal", window.location.href);
+        const url = new URL(appServerPath("terminal"), window.location.href);
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         return url.toString();
       },
@@ -224,7 +234,7 @@ export function createWebAppShell(): FrontendShell {
           fileViewerHandle: handle,
           operationId,
         });
-        const url = `/__openaide-app-server/download?${search}`;
+        const url = `${appServerPath("download")}?${search}`;
         // Only a metadata check uses fetch: file bytes stream directly to the browser's
         // download manager, without buffering a potentially large artifact in the renderer.
         const ready = await fetch(`${url}&check=1`, {
@@ -258,7 +268,7 @@ export function createWebAppShell(): FrontendShell {
           preview: "1",
         });
         return readFileViewerContentOverHttp(
-          `/__openaide-app-server/download?${search}`,
+          `${appServerPath("download")}?${search}`,
           { credentials: "same-origin" },
           maxBytes,
           signal,
