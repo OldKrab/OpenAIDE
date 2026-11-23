@@ -86,6 +86,14 @@ impl RemoteComputer {
 
     /// The Web App's side: a gateway with its own folder, bound on this network.
     fn web_app(&self, folder: &std::path::Path) -> (Arc<ComputerGateway>, Events) {
+        self.web_app_logged(folder, quiet())
+    }
+
+    fn web_app_logged(
+        &self,
+        folder: &std::path::Path,
+        log: Logger,
+    ) -> (Arc<ComputerGateway>, Events) {
         let network = Network::Local(self.lookup.clone());
         let endpoint = self.run(async move {
             let endpoint = network
@@ -100,7 +108,7 @@ impl RemoteComputer {
         });
         let folder = Folder::open(folder).unwrap();
         let (gateway, events) =
-            ComputerGateway::with_endpoint(folder, endpoint, "web-host".to_string(), quiet());
+            ComputerGateway::with_endpoint(folder, endpoint, "web-host".to_string(), log);
         (Arc::new(gateway), events)
     }
 
@@ -117,6 +125,24 @@ type Events = tokio::sync::mpsc::UnboundedReceiver<Event>;
 
 fn quiet() -> Logger {
     Arc::new(|_, _| {})
+}
+
+/// A logger that keeps the event names, and a way to count one of them.
+fn recording() -> (Logger, impl Fn(&str) -> usize) {
+    let events = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log: Logger = {
+        let events = events.clone();
+        Arc::new(move |event, _| events.lock().unwrap().push(event.to_string()))
+    };
+    let count = move |name: &str| {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| *event == name)
+            .count()
+    };
+    (log, count)
 }
 
 async fn through(endpoint_url: &str, token: &str) -> String {
@@ -215,7 +241,8 @@ fn text_that_is_not_a_usable_code_is_refused_without_the_network() {
 fn a_removed_web_app_keeps_being_told_why() {
     let computer = remote_computer();
     let folder = tempfile::tempdir().unwrap();
-    let (gateway, mut events) = computer.web_app(folder.path());
+    let (log, logged) = recording();
+    let (gateway, mut events) = computer.web_app_logged(folder.path(), log);
     let paired = computer.run(gateway.pair(&computer.code(), None)).unwrap();
     let connection = computer.run(gateway.connect(&paired.id)).unwrap();
 
@@ -238,8 +265,9 @@ fn a_removed_web_app_keeps_being_told_why() {
     assert!(refused.message.contains("removed"));
     // The event comes once per connection, not per refused request.
     assert!(events.try_recv().is_err());
-    // A later attempt starts over. That App Server removed its last device and no
-    // longer listens, which is still the removal, not an unreachable computer.
+    // Later requests are told without asking that Computer: a removed device stays
+    // removed until it pairs again, and that App Server no longer even listens.
+    let attempts = logged("remote_connect_started");
     assert_eq!(
         computer
             .run(gateway.connect(&paired.id))
@@ -247,6 +275,7 @@ fn a_removed_web_app_keeps_being_told_why() {
             .reason,
         "not_trusted"
     );
+    assert_eq!(logged("remote_connect_started"), attempts);
 
     // That App Server forgot its identity with its last device, so pairing again
     // makes a new Computer; the old one stays refused until the user forgets it.

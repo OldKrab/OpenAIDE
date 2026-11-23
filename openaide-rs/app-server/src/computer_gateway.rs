@@ -49,9 +49,10 @@ pub struct ComputerGateway {
 #[derive(Default)]
 struct Slot {
     running: Option<Running>,
-    /// Why the Computer last refused this device for good. It stands until the
-    /// Computer is reached again: an App Server that removed its last device stops
-    /// listening, so later attempts would only find it unreachable.
+    /// Why the Computer last refused this device for good. A removal stands until
+    /// this device pairs again; a version mismatch until the Computer is reached
+    /// again. An App Server that removed its last device stops listening, so later
+    /// attempts would only find it unreachable.
     refused: Option<Failure>,
 }
 
@@ -166,7 +167,8 @@ impl ComputerGateway {
         if let Some(current) = slot.running.as_ref() {
             match current.refused.get().copied() {
                 None => return Ok(connection_of(&current.gateway)),
-                // This attempt starts over, so an update on that side is found.
+                // The refusal is kept; a version mismatch is asked again, so an
+                // update on that side is found.
                 Some(failure) => {
                     slot.refused = Some(failure);
                     if let Some(previous) = slot.running.take() {
@@ -174,6 +176,14 @@ impl ComputerGateway {
                     }
                 }
             }
+        }
+        let unusable = |failure: Failure| {
+            Refusal::new(failure.class(), messages::unusable(failure, &computer.name))
+        };
+        // A removed device stays removed until it pairs again, which drops this
+        // refusal, so asking that Computer again could only wait to be refused.
+        if slot.refused == Some(Failure::NotTrusted) {
+            return Err(unusable(Failure::NotTrusted));
         }
         let failure = match self.reach(id, server).await {
             Ok(Reached::Running(running)) => {
@@ -198,10 +208,7 @@ impl ComputerGateway {
         if failure != Failure::Unreachable {
             slot.refused = Some(failure);
         }
-        Err(Refusal::new(
-            failure.class(),
-            messages::unusable(failure, &computer.name),
-        ))
+        Err(unusable(failure))
     }
 
     /// Reaches the Computer `server`, then starts the loopback gateway to it.
