@@ -1,5 +1,5 @@
 import type { BackendConnection, PreSendAttachment } from "@openaide/app-server-client";
-import type { FileUploadKind } from "./fileUploadHttp";
+import { uploadFailureFields, type FileUploadKind } from "./fileUploadHttp";
 import type { FileUploadProgress, FrontendFileAcquisition } from "./frontendShell";
 import { recordFrontendLifecycleEvent } from "./frontendLifecycleTelemetry";
 
@@ -33,7 +33,9 @@ export async function uploadComposerFile(
     record("composer_upload_completed", {
       outcome: cancelled ? "cancelled" : "failure",
       duration_ms: performance.now() - startedAt,
-      ...(cancelled ? {} : { error_kind: error instanceof Error ? error.name : typeof error }),
+      // The transport's class and status show where a failure stopped: refused by the App Server
+      // or a gateway (`rejected` with its status), or never answered (`transportError`, `timeout`).
+      ...(cancelled ? {} : uploadFailureFields(error)),
     });
     throw error;
   }
