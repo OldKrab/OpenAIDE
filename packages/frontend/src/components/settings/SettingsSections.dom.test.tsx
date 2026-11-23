@@ -263,10 +263,8 @@ const phone = { deviceId: "device_1", name: "Phone", model: "Example 9", addedAt
 
 function deviceIntents() {
   return {
-    approveJoinRequest: vi.fn(async () => undefined),
     cancelInvite: vi.fn(async () => undefined),
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
-    previewJoinRequest: vi.fn(async () => ({ deviceId: "device_1", name: "Phone", model: "Example 9", serverName: "workstation", alreadyTrusted: false })),
     remove: vi.fn(async () => undefined),
     replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
   };
@@ -306,25 +304,6 @@ it("shows a single-use pairing code, reports the device that used it, and withdr
 
   await click("Done");
   expect(intents.cancelInvite).toHaveBeenCalled();
-});
-
-it("adds a device from its code only after showing what the code names", async () => {
-  const intents = deviceIntents();
-  await mountSettings({ deviceIntents: intents, state: remoteState({ remoteAccess: "on", serverName: "workstation" }) });
-
-  await click("Enter code");
-  expect((button("Continue") as HTMLButtonElement).disabled).toBe(true);
-  await type("Code from the device", "OAJ1 CODE");
-  await click("Continue");
-  await settle();
-
-  expect(intents.approveJoinRequest).not.toHaveBeenCalled();
-  expect(dialog("Add a device by code")?.textContent).toContain("full access");
-  await click("Add device");
-  await settle();
-
-  expect(intents.approveJoinRequest).toHaveBeenCalledWith("OAJ1 CODE");
-  expect(dialog("Add a device by code")).toBeNull();
 });
 
 const studio = { id: "a".repeat(64), name: "Studio", current: false };

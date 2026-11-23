@@ -10,6 +10,12 @@ pub struct DeviceCollectionSnapshot {
     pub remote_access: RemoteAccessState,
     /// The user-facing name of the machine this App Server runs on.
     pub server_name: String,
+    /// The public key Remote Devices reach this App Server by, in text form. A device
+    /// compares it with the key in a Pairing Code to recognize this computer's own code
+    /// (ADR-0081). Absent until the first Pairing Code and after the last Remote Device
+    /// is removed, because the key is made then and forgotten then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub devices: Vec<RemoteDeviceSummary>,
 }
@@ -66,7 +72,7 @@ pub enum RemoteDevicePath {
 #[serde(rename_all = "camelCase")]
 pub struct DevicesCreateInviteParams {}
 
-/// A single-use Pairing Code a new device reads to join this App Server. Creating
+/// A single-use Pairing Code that lets one more device use this App Server. Creating
 /// another invite, cancelling, or reaching `expires_at_ms` invalidates it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -82,36 +88,6 @@ pub struct DevicesCancelInviteParams {}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DevicesCancelInviteResult {}
-
-/// Reads the Pairing Code a new device shows, without trusting it yet.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DevicesPreviewJoinRequestParams {
-    pub code: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DevicesPreviewJoinRequestResult {
-    pub device_id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// The App Server the device would join, for the confirmation shown to the user.
-    pub server_name: String,
-    pub already_trusted: bool,
-}
-
-/// Trusts the device named by a join-request Pairing Code the user confirmed.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DevicesApproveJoinRequestParams {
-    pub code: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DevicesApproveJoinRequestResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

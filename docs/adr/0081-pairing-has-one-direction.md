@@ -16,7 +16,7 @@ Status: accepted; replaces the join request of ADR-0062
   - the entry dialog says: get the code on the computer, Settings › Remote › Add a device.
 - **A wrong code says what to do.** The device that reads a code checks it before spending it:
   - The code of the Computer this device runs itself: "This is <name>'s own code. Enter it on the device that should use <name>."
-  - A join-request code from an older OpenAIDE: update the app on that device and use its new code.
+  - A join-request code from an older OpenAIDE: update OpenAIDE on that device, then make a code on the computer it should use.
   - An invite that was used, was cancelled, or has expired: make a new code on the computer.
   - Anything else: "This isn't an OpenAIDE code."
 - **The long code stays.** A Pairing Code is `OAI1` followed by base32 of the App Server's public key and a single-use secret. That is about 81 characters, pasted on a computer and scanned as a QR code on a phone. Any future field, such as a relay or a token, needs a new version prefix.

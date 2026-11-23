@@ -61,7 +61,6 @@ const network = 'The connection uses iroh over QUIC. It goes directly between th
 const info = {
   welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
   remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Remote on your computer.', network],
-  join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.', network],
   settings: ['How the connection works', 'How the connection works', 'Your phone and computer each have their own key, and the connection is encrypted end to end with those keys. There is no account or password.', network],
   local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
   background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
@@ -86,15 +85,10 @@ function closeSheet() {
 sheet.addEventListener('click', event => { if (event.target === sheet || event.target.closest('.sheet-close')) closeSheet(); });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSheet(); });
 
-// This phone's code is disclosed only while its screen is open.
-function enter(next) {
-  if (next === 'local') send('check');
-  if (next === 'join') send('join');
-}
-function leave(previous) { if (previous === 'join') send('join_stop'); }
+// Opening the phone's own screen checks it again.
+function enter(next) { if (next === 'local') send('check'); }
 function go(next) {
   rememberCode();
-  leave(screen);
   history.push(screen);
   screen = next;
   render();
@@ -116,7 +110,6 @@ window.back = () => {
   if (closeSheet()) return;
   if (state.busy) { explainBlockedBack(); return; }
   rememberCode();
-  leave(screen);
   if (!history.length) { send('close'); return; }
   screen = history.pop();
   render();
@@ -200,7 +193,7 @@ function render() {
       + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
       + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Pairing code" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Pair</button></form>`
       + button('Scan code', 'scan')
-      + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button><button class="link" data-action="join_screen">Show my code</button></div>`
+      + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button></div>`
       + '</div>';
     document.getElementById('code').value = codeDraft;
     document.getElementById('pair-form').addEventListener('submit', event => { event.preventDefault(); rememberCode(); send('pair', { code: codeDraft }); });
@@ -210,11 +203,6 @@ function render() {
       render();
       if (pasteOpen) document.getElementById('code').focus();
     });
-  } else if (screen === 'join') {
-    const join = state.join;
-    page.innerHTML = heading('Show this code', 'On your computer, open') + path('Settings', 'Remote', 'Enter code')
-      + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="waiting"><span class="pulse" aria-hidden="true"></span>Waiting for your computer</p>${hint()}`
-        : '<p class="waiting"><span class="pulse" aria-hidden="true"></span>Preparing this phone’s code…</p>');
   } else if (screen === 'background') {
     // One setting: it keeps local work running, or a paired computer's Task notifications arriving.
     const remote = state.remote;

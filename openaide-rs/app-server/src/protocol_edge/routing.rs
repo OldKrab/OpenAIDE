@@ -298,12 +298,6 @@ impl RpcGateway {
             openaide_app_server_protocol::methods::DEVICES_CANCEL_INVITE => {
                 self.handle_devices_cancel_invite(connection_id, id, params, meta, now)
             }
-            openaide_app_server_protocol::methods::DEVICES_PREVIEW_JOIN_REQUEST => {
-                self.handle_devices_preview_join_request(connection_id, id, params, meta)
-            }
-            openaide_app_server_protocol::methods::DEVICES_APPROVE_JOIN_REQUEST => {
-                self.handle_devices_approve_join_request(connection_id, id, params, meta, now)
-            }
             openaide_app_server_protocol::methods::DEVICES_REMOVE => {
                 self.handle_devices_remove(connection_id, id, params, meta, now)
             }

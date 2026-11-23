@@ -51,7 +51,7 @@ impl InviteRequest {
     }
 }
 
-/// The outcome of a pairing, sent by the App Server.
+/// The outcome of spending an invite, sent by the App Server.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingResult {

@@ -18,7 +18,7 @@ mod wire;
 
 pub use network::Network;
 pub use pairing_code::{
-    clamp_label, InviteCode, JoinCode, PairingCodeError, INVITE_SECRET_LEN, MAX_LABEL_BYTES,
+    clamp_label, InviteCode, PairingCodeError, INVITE_SECRET_LEN, MAX_LABEL_BYTES,
 };
 pub use wire::{
     application_alpn, close, InviteRequest, PairingResult, PAIRING_ALPN, PAIRING_MESSAGE_LIMIT,

@@ -28,9 +28,6 @@ use crate::logging;
 /// Time a removed device's connection stays open so the removal reply can be delivered.
 const REMOVAL_CLOSE_GRACE: Duration = Duration::from_millis(750);
 const PAIRING_STEP_TIMEOUT: Duration = Duration::from_secs(15);
-/// A device that showed a join request stays on that screen for about this long.
-const ANNOUNCE_ATTEMPTS: u32 = 6;
-const ANNOUNCE_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 /// Starts the edge on its own runtime thread. It binds nothing until remote access is in use.
 pub fn start(devices: RemoteDevices, local_http: std::net::SocketAddr, auth_token: String) {
@@ -108,15 +105,6 @@ async fn run(
                             running.task.abort();
                         }
                         health = RelayHealth::default();
-                    }
-                }
-                Some(EdgeCommand::AnnounceTrust(device)) => {
-                    if let Some(endpoint) = &endpoint {
-                        tokio::spawn(announce_trust(
-                            endpoint.clone(),
-                            device,
-                            devices.server_name(),
-                        ));
                     }
                 }
                 Some(EdgeCommand::Disconnect(device)) => {
@@ -581,7 +569,7 @@ fn log_write_stall(
     }
 }
 
-/// Invite direction: the new device connected to us and presents the secret.
+/// The new device connected to us and presents the invite secret.
 async fn accept_invite(connection: Connection, devices: RemoteDevices) {
     let device = connection.remote_id();
     let device_label = device.fmt_short().to_string();
@@ -625,80 +613,6 @@ async fn accept_invite(connection: Connection, devices: RemoteDevices) {
         logging::warn("remote_device_invite_redeemed", fields);
     } else {
         logging::info("remote_device_invite_redeemed", fields);
-    }
-}
-
-/// Join-request direction: we connect to the approved device and name ourselves.
-/// It learns our key from the connection, not from anything we send.
-async fn announce_trust(endpoint: Endpoint, device: PublicKey, server_name: String) {
-    let device_label = device.fmt_short().to_string();
-    let started = Instant::now();
-    logging::info(
-        "remote_device_trust_announce_started",
-        serde_json::json!({ "device": device_label }),
-    );
-    for attempt in 1..=ANNOUNCE_ATTEMPTS {
-        let result = tokio::time::timeout(PAIRING_STEP_TIMEOUT, async {
-            let connection = endpoint
-                .connect(device, PAIRING_ALPN)
-                .await
-                .map_err(|_| "connect")?;
-            let (mut send, mut recv) = connection.open_bi().await.map_err(|_| "stream")?;
-            let bytes = serde_json::to_vec(&PairingResult {
-                trusted: true,
-                server_name: Some(server_name.clone()),
-            })
-            .map_err(|_| "encode")?;
-            send.write_all(&bytes).await.map_err(|_| "write")?;
-            send.finish().map_err(|_| "write")?;
-            // The device answers by finishing its side once it stored our key.
-            recv.read_to_end(PAIRING_MESSAGE_LIMIT)
-                .await
-                .map_err(|_| "acknowledge")?;
-            connection.close(0u32.into(), b"done");
-            Ok::<(), &'static str>(())
-        })
-        .await
-        .unwrap_or(Err("timeout"));
-        match result {
-            Ok(()) => {
-                logging::info(
-                    "remote_device_trust_announce_completed",
-                    serde_json::json!({
-                        "device": device_label,
-                        "outcome": "ok",
-                        "attempt": attempt,
-                        "duration_ms": elapsed_ms(started),
-                    }),
-                );
-                return;
-            }
-            Err(class) if attempt == ANNOUNCE_ATTEMPTS => {
-                // The device stays trusted: it can still connect if it learns our key
-                // another way, and the user can remove it from the device list.
-                logging::warn(
-                    "remote_device_trust_announce_completed",
-                    serde_json::json!({
-                        "device": device_label,
-                        "outcome": "failed",
-                        "attempt": attempt,
-                        "error_kind": class,
-                        "duration_ms": elapsed_ms(started),
-                    }),
-                );
-            }
-            Err(class) => {
-                logging::info(
-                    "remote_device_trust_announce_retry",
-                    serde_json::json!({
-                        "device": device_label,
-                        "attempt": attempt,
-                        "error_kind": class,
-                    }),
-                );
-                tokio::time::sleep(ANNOUNCE_RETRY_DELAY).await;
-            }
-        }
     }
 }
 

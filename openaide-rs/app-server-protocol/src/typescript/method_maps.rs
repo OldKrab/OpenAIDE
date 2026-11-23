@@ -9,7 +9,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.insert_str(output.len() - ";\n".len(), " | typeof TASK_QUEUE_RESUME");
     output.insert_str(
         output.len() - ";\n".len(),
-        " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE",
+        " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE",
     );
     output.insert_str(
         output.len() - ";\n".len(),
@@ -75,8 +75,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryParams;\n");
     output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteParams;\n");
     output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteParams;\n");
-    output.push_str("  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestParams;\n");
-    output.push_str("  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestParams;\n");
     output.push_str("  [DEVICES_REMOVE]: DevicesRemoveParams;\n");
     output.push_str("  [TASK_ATTENTION_WAIT]: TaskAttentionWaitParams;\n");
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenParams;\n");
@@ -208,8 +206,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryResult;\n");
     output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteResult;\n");
     output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteResult;\n");
-    output.push_str("  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestResult;\n");
-    output.push_str("  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestResult;\n");
     output.push_str("  [DEVICES_REMOVE]: DevicesRemoveResult;\n");
     output.push_str("  [TASK_ATTENTION_WAIT]: TaskAttentionWaitResult;\n");
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenResult;\n");

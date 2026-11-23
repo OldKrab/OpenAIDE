@@ -29,9 +29,8 @@ installation.
 
 A remote computer needs no address, account or password. On the computer, open
 **Settings → Remote → Show code**; on the phone, choose **Remote computer** and scan
-the QR code with the camera or paste its text. Where the phone cannot scan, it shows
-its own code instead, which the computer accepts under **Enter code**. A code works
-once and for a few minutes. Pairing makes the computer trust this phone's key; the
+the QR code with the camera or paste its text. A code works once and for a few
+minutes. Pairing makes the computer trust this phone's key; the
 phone keeps its private key encrypted with Android Keystore and remembers the computer's
 key and name. Any client of that computer can remove the phone under **Settings → Remote**.
 

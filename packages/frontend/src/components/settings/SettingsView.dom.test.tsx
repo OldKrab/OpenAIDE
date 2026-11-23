@@ -344,10 +344,8 @@ it("asks the phone for its state only once the route names a section with phone 
 
 function fakeDeviceIntents() {
   return {
-    approveJoinRequest: vi.fn(async () => undefined),
     cancelInvite: vi.fn(async () => undefined),
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
-    previewJoinRequest: vi.fn(),
     remove: vi.fn(async () => undefined),
     replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
   };

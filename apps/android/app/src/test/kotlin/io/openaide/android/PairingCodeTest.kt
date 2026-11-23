@@ -7,16 +7,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class PairingCodeTest {
-    // Encoded by the App Server's own tests (`pairing_code_tests.rs`): a device
-    // named "Tablet" with no model.
-    private val serverJoinFixture = "OAJ15VESRRRI2HBMN2XJAM4JAWMVMEUVSJZ2LRR7SNRWYFDBJLEHG7IQMVDBMJWGK5AA"
-
-    @Test fun joinCodeMatchesTheAppServerEncoding() {
-        val payload = PairingCode.decodeBase32(serverJoinFixture.substring(4))!!
-        val device = payload.copyOfRange(0, 32)
-        assertEquals(serverJoinFixture, PairingCode.join(device, " Tablet ", null))
-        assertEquals("OAJ1 5VES RRRI", PairingCode.grouped(serverJoinFixture).substring(0, 14))
-    }
+    // A join-request code exactly as an OpenAIDE before ADR-0081 showed it, as in
+    // `openaide-remote-core`'s own tests.
+    private val oldJoinCode = "OAJ15VESRRRI2HBMN2XJAM4JAWMVMEUVSJZ2LRR7SNRWYFDBJLEHG7IQMVDBMJWGK5AA"
 
     @Test fun inviteToleratesPastedFormatting() {
         val server = ByteArray(32) { 1 }
@@ -32,7 +25,8 @@ class PairingCodeTest {
 
     @Test fun namesWhatIsWrongWithACode() {
         fun problem(code: String) = assertThrows(PairingCode.Invalid::class.java) { PairingCode.parseInvite(code) }.problem
-        assertEquals(PairingCode.Problem.WRONG_KIND, problem(serverJoinFixture))
+        assertEquals(PairingCode.Problem.FROM_OLDER_OPENAIDE, problem(oldJoinCode))
+        assertEquals(PairingCode.Problem.FROM_OLDER_OPENAIDE, problem(oldJoinCode.lowercase()))
         assertEquals(PairingCode.Problem.NOT_A_PAIRING_CODE, problem("https://example.com"))
         assertEquals(PairingCode.Problem.MALFORMED, problem("OAI1!!!"))
         assertEquals(PairingCode.Problem.MALFORMED, problem("OAI1" + PairingCode.encodeBase32(ByteArray(40))))

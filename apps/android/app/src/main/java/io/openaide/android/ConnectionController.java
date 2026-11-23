@@ -41,7 +41,6 @@ final class ConnectionController extends ContextWrapper {
     private long operationStarted;
     private int operationSequence;
     private String operationName;
-    private JSONObject joinCode;
     private final ComputerSwitch<?> switcher;
     /** A switch this page started is connecting; the page offers Cancel while every other control waits. */
     private boolean switching;
@@ -118,8 +117,6 @@ final class ConnectionController extends ContextWrapper {
             case "phone_setup": view.setup("local"); break;
             case "scan": scan(); break;
             case "pair": pair(message.optString("code")); break;
-            case "join": join(); break;
-            case "join_stop": RemotePairing.stopJoin(); joinCode = null; emit(); break;
             case "ssh_add":
                 if (BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()) { unavailableInBuild("ssh"); break; }
                 SshSetup.start(activity, this::changed);
@@ -269,20 +266,6 @@ final class ConnectionController extends ContextWrapper {
         });
     }
 
-    private void join() {
-        begin("setup_pairing_join", "Preparing this phone’s code…");
-        RemotePairing.join(this, (code, problem) -> {
-            if (isDestroyed()) { RemotePairing.stopJoin(); return; }
-            joinCode = code;
-            end(code != null, code != null ? "" : problem);
-        }, (server, problem) -> {
-            if (isDestroyed()) return;
-            joinCode = null;
-            diagnostics.record("setup_pairing_join", "paired", operationSequence, SystemClock.elapsedRealtime() - operationStarted);
-            changed();
-        });
-    }
-
     private void stopSsh(String id) {
         ConnectionStore store = new ConnectionStore(this);
         SshComputers.Computer computer = SshComputers.find(store.sshComputers(), id);
@@ -364,7 +347,7 @@ final class ConnectionController extends ContextWrapper {
                 .put("sshComputers", sshComputers(store))
                 .put("ssh", sshStatus(ssh))
                 .put("sshAvailable", !BuildConfig.SSH_APP_SERVER_SHA256.isEmpty()).put("phoneAvailable", BundledRuntime.installable()).put("sshNotice", sshNotice)
-                .put("join", joinCode == null ? JSONObject.NULL : joinCode).put("busy", busy).put("switching", switching).put("notice", notice)
+                .put("busy", busy).put("switching", switching).put("notice", notice)
                 .put("termux", installed("com.termux")).put("permission", checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
                 .put("checks", checks == null ? JSONObject.NULL : checks)
                 .put("background", preferences.getBoolean("background", true))
@@ -479,7 +462,6 @@ final class ConnectionController extends ContextWrapper {
         disposed = true;
         // A page that goes away mid-switch cannot be answered; the switch ends with it.
         switcher.cancel();
-        RemotePairing.stopJoin();
         worker.shutdownNow();
     }
     private boolean isDestroyed() { return disposed || activity.isDestroyed(); }

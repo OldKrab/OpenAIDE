@@ -6,12 +6,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import computer.iroh.Connection
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /**
  * What the shell's screens ask of the paired connection, with every answer
@@ -21,7 +17,6 @@ internal object RemotePairing {
     fun interface Paired { fun done(server: ConnectionStore.PairedServer?, problem: String?) }
     /** [reason] is the failure class in lower case, such as `unreachable`; null on success or when the gateway did not start. */
     fun interface Connected { fun done(problem: String?, reason: String?) }
-    fun interface JoinCode { fun shown(code: JSONObject?, problem: String?) }
     fun interface Checked { fun done(ok: Boolean, message: String) }
 
     private val main = Handler(Looper.getMainLooper())
@@ -30,9 +25,9 @@ internal object RemotePairing {
     @JvmStatic fun redeem(context: Context, code: String, callback: Paired) {
         val invite = try { PairingCode.parseInvite(code) } catch (error: PairingCode.Invalid) {
             callback.done(null, when (error.problem) {
-                PairingCode.Problem.WRONG_KIND -> "That code adds a device to a computer. On your computer, open Settings → Remote and choose Show code."
+                PairingCode.Problem.FROM_OLDER_OPENAIDE -> "This code comes from an older OpenAIDE. Update OpenAIDE on that device, then make a code on the computer it should use: Settings › Remote › Add a device."
                 PairingCode.Problem.MALFORMED -> "The code is incomplete. Scan or paste it again."
-                PairingCode.Problem.NOT_A_PAIRING_CODE -> "That is not an OpenAIDE pairing code."
+                PairingCode.Problem.NOT_A_PAIRING_CODE -> "This isn’t an OpenAIDE code."
             })
             return
         }
@@ -46,32 +41,12 @@ internal object RemotePairing {
                 main.post { callback.done(server, null) }
             } catch (error: RemoteNode.Unavailable) {
                 val problem = if (error.failure == RemoteNode.Failure.NOT_TRUSTED) {
-                    "This code has expired or was already used. Show a new code on your computer."
+                    "This code was already used or has expired. Make a new one on the computer."
                 } else message(error.failure)
                 main.post { callback.done(null, problem) }
             }
         }
     }
-
-    /** Shows this phone's own code and waits for a computer to approve it. */
-    @JvmStatic fun join(context: Context, shown: JoinCode, paired: Paired) {
-        val application = context.applicationContext
-        RemoteNode.scope.launch {
-            try {
-                val code = RemoteNode.joinCode(application, deviceName(application), deviceModel())
-                RemoteNode.awaitJoin { server ->
-                    RemoteNode.disconnect()
-                    main.post { paired.done(server, null) }
-                }
-                val presented = JSONObject().put("text", PairingCode.grouped(code)).put("qr", qr(code))
-                main.post { shown.shown(presented, null) }
-            } catch (error: RemoteNode.Unavailable) {
-                main.post { shown.shown(null, message(error.failure)) }
-            }
-        }
-    }
-
-    @JvmStatic fun stopJoin() = RemoteNode.stopJoin()
 
     /** Starts the gateway and reaches the paired computer before the workspace is shown. */
     @JvmStatic fun connect(context: Context, callback: Connected) {
@@ -203,12 +178,4 @@ internal object RemotePairing {
     }
 
     private fun deviceModel(): String = PairingCode.clampLabel(listOfNotNull(Build.MANUFACTURER, Build.MODEL).joinToString(" "))
-
-    /** The code as dark-module rows, drawn by the setup page without an image resource. */
-    private fun qr(code: String): JSONObject {
-        val matrix = QRCodeWriter().encode(code, BarcodeFormat.QR_CODE, 0, 0, mapOf(EncodeHintType.MARGIN to 0))
-        val path = StringBuilder()
-        for (y in 0 until matrix.height) for (x in 0 until matrix.width) if (matrix[x, y]) path.append("M").append(x).append(' ').append(y).append("h1v1h-1z")
-        return JSONObject().put("size", matrix.width).put("path", path.toString())
-    }
 }
