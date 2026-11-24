@@ -7,7 +7,7 @@ import { computerSwitch, useComputerSwitch } from "../../services/computerSwitch
 import type { PhoneSshComputer } from "../../services/connectionSettings";
 import { currentFrontendShell } from "../../services/frontendShell";
 import { PopupDialog } from "../Popup";
-import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
+import { InviteDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
 import { settingsInfo } from "./settingsInfo";
 import { AddSshComputerDialog, UpdateSshComputerDialog, useSshStatus } from "./sshComputers";
@@ -30,7 +30,6 @@ type Dialog =
   | { kind: "forget-phone-ssh"; computer: PhoneSshComputer }
   | { kind: "update-phone-ssh" }
   | { kind: "invite" }
-  | { kind: "join" }
   | { kind: "remove"; device: RemoteDeviceSummary };
 
 /**
@@ -152,7 +151,6 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
           />
         ) : null}
         {dialog.kind === "invite" && deviceIntents ? <InviteDialog devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} /> : null}
-        {dialog.kind === "join" && deviceIntents ? <JoinDialog intents={deviceIntents} onClose={close} /> : null}
         {dialog.kind === "remove" && deviceIntents ? (
           <SettingsConfirm
             confirmLabel="Remove device"
@@ -401,10 +399,7 @@ function devicesGroup(
     title: `Devices paired with ${owner}`,
     info: settingsInfo.devices,
     actions: devices ? (
-      <>
-        <SettingsButton onClick={() => open({ kind: "join" })}>Enter code</SettingsButton>
-        <SettingsButton icon={<QrCode aria-hidden="true" size={14} />} onClick={() => open({ kind: "invite" })} variant="primary">Show code</SettingsButton>
-      </>
+      <SettingsButton icon={<QrCode aria-hidden="true" size={14} />} onClick={() => open({ kind: "invite" })} variant="primary">Show code</SettingsButton>
     ) : undefined,
     notice: devices?.remoteAccess === "failed" ? (
       <SettingsInlineError>Remote access could not start, so paired devices cannot connect. Check the network and restart OpenAIDE.</SettingsInlineError>

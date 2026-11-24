@@ -7,7 +7,7 @@ use openaide_app_server_protocol::devices::RemoteAccessState;
 use super::*;
 use crate::remote_devices::RemoteDevicesWorkflow;
 use crate::test_sync::{wait_for, wait_until, WATCHDOG};
-use openaide_remote_core::{InviteCode, JoinCode, INVITE_SECRET_LEN};
+use openaide_remote_core::{InviteCode, INVITE_SECRET_LEN};
 
 const LOCAL_TOKEN: &str = "local-token";
 
@@ -213,51 +213,6 @@ fn an_untrusted_key_is_refused_on_the_application_protocol() {
     assert!(!wrong_secret.trusted);
     assert!(!served);
     assert!(fixture.devices.snapshot().devices.is_empty());
-}
-
-#[test]
-fn an_approved_join_request_is_announced_to_the_device() {
-    let fixture = fixture();
-    let device = fixture.device_endpoint(3, vec![PAIRING_ALPN.to_vec()]);
-    let code = JoinCode {
-        device: device.id(),
-        name: "Tablet".to_string(),
-        model: None,
-    }
-    .encode();
-
-    fixture
-        .devices
-        .approve_join_request(&code, "desk".to_string(), 1)
-        .unwrap();
-
-    let (server, announced) = fixture.run(async {
-        let connection = device.accept().await.unwrap().await.unwrap();
-        let (mut send, mut recv) = connection.accept_bi().await.unwrap();
-        let message = recv.read_to_end(PAIRING_MESSAGE_LIMIT).await.unwrap();
-        send.finish().unwrap();
-        connection.closed().await;
-        (
-            connection.remote_id(),
-            serde_json::from_slice::<PairingResult>(&message).unwrap(),
-        )
-    });
-
-    assert!(announced.trusted);
-    assert_eq!(announced.server_name, Some(fixture.devices.server_name()));
-    // The device learned the App Server's key from the connection itself.
-    assert_eq!(
-        Some(server),
-        fixture
-            .devices
-            .endpoint_secret_key()
-            .map(|key| key.public())
-    );
-    let response = fixture.run(async {
-        let connection = device.connect(server, &application_alpn()).await.unwrap();
-        request(&connection, "POST /app HTTP/1.1\r\n\r\n").await
-    });
-    assert!(response.contains(LOCAL_TOKEN));
 }
 
 fn quiet() -> openaide_remote_client::Logger {

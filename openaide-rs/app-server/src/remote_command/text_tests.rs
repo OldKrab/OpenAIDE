@@ -24,6 +24,7 @@ fn list(devices: Vec<RemoteDeviceSummary>) -> DeviceCollectionSnapshot {
     DeviceCollectionSnapshot {
         remote_access: RemoteAccessState::On,
         server_name: "studio".to_string(),
+        server_key: None,
         devices,
     }
 }

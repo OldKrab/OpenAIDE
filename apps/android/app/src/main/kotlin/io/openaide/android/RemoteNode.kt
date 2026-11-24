@@ -60,10 +60,7 @@ internal object RemoteNode {
     private var binds = 0
     /** Dials for a switch now on the endpoint; a retire waits for them. Changed under [binding]. */
     private var switchDials = 0
-    /** Set by the first bind, for the bind that follows a return while a join is awaited. */
-    @Volatile private var application: Context? = null
     @Volatile private var connection: Connection? = null
-    @Volatile private var joinListener: ((ConnectionStore.PairedServer) -> Unit)? = null
     private var attempts = 0
 
     /** The app left the screen; Android may stop its network from here on. */
@@ -79,12 +76,8 @@ internal object RemoteNode {
         hiddenAt = 0
         if (since == 0L || !ReconnectPolicy.staleAfterHidden(SystemClock.elapsedRealtime() - since)) return
         stale = "resumed"
-        scope.launch {
-            // A computer answering this phone's own code connects to the endpoint, so
-            // one must be listening again at once; otherwise the next dial binds it.
-            val waiting = application.takeIf { joinListener != null }
-            if (waiting != null) runCatching { endpoint(waiting) } else binding.withLock { retire() }
-        }
+        // The next dial binds a new endpoint.
+        scope.launch { binding.withLock { retire() } }
     }
 
     /**
@@ -143,7 +136,7 @@ internal object RemoteNode {
         val started = SystemClock.elapsedRealtime()
         val bind = ++binds
         diagnostics.record("remote_endpoint_bind", "started", bind, 0)
-        val application = context.applicationContext.also { this.application = it }
+        val application = context.applicationContext
         return try {
             val store = ConnectionStore(application)
             val key = try {
@@ -152,9 +145,9 @@ internal object RemoteNode {
                 throw Unavailable(Failure.STORAGE)
             }
             IrohAndroid.installAndroidContext(application)
-            val bound = Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = key, alpns = listOf(PAIRING_ALPN)))
+            // The phone only dials (ADR-0081), so it accepts no protocol.
+            val bound = Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = key))
             endpoint = bound
-            scope.launch { acceptAnnouncements(application, bound) }
             diagnostics.record("remote_endpoint_bind", "ready", bind, SystemClock.elapsedRealtime() - started)
             bound
         } catch (error: Throwable) {
@@ -163,19 +156,6 @@ internal object RemoteNode {
             throw error as? Unavailable ?: Unavailable(Failure.UNREACHABLE)
         }
     }
-
-    /** The Pairing Code this phone shows so a trusted client can add it. */
-    suspend fun joinCode(context: Context, name: String, model: String?): String =
-        PairingCode.join(endpoint(context).id().toBytes(), name, model)
-
-    /**
-     * Listens for the App Server that approved this phone's join request. Only one
-     * announcement is accepted, and only while the code is on screen: the code is
-     * the only place this phone's key is disclosed.
-     */
-    fun awaitJoin(listener: (ConnectionStore.PairedServer) -> Unit) { joinListener = listener }
-
-    fun stopJoin() { joinListener = null }
 
     /** Spends an invite: connects to the App Server it names and presents its secret. */
     suspend fun redeem(context: Context, invite: PairingCode.Invite, name: String, model: String?): ConnectionStore.PairedServer {
@@ -483,46 +463,6 @@ internal object RemoteNode {
         listOf("untrusted", "removed", "refused").any { closeReason.contains(it) } -> Failure.NOT_TRUSTED
         closeReason.contains("unknown protocol") -> Failure.INCOMPATIBLE
         else -> Failure.UNREACHABLE
-    }
-
-    /** Join direction: the App Server that trusted this phone connects to say so. */
-    private suspend fun acceptAnnouncements(context: Context, node: Endpoint) {
-        while (true) {
-            val incoming = try { node.acceptNext() ?: break } catch (error: Throwable) { break }
-            scope.launch {
-                var outcome = "ignored"
-                val started = SystemClock.elapsedRealtime()
-                try {
-                    val accepting = incoming.accept()
-                    if (!accepting.alpn().contentEquals(PAIRING_ALPN)) return@launch
-                    val announcing = accepting.connect()
-                    try {
-                        val listener = joinListener ?: return@launch
-                        val stream = withTimeout(PAIRING_TIMEOUT_MS) { announcing.acceptBi() }
-                        val result = JSONObject(String(withTimeout(PAIRING_TIMEOUT_MS) { stream.recv().readToEnd(PAIRING_MESSAGE_LIMIT) }))
-                        if (!result.optBoolean("trusted") || joinListener !== listener) return@launch
-                        joinListener = null
-                        val server = ConnectionStore.PairedServer(announcing.remoteId().toString(), result.optString("serverName"))
-                        ConnectionStore(context).savePaired(server)
-                        // Finishing this side tells the App Server the announcement arrived.
-                        stream.send().finish()
-                        outcome = "trusted"
-                        listener(server)
-                        // Closing first could drop the acknowledgement before it is delivered.
-                        withTimeoutOrNull(PAIRING_TIMEOUT_MS) { announcing.closed() }
-                    } finally {
-                        runCatching { announcing.close(0L, "done".toByteArray()) }
-                    }
-                } catch (error: Throwable) {
-                    outcome = "failed"
-                } finally {
-                    if (outcome != "ignored") {
-                        diagnostics.record("remote_pairing_join", outcome, 0, SystemClock.elapsedRealtime() - started)
-                    }
-                }
-            }
-        }
-        diagnostics.record("remote_endpoint_bind", "accept_ended", 0, 0)
     }
 
     private const val REFUSAL_WAIT_MS = 400L

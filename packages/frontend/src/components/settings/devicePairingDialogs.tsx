@@ -1,8 +1,4 @@
-import type {
-  DevicesCreateInviteResult,
-  DevicesPreviewJoinRequestResult,
-  RemoteDeviceSummary,
-} from "@openaide/app-server-client";
+import type { DevicesCreateInviteResult, RemoteDeviceSummary } from "@openaide/app-server-client";
 import { Copy } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { encode } from "uqr";
@@ -90,75 +86,6 @@ export function InviteDialog({
           <SettingsButton onClick={create}>New code</SettingsButton>
         ) : null}
         <SettingsButton onClick={onClose} variant={paired ? "primary" : "default"}>{paired ? "Done" : "Close"}</SettingsButton>
-      </footer>
-    </PopupDialog>
-  );
-}
-
-/** Trusts a device from the code it shows, after the user has seen what the code names. */
-export function JoinDialog({ intents, onClose }: { intents: RemoteDeviceIntents; onClose: () => void }) {
-  const [code, setCode] = useState("");
-  const [preview, setPreview] = useState<DevicesPreviewJoinRequestResult>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const run = async (action: () => Promise<void>, fallback: string) => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await action();
-    } catch (cause) {
-      setError(errorSentence(cause, fallback));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const review = () => run(async () => setPreview(await intents.previewJoinRequest(code.trim())), "This code could not be read.");
-  const approve = () => run(async () => {
-    await intents.approveJoinRequest(code.trim());
-    onClose();
-  }, "Unable to add the device.");
-
-  return (
-    <PopupDialog className="settings-confirm settings-pairing" label="Add a device by code" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
-      <strong>{preview ? `Add ${preview.name}?` : "Enter the code from the device"}</strong>
-      <p>{preview ? "Check that this is your device." : "OpenAIDE on the new device shows it on its first screen."}</p>
-      {preview ? (
-        <>
-          <dl className="settings-facts">
-            <div><dt>Device</dt><dd>{preview.name}{preview.model && preview.model !== preview.name ? ` · ${preview.model}` : ""}</dd></div>
-            <div><dt>Connects to</dt><dd>{preview.serverName}</dd></div>
-          </dl>
-          <p>
-            {preview.alreadyTrusted
-              ? "This device is already paired. Adding it again tells it where to connect."
-              : "It will have full access to this OpenAIDE: Tasks, files, and Agents. The name is reported by the device and is not verified."}
-          </p>
-          <ConnectionNote />
-        </>
-      ) : (
-        <textarea
-          aria-label="Code from the device"
-          autoCapitalize="characters"
-          autoComplete="off"
-          autoFocus
-          className="settings-code-input"
-          onChange={(event) => setCode(event.currentTarget.value)}
-          placeholder="OAJ1…"
-          rows={3}
-          spellCheck={false}
-          value={code}
-        />
-      )}
-      {error ? <SettingsInlineError>{error}</SettingsInlineError> : null}
-      <footer>
-        <SettingsButton disabled={busy} onClick={preview ? () => { setPreview(undefined); setError(undefined); } : onClose}>
-          {preview ? "Back" : "Cancel"}
-        </SettingsButton>
-        {preview ? (
-          <SettingsButton busy={busy} onClick={() => void approve()} variant="primary">{busy ? "Adding…" : "Add device"}</SettingsButton>
-        ) : (
-          <SettingsButton disabled={busy || !code.trim()} onClick={() => void review()} variant="primary">Continue</SettingsButton>
-        )}
       </footer>
     </PopupDialog>
   );

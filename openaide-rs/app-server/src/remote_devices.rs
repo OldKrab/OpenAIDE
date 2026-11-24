@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use iroh::{PublicKey, SecretKey};
 use openaide_app_server_protocol::devices::{
-    DeviceCollectionSnapshot, DevicesCreateInviteResult, DevicesPreviewJoinRequestResult,
-    RemoteAccessState, RemoteDeviceConnection, RemoteDeviceSummary,
+    DeviceCollectionSnapshot, DevicesCreateInviteResult, RemoteAccessState, RemoteDeviceConnection,
+    RemoteDeviceSummary,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
@@ -22,9 +22,7 @@ mod network_watch;
 mod relay_check;
 mod store;
 
-use openaide_remote_core::{
-    clamp_label, InviteCode, JoinCode, PairingCodeError, INVITE_SECRET_LEN,
-};
+use openaide_remote_core::{clamp_label, InviteCode, INVITE_SECRET_LEN};
 use store::{RemoteDeviceStore, StoredRemoteDevice, StoredRemoteDevices};
 
 /// An invite is refreshed by the client that shows it; this bounds one left open.
@@ -39,16 +37,6 @@ pub(crate) trait RemoteDevicesWorkflow: Send + Sync {
         now_ms: u64,
     ) -> Result<DevicesCreateInviteResult, ProtocolError>;
     fn cancel_invite(&self);
-    fn preview_join_request(
-        &self,
-        code: &str,
-    ) -> Result<DevicesPreviewJoinRequestResult, ProtocolError>;
-    fn approve_join_request(
-        &self,
-        code: &str,
-        added_by: String,
-        now_ms: u64,
-    ) -> Result<(), ProtocolError>;
     fn remove(&self, device_id: &str) -> Result<(), ProtocolError>;
     /// The Remote Device behind a protocol connection, or `None` for a same-machine client.
     fn device_name_for_connection(&self, connection_id: &str) -> Option<String>;
@@ -59,8 +47,6 @@ pub(crate) trait RemoteDevicesWorkflow: Send + Sync {
 pub(crate) enum EdgeCommand {
     /// Start or stop the endpoint to match whether remote access is in use.
     Reconcile,
-    /// Tell a device approved from its join request which App Server trusts it.
-    AnnounceTrust(PublicKey),
     /// Close every connection of a removed device.
     Disconnect(PublicKey),
 }
@@ -322,6 +308,10 @@ impl RemoteDevicesWorkflow for RemoteDevices {
         DeviceCollectionSnapshot {
             remote_access: state.access,
             server_name: self.inner.server_name.clone(),
+            server_key: state
+                .stored
+                .secret_key()
+                .map(|key| key.public().to_string()),
             devices: state
                 .stored
                 .devices
@@ -383,54 +373,6 @@ impl RemoteDevicesWorkflow for RemoteDevices {
             state.forget_identity_if_unused(&self.inner.store);
             state.send(EdgeCommand::Reconcile);
         }
-    }
-
-    fn preview_join_request(
-        &self,
-        code: &str,
-    ) -> Result<DevicesPreviewJoinRequestResult, ProtocolError> {
-        let join = JoinCode::decode(code).map_err(pairing_code_error)?;
-        let device_id = join.device.to_string();
-        Ok(DevicesPreviewJoinRequestResult {
-            already_trusted: self
-                .state()
-                .stored
-                .devices
-                .iter()
-                .any(|device| device.device_id == device_id),
-            device_id,
-            name: join.name,
-            model: join.model,
-            server_name: self.inner.server_name.clone(),
-        })
-    }
-
-    fn approve_join_request(
-        &self,
-        code: &str,
-        added_by: String,
-        now_ms: u64,
-    ) -> Result<(), ProtocolError> {
-        let join = JoinCode::decode(code).map_err(pairing_code_error)?;
-        let mut state = self.state();
-        if state.edge.is_none() {
-            return Err(remote_access_unavailable());
-        }
-        let mut stored = state.stored.clone();
-        stored.ensure_secret_key();
-        trust(
-            &mut stored,
-            &join.device,
-            &join.name,
-            join.model.as_deref(),
-            added_by,
-            now_ms,
-        );
-        self.inner.store.write(&stored).map_err(storage_error)?;
-        state.stored = stored;
-        state.send(EdgeCommand::Reconcile);
-        state.send(EdgeCommand::AnnounceTrust(join.device));
-        Ok(())
     }
 
     fn remove(&self, device_id: &str) -> Result<(), ProtocolError> {
@@ -508,6 +450,7 @@ impl RemoteDevicesWorkflow for NoRemoteDevices {
         DeviceCollectionSnapshot {
             remote_access: RemoteAccessState::Off,
             server_name: String::new(),
+            server_key: None,
             devices: Vec::new(),
         }
     }
@@ -521,22 +464,6 @@ impl RemoteDevicesWorkflow for NoRemoteDevices {
     }
 
     fn cancel_invite(&self) {}
-
-    fn preview_join_request(
-        &self,
-        _code: &str,
-    ) -> Result<DevicesPreviewJoinRequestResult, ProtocolError> {
-        Err(remote_access_unavailable())
-    }
-
-    fn approve_join_request(
-        &self,
-        _code: &str,
-        _added_by: String,
-        _now_ms: u64,
-    ) -> Result<(), ProtocolError> {
-        Err(remote_access_unavailable())
-    }
 
     fn remove(&self, _device_id: &str) -> Result<(), ProtocolError> {
         Err(remote_access_unavailable())
@@ -595,23 +522,6 @@ fn remote_access_unavailable() -> ProtocolError {
         code: ProtocolErrorCode::CapabilityUnavailable,
         message: "Remote devices are not available in this app".to_string(),
         recoverable: false,
-        target: None,
-    }
-}
-
-/// Words a code error for a client reading a join request, the only code a client gives here.
-fn pairing_code_error(error: PairingCodeError) -> ProtocolError {
-    let message = match error {
-        PairingCodeError::NotAPairingCode => "this is not an OpenAIDE pairing code",
-        PairingCodeError::WrongKind => {
-            "this code adds a device to a computer; open it on the new device"
-        }
-        PairingCodeError::Malformed => "the pairing code is damaged; read it again",
-    };
-    ProtocolError {
-        code: ProtocolErrorCode::ValidationFailed,
-        message: message.to_string(),
-        recoverable: true,
         target: None,
     }
 }

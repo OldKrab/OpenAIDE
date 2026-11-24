@@ -48,8 +48,6 @@ pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
 pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
 pub const DEVICES_CREATE_INVITE: &str = "devices/createInvite";
 pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
-pub const DEVICES_PREVIEW_JOIN_REQUEST: &str = "devices/previewJoinRequest";
-pub const DEVICES_APPROVE_JOIN_REQUEST: &str = "devices/approveJoinRequest";
 pub const DEVICES_REMOVE: &str = "devices/remove";
 pub const TERMINALS_OPEN: &str = "terminals/open";
 pub const TERMINALS_ATTACH: &str = "terminals/attach";
@@ -173,8 +171,6 @@ pub const CLIENT_METHODS: &[&str] = &[
     SETTINGS_RESET_TASK_HISTORY,
     DEVICES_CREATE_INVITE,
     DEVICES_CANCEL_INVITE,
-    DEVICES_PREVIEW_JOIN_REQUEST,
-    DEVICES_APPROVE_JOIN_REQUEST,
     DEVICES_REMOVE,
     TERMINALS_OPEN,
     TERMINALS_ATTACH,

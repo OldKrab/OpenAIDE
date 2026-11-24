@@ -1,6 +1,5 @@
 use openaide_app_server_protocol::devices::{
-    DevicesApproveJoinRequestParams, DevicesApproveJoinRequestResult, DevicesCancelInviteParams,
-    DevicesCancelInviteResult, DevicesCreateInviteParams, DevicesPreviewJoinRequestParams,
+    DevicesCancelInviteParams, DevicesCancelInviteResult, DevicesCreateInviteParams,
     DevicesRemoveParams, DevicesRemoveResult,
 };
 use openaide_app_server_protocol::envelopes::RequestMeta;
@@ -54,59 +53,6 @@ impl RpcGateway {
             DevicesCancelInviteResult {},
             events,
         )
-    }
-
-    pub(super) fn handle_devices_preview_join_request(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<DevicesPreviewJoinRequestParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        match self.remote_devices.preview_join_request(&params.code) {
-            Ok(result) => self.result(connection_id, id, meta, result),
-            Err(error) => self.error(connection_id, id, meta, error),
-        }
-    }
-
-    pub(super) fn handle_devices_approve_join_request(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-        now: AppServerTime,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<DevicesApproveJoinRequestParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        let added_by = self.pairing_client_label(&connection_id);
-        match self
-            .remote_devices
-            .approve_join_request(&params.code, added_by, now.0)
-        {
-            Ok(()) => {
-                crate::logging::info("remote_device_join_request_approved", serde_json::json!({}));
-                let events = self.publish_device_collection_update(now);
-                self.result_with_events(
-                    connection_id,
-                    id,
-                    meta,
-                    DevicesApproveJoinRequestResult {},
-                    events,
-                )
-            }
-            Err(error) => self.error(connection_id, id, meta, error),
-        }
     }
 
     pub(super) fn handle_devices_remove(

@@ -284,12 +284,13 @@ pub(crate) async fn desktop_remote_pair(
     operation_id: Option<String>,
 ) -> Result<&'static str, String> {
     let invite = remote::InviteCode::decode(&code).map_err(|error| {
+        // The wording follows ADR-0081 and matches the other App Shells.
         match error {
-            remote::PairingCodeError::WrongKind => {
-                "That code adds a device to a computer. On the other computer, open Settings → Remote and choose Show code."
+            remote::PairingCodeError::FromOlderOpenAide => {
+                "This code comes from an older OpenAIDE. Update OpenAIDE on that device, then make a code on the computer it should use: Settings › Remote › Add a device."
             }
             remote::PairingCodeError::Malformed => "The code is incomplete. Copy it again.",
-            remote::PairingCodeError::NotAPairingCode => "That is not an OpenAIDE pairing code.",
+            remote::PairingCodeError::NotAPairingCode => "This isn't an OpenAIDE code.",
         }
         .to_string()
     })?;
@@ -304,7 +305,7 @@ pub(crate) async fn desktop_remote_pair(
     .await
     .map_err(|failure| match failure {
         remote::Failure::NotTrusted => {
-            "This code has expired or was already used. Show a new code on the other computer."
+            "This code was already used or has expired. Make a new one on the other computer."
                 .to_string()
         }
         other => message(other, "The other computer"),

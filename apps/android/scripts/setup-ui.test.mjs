@@ -68,21 +68,6 @@ test('pairing asks for a code, never an address or password, and keeps a pasted 
   } finally { view.close(); }
 });
 
-test('this phone’s code is requested only while its screen is open', () => {
-  const view = setup({ initial: 'remote' });
-  try {
-    view.document.querySelector('[data-action="join_screen"]').click();
-    assert.deepEqual(view.actions.at(-1), { action: 'join' });
-    assert.match(view.document.querySelector('main').textContent, /Preparing this phone/);
-    view.window.receive({ join: { text: 'OAJ1 ABCD', qr: { size: 2, path: 'M0 0h1v1h-1z' } } });
-    assert.equal(view.document.querySelector('.code').textContent, 'OAJ1 ABCD');
-    assert.equal(view.document.querySelector('.qr path').getAttribute('d'), 'M0 0h1v1h-1z');
-    view.window.back();
-    assert.deepEqual(view.actions.at(-1), { action: 'join_stop' });
-    assert.ok(view.document.getElementById('pair-form'));
-  } finally { view.close(); }
-});
-
 test('a paired computer is named without interpreting its name as HTML', () => {
   const id = 'a'.repeat(64);
   const view = setup({ initial: 'remote', paired: true, remote: false, computers: [{ id, name: '<img src=x onerror=alert(1)>', current: false }] });

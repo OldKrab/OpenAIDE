@@ -2,16 +2,23 @@ use iroh::SecretKey;
 
 use super::*;
 
+/// A join-request code exactly as an OpenAIDE before ADR-0081 showed it.
+const OLD_JOIN_CODE: &str = "OAJ15VESRRRI2HBMN2XJAM4JAWMVMEUVSJZ2LRR7SNRWYFDBJLEHG7IQMVDBMJWGK5AA";
+
 fn key(seed: u8) -> PublicKey {
     SecretKey::from_bytes(&[seed; 32]).public()
 }
 
+fn invite(secret: u8) -> InviteCode {
+    InviteCode {
+        server: key(1),
+        secret: [secret; INVITE_SECRET_LEN],
+    }
+}
+
 #[test]
 fn invite_round_trips_and_tolerates_pasted_formatting() {
-    let invite = InviteCode {
-        server: key(1),
-        secret: [7; INVITE_SECRET_LEN],
-    };
+    let invite = invite(7);
     let code = invite.encode();
 
     assert!(code.starts_with("OAI1"));
@@ -21,94 +28,33 @@ fn invite_round_trips_and_tolerates_pasted_formatting() {
 }
 
 #[test]
-fn join_request_round_trips_labels_and_omits_an_empty_model() {
-    let join = JoinCode {
-        device: key(2),
-        name: "Kitchen tablet".to_string(),
-        model: Some("Tab S9".to_string()),
-    };
-    assert_eq!(JoinCode::decode(&join.encode()), Ok(join));
-
-    let unnamed_model = JoinCode {
-        device: key(2),
-        name: "Phone".to_string(),
-        model: None,
-    };
-    assert_eq!(JoinCode::decode(&unnamed_model.encode()), Ok(unnamed_model));
-}
-
-#[test]
-fn decoding_names_the_wrong_kind_of_code() {
-    let invite = InviteCode {
-        server: key(1),
-        secret: [0; INVITE_SECRET_LEN],
-    }
-    .encode();
-
-    assert_eq!(JoinCode::decode(&invite), Err(PairingCodeError::WrongKind));
+fn a_code_from_an_older_openaide_is_told_apart_from_other_text() {
     assert_eq!(
-        InviteCode::decode("OAJ1ABCD"),
-        Err(PairingCodeError::WrongKind)
+        InviteCode::decode(OLD_JOIN_CODE),
+        Err(PairingCodeError::FromOlderOpenAide)
     );
     assert_eq!(
-        JoinCode::decode("https://example.test"),
-        Err(PairingCodeError::NotAPairingCode)
+        InviteCode::decode(&OLD_JOIN_CODE.to_lowercase()),
+        Err(PairingCodeError::FromOlderOpenAide)
     );
     assert_eq!(
-        InviteCode::decode("hello"),
+        InviteCode::decode("https://example.test"),
         Err(PairingCodeError::NotAPairingCode)
     );
 }
 
 #[test]
-fn decoding_rejects_damaged_and_unnamed_codes() {
-    let join = JoinCode {
-        device: key(2),
-        name: "Phone".to_string(),
-        model: None,
-    }
-    .encode();
+fn a_damaged_invite_is_named_as_damaged() {
+    let code = invite(9).encode();
 
     assert_eq!(
-        JoinCode::decode(&join[..join.len() - 3]),
+        InviteCode::decode(&code[..code.len() - 4]),
         Err(PairingCodeError::Malformed)
     );
     assert_eq!(
-        JoinCode::decode("OAJ1!!!"),
+        InviteCode::decode("OAI1!!!"),
         Err(PairingCodeError::Malformed)
     );
-    let unnamed = JoinCode {
-        device: key(2),
-        name: " ".to_string(),
-        model: None,
-    }
-    .encode();
-    assert_eq!(JoinCode::decode(&unnamed), Err(PairingCodeError::Malformed));
-
-    let invite = InviteCode {
-        server: key(1),
-        secret: [9; INVITE_SECRET_LEN],
-    }
-    .encode();
-    assert_eq!(
-        InviteCode::decode(&invite[..invite.len() - 4]),
-        Err(PairingCodeError::Malformed)
-    );
-}
-
-#[test]
-fn the_secret_travels_as_base32_like_the_code() {
-    let invite = InviteCode {
-        server: key(1),
-        secret: [9; INVITE_SECRET_LEN],
-    };
-    let request = crate::InviteRequest {
-        secret: invite.secret_text().to_lowercase(),
-        name: "Phone".to_string(),
-        model: None,
-    };
-
-    assert_eq!(request.secret_bytes(), Some(invite.secret.to_vec()));
 }
 
 #[test]
@@ -121,17 +67,14 @@ fn labels_are_clamped_on_a_character_boundary_without_control_characters() {
     assert_eq!(clamp_label("a\u{7}b"), "ab");
 }
 
-/// Other test files paste this code as a literal; it must keep decoding.
 #[test]
-fn the_join_code_fixture_used_by_gateway_tests_stays_valid() {
-    let join = JoinCode {
-        device: key(3),
-        name: "Tablet".to_string(),
+fn the_secret_travels_as_base32_like_the_code() {
+    let invite = invite(9);
+    let request = crate::InviteRequest {
+        secret: invite.secret_text().to_lowercase(),
+        name: "Phone".to_string(),
         model: None,
     };
 
-    assert_eq!(
-        join.encode(),
-        "OAJ15VESRRRI2HBMN2XJAM4JAWMVMEUVSJZ2LRR7SNRWYFDBJLEHG7IQMVDBMJWGK5AA"
-    );
+    assert_eq!(request.secret_bytes(), Some(invite.secret.to_vec()));
 }

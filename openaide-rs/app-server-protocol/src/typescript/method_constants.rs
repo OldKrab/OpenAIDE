@@ -33,8 +33,7 @@ use crate::methods::{
     WORKTREE_RESOLVE_FOLDER,
 };
 use crate::methods::{
-    DEVICES_APPROVE_JOIN_REQUEST, DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE,
-    DEVICES_PREVIEW_JOIN_REQUEST, DEVICES_REMOVE, TASK_ATTENTION_WAIT, TASK_IMAGE,
+    DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE, DEVICES_REMOVE, TASK_ATTENTION_WAIT, TASK_IMAGE,
     TERMINALS_ATTACH, TERMINALS_CLOSE, TERMINALS_OPEN,
 };
 use crate::methods::{
@@ -246,14 +245,6 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const DEVICES_CANCEL_INVITE = {:?} as const;\n",
         DEVICES_CANCEL_INVITE
-    ));
-    output.push_str(&format!(
-        "export const DEVICES_PREVIEW_JOIN_REQUEST = {:?} as const;\n",
-        DEVICES_PREVIEW_JOIN_REQUEST
-    ));
-    output.push_str(&format!(
-        "export const DEVICES_APPROVE_JOIN_REQUEST = {:?} as const;\n",
-        DEVICES_APPROVE_JOIN_REQUEST
     ));
     output.push_str(&format!(
         "export const DEVICES_REMOVE = {:?} as const;\n",
