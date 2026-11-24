@@ -4,39 +4,31 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.SystemClock
-import computer.iroh.Connection
-import computer.iroh.ConnectionStats
-import computer.iroh.Endpoint
-import computer.iroh.EndpointAddr
-import computer.iroh.EndpointId
-import computer.iroh.EndpointOptions
-import computer.iroh.IrohAndroid
-import computer.iroh.SecretKey
-import computer.iroh.presetN0
+import io.openaide.android.remote.Check
+import io.openaide.android.remote.Invite
+import io.openaide.android.remote.NetworkKind
+import io.openaide.android.remote.Reached
+import io.openaide.android.remote.Remote
+import io.openaide.android.remote.RemoteException
+import io.openaide.android.remote.RemoteHost
+import io.openaide.android.remote.StorageException
+import io.openaide.android.remote.Stream
+import io.openaide.android.remote.Transport
+import io.openaide.android.remote.networkKind
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONObject
 
 /**
- * This phone as a Remote Device: its key pair, its iroh endpoint, and the one
- * connection to the paired computer's App Server (ADR-0062).
+ * This phone as a Remote Device (ADR-0062): the shell's side of the node in
+ * `openaide-rs/android-remote`, which owns the endpoint, pairing, the connection to
+ * the computer in use, and the rules that keep that connection on a phone.
  *
- * One endpoint is in use at a time: the library closes every connection when an
- * endpoint is collected, and two endpoints with the same key compete for its
- * relay. It is replaced, not kept for the life of the process, because Android
- * stops a hidden app's network and the library cannot observe that on Android.
- * See [ReconnectPolicy].
+ * The shell keeps what only it can: the key and paired computers in [ConnectionStore],
+ * the network Android reports, the app leaving and returning to the screen, and the
+ * diagnostics log the node's metadata-only events are written to. The node is made
+ * on first use, so a phone that never pairs never loads its library.
  */
 internal object RemoteNode {
     /** Why the paired computer cannot be used right now. */
@@ -44,429 +36,166 @@ internal object RemoteNode {
 
     class Unavailable(val failure: Failure) : Exception(failure.name)
 
-    private val APP_ALPN = "openaide/app-server/${BuildConfig.PROTOCOL_MAJOR}".toByteArray()
-    private val PAIRING_ALPN = "openaide/pair/1".toByteArray()
-    private const val PAIRING_MESSAGE_LIMIT = 4096u
-    private const val PAIRING_TIMEOUT_MS = 20_000L
-
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val diagnostics = AndroidDiagnostics()
-    private val binding = Mutex()
-    private val connecting = Mutex()
-    private var endpoint: Endpoint? = null
-    /** Why the endpoint must be replaced before its next use, or null. Set from any thread, acted on under [binding]. */
-    @Volatile private var stale: String? = null
-    @Volatile private var hiddenAt = 0L
-    private var binds = 0
-    /** Dials for a switch now on the endpoint; a retire waits for them. Changed under [binding]. */
-    private var switchDials = 0
-    @Volatile private var connection: Connection? = null
-    private var attempts = 0
+    private var created: Remote? = null
+    private var hidden = false
 
     /** The app left the screen; Android may stop its network from here on. */
-    fun hidden() { hiddenAt = SystemClock.elapsedRealtime() }
-
-    /**
-     * The app is on screen again. After more than a short pause the endpoint is
-     * replaced before the next dial, and a dial already waiting on it is ended;
-     * a switch's dial instead runs out its attempt, and the retire follows it.
-     */
-    fun shown() {
-        val since = hiddenAt
-        hiddenAt = 0
-        if (since == 0L || !ReconnectPolicy.staleAfterHidden(SystemClock.elapsedRealtime() - since)) return
-        stale = "resumed"
-        // The next dial binds a new endpoint.
-        scope.launch { binding.withLock { retire() } }
+    @Synchronized fun hidden() {
+        hidden = true
+        created?.hidden()
     }
 
-    /**
-     * Gives up the endpoint marked stale and its connection. Closing can take
-     * seconds on a dead network, so it does not delay the endpoint that follows.
-     */
-    private fun retire() {
-        val reason = stale ?: return
-        if (!ReconnectPolicy.retireNow(switchDials)) {
-            // The switch's dial ends on its own; its next attempt or the next bind retires.
-            diagnostics.record("remote_endpoint_retire", "deferred_for_switch", binds, 0)
-            return
-        }
-        val old = endpoint
-        endpoint = null
-        connection = null
-        // Cleared last: until then no caller may take the connection being given up.
-        stale = null
-        if (old == null) return
-        diagnostics.record("remote_endpoint_retire", reason, binds, 0)
-        scope.launch {
-            val started = SystemClock.elapsedRealtime()
-            val outcome = if (runCatching { old.shutdown() }.isSuccess) "closed" else "failed"
-            diagnostics.record("remote_endpoint_close", outcome, 0, SystemClock.elapsedRealtime() - started)
-        }
-    }
-
-    /** Binds the endpoint with this phone's stored key, creating the key on first use. */
-    suspend fun endpoint(context: Context): Endpoint = binding.withLock { boundEndpoint(context) }
-
-    /**
-     * The endpoint for one dial of a switch, counted until [endSwitchDial] so that a
-     * reconnect of the live connection meanwhile cannot retire it from under the dial.
-     */
-    private suspend fun switchDialEndpoint(context: Context): Endpoint = binding.withLock {
-        boundEndpoint(context).also { switchDials++ }
-    }
-
-    private suspend fun endSwitchDial(succeeded: Boolean) = binding.withLock {
-        switchDials--
-        val reason = stale
-        // The dial just reached a computer on this endpoint, so whatever marked it stale
-        // meanwhile was wrong about its network; retiring it would end the new connection.
-        if (succeeded && reason != null && switchDials == 0) {
-            stale = null
-            diagnostics.record("remote_endpoint_retire", "kept_after_switch", binds, 0)
-        } else if (switchDials == 0) {
-            retire()
-        }
-    }
-
-    /** Must hold [binding]. */
-    private suspend fun boundEndpoint(context: Context): Endpoint {
-        retire()
-        endpoint?.let { return it }
-        val started = SystemClock.elapsedRealtime()
-        val bind = ++binds
-        diagnostics.record("remote_endpoint_bind", "started", bind, 0)
-        val application = context.applicationContext
-        return try {
-            val store = ConnectionStore(application)
-            val key = try {
-                store.deviceKey() ?: SecretKey.generate().toBytes().also(store::saveDeviceKey)
-            } catch (error: RuntimeException) {
-                throw Unavailable(Failure.STORAGE)
-            }
-            IrohAndroid.installAndroidContext(application)
-            // The phone only dials (ADR-0081), so it accepts no protocol.
-            val bound = Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = key))
-            endpoint = bound
-            diagnostics.record("remote_endpoint_bind", "ready", bind, SystemClock.elapsedRealtime() - started)
-            bound
-        } catch (error: Throwable) {
-            diagnostics.record("remote_endpoint_bind", if (error is Unavailable) "storage_unavailable" else "failed", bind,
-                SystemClock.elapsedRealtime() - started)
-            throw error as? Unavailable ?: Unavailable(Failure.UNREACHABLE)
-        }
+    /** The app is on screen again; after a longer absence the node replaces its endpoint. */
+    @Synchronized fun shown() {
+        hidden = false
+        created?.shown()
     }
 
     /** Spends an invite: connects to the App Server it names and presents its secret. */
-    suspend fun redeem(context: Context, invite: PairingCode.Invite, name: String, model: String?): ConnectionStore.PairedServer {
-        val started = SystemClock.elapsedRealtime()
-        diagnostics.record("remote_pairing_invite", "started", 0, 0)
-        var outcome = "unreachable"
-        try {
-            val node = endpoint(context)
-            val result = withTimeout(PAIRING_TIMEOUT_MS) {
-                val pairing = node.connect(EndpointAddr(EndpointId.fromString(invite.serverId), null, emptyList()), PAIRING_ALPN)
-                try {
-                    val stream = pairing.openBi()
-                    val request = JSONObject().put("secret", invite.secretText).put("name", name)
-                    if (!model.isNullOrEmpty()) request.put("model", model)
-                    stream.send().writeAll(request.toString().toByteArray())
-                    stream.send().finish()
-                    JSONObject(String(stream.recv().readToEnd(PAIRING_MESSAGE_LIMIT)))
-                } finally {
-                    runCatching { pairing.close(0L, "done".toByteArray()) }
-                }
-            }
-            if (!result.optBoolean("trusted")) {
-                outcome = "refused"
-                throw Unavailable(Failure.NOT_TRUSTED)
-            }
-            outcome = "trusted"
-            return ConnectionStore.PairedServer(invite.serverId, result.optString("serverName"))
-        } catch (error: Unavailable) {
-            throw error
-        } catch (error: Throwable) {
-            throw Unavailable(Failure.UNREACHABLE)
-        } finally {
-            diagnostics.record("remote_pairing_invite", outcome, 0, SystemClock.elapsedRealtime() - started)
-        }
+    suspend fun redeem(context: Context, invite: Invite, name: String, model: String?): ConnectionStore.PairedServer {
+        val paired = call { remote(context).redeem(invite, name, model) }
+        return ConnectionStore.PairedServer(paired.id, paired.name)
     }
 
-    /** The live connection to the paired App Server, opened or reopened on demand. */
-    suspend fun connection(context: Context): Connection {
-        live()?.let { return it }
-        return connecting.withLock {
-            live()?.let { return it }
-            val store = ConnectionStore(context.applicationContext)
-            val server = store.pairedServer() ?: throw Unavailable(Failure.NOT_TRUSTED)
-            reach(context, store, server).also { use(it) }
-        }
-    }
+    /** Reaches the computer in use, unless the connection to it is live. */
+    suspend fun connect(context: Context) = call { remote(context).connect() }
+
+    /** Opens the stream for one request to the computer in use; the caller closes it. */
+    suspend fun open(context: Context): Stream = call { remote(context).open() }
 
     /**
      * Reaches [server] for a switch while the connection in use stays live: the
      * result is not used until [adopt] takes it, and a failed attempt keeps the
      * endpoint that connection rides on.
      */
-    suspend fun reachForSwitch(context: Context, server: ConnectionStore.PairedServer): Connection =
-        reach(context, ConnectionStore(context.applicationContext), server, DialReport.Purpose.SWITCH)
+    suspend fun reachForSwitch(context: Context, server: ConnectionStore.PairedServer): Reached =
+        call { remote(context).reachForSwitch(server.id) }
 
     /** Makes a connection reached for a switch the one in use, ending the previous one. */
-    fun adopt(next: Connection) {
-        val previous = connection
-        use(next)
-        if (previous != null && previous !== next) runCatching { previous.close(0L, "switched".toByteArray()) }
-        diagnostics.record("remote_connect", "adopted", attempts, 0)
-    }
-
-    /** Makes [opened] the live connection; its receive watch lasts while it stays live. */
-    private fun use(opened: Connection) {
-        connection = opened
-        watchReceive(opened, attempts)
+    fun adopt(context: Context, reached: Reached) {
+        remote(context).adopt(reached)
+        reached.close()
     }
 
     /** Ends a connection reached for a switch that was cancelled or could not be saved. */
-    fun abandon(unused: Connection) {
-        if (connection === unused) return
-        runCatching { unused.close(0L, "cancelled".toByteArray()) }
-        diagnostics.record("remote_connect", "abandoned", attempts, 0)
+    fun abandon(context: Context, reached: Reached) {
+        remote(context).abandon(reached)
+        reached.close()
     }
 
-    /**
-     * One slow or stalled dial is not yet an unreachable computer: each further
-     * attempt starts on a new endpoint, and the caller keeps showing "Connecting…".
-     */
-    private suspend fun reach(
-        context: Context,
-        store: ConnectionStore,
-        server: ConnectionStore.PairedServer,
-        purpose: DialReport.Purpose = DialReport.Purpose.LIVE,
-    ): Connection {
-        val started = SystemClock.elapsedRealtime()
-        var index = 0
-        while (true) {
-            val timeoutMs = ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started)
-            try {
-                return dial(context, store, server, index, timeoutMs, purpose)
-            } catch (error: Unavailable) {
-                index++
-                // A hidden app usually has no network to retry on; its return starts over anyway.
-                val more = hiddenAt == 0L && ReconnectPolicy.attemptTimeoutMs(index, SystemClock.elapsedRealtime() - started) > 0
-                if (error.failure != Failure.UNREACHABLE || !more) throw error
-                if (ReconnectPolicy.retireAfterFailedDial(live() != null)) stale = "dial_failed"
-            }
-        }
+    /** Runs the steps of [ConnectionCheck]; recorded by the node as one `remote_check` pair. */
+    suspend fun check(context: Context, server: ConnectionStore.PairedServer): Check =
+        call { remote(context).check(server.id) }
+
+    /** Ends the connection after the user forgets the computer or uses another. */
+    @Synchronized fun disconnect() {
+        created?.disconnect()
     }
 
-    /** One attempt to reach the computer, on the current endpoint, ending in one [DialReport] record. */
-    private suspend fun dial(
-        context: Context,
-        store: ConnectionStore,
-        server: ConnectionStore.PairedServer,
-        index: Int,
-        timeoutMs: Long,
-        purpose: DialReport.Purpose,
-    ): Connection {
-        val attempt = ++attempts
+    /** The node, made with this app's key and storage on first use. */
+    @Synchronized private fun remote(context: Context): Remote {
+        created?.let { return it }
+        val application = context.applicationContext
         val started = SystemClock.elapsedRealtime()
-        val report = DialReport(purpose, index, server.id, network(context))
-        diagnostics.record("remote_connect", "started", attempt, 0, report.startFields())
-        var outcome = "unreachable"
-        var cause: Throwable? = null
-        var counted = false
-        var node: Endpoint? = null
-        val id = runCatching { EndpointId.fromString(server.id) }.getOrNull()
-        try {
-            // The live connection and a switch share the one endpoint (see the class); a
-            // switch's dial holds off a retire the live connection's reconnect would make.
-            val forSwitch = purpose == DialReport.Purpose.SWITCH
-            node = if (forSwitch) switchDialEndpoint(context).also { counted = true } else endpoint(context)
-            report.stage = DialReport.Stage.ADDRESS
-            report.ownRelay = runCatching { node.addr().relayUrl() != null }.getOrNull()
-            val relay = ReconnectPolicy.relayFor(index, runCatching { store.relay(server.id) }.getOrNull())
-            report.address = if (relay != null) "remembered_relay" else "lookup"
-            if (id == null) throw IllegalArgumentException()
-            report.stage = DialReport.Stage.CONNECT
-            val opened = try {
-                withTimeout(timeoutMs) { node.connect(EndpointAddr(id, relay, emptyList()), APP_ALPN) }
-            } catch (error: TimeoutCancellationException) {
-                outcome = "timeout"
-                throw Unavailable(Failure.UNREACHABLE)
+        return try {
+            RemoteLibrary.load(application)
+            Remote(AndroidRemoteHost(application)).also {
+                // The node starts after the app may already have left the screen.
+                if (hidden) it.hidden()
+                created = it
+                diagnostics.record("remote_library_load", "ready", 0, SystemClock.elapsedRealtime() - started)
             }
-            // The App Server completes the handshake before it checks the key,
-            // so a removed phone learns it from the close that follows.
-            report.stage = DialReport.Stage.REFUSAL_CHECK
-            val refusal = withTimeoutOrNull(REFUSAL_WAIT_MS) { opened.closed() }
-            if (refusal != null) throw Unavailable(failure(refusal))
-            report.stage = DialReport.Stage.DONE
-            outcome = if (opened.paths().any { it.isSelected && it.isRelay }) "relay" else "direct"
-            rememberRelay(node, store, id, server.id, relay, attempt)
-            return opened
-        } catch (error: Unavailable) {
-            if (outcome != "timeout") outcome = error.failure.name.lowercase()
-            throw error
-        } catch (error: CancellationException) {
-            // A cancelled switch, not an unreachable computer.
-            outcome = "cancelled"
-            throw error
         } catch (error: Throwable) {
-            cause = error
-            // An App Server of another protocol major does not offer this ALPN.
-            val incompatible = DialReport.errorReason(error.message) == "alpn"
-            outcome = if (incompatible) "incompatible" else "failed"
-            throw Unavailable(if (incompatible) Failure.INCOMPATIBLE else Failure.UNREACHABLE)
-        } finally {
-            withContext(NonCancellable) {
-                if (counted) endSwitchDial(succeeded = outcome == "relay" || outcome == "direct")
-                // What the endpoint learned of the computer tells a failed lookup from an unanswered dial.
-                if (outcome == "timeout" || outcome == "failed") knownAddress(node, id, report)
-            }
-            diagnostics.record("remote_connect", outcome, attempt, SystemClock.elapsedRealtime() - started, report.fields(cause))
+            // A library missing from this build, or a native failure: no remote work is possible.
+            diagnostics.record("remote_library_load", "failed", 0, SystemClock.elapsedRealtime() - started,
+                mapOf("error_class" to error.javaClass.simpleName))
+            throw Unavailable(Failure.UNREACHABLE)
         }
     }
 
-    private suspend fun knownAddress(node: Endpoint?, id: EndpointId?, report: DialReport) {
-        if (node == null || id == null) return
-        val known = withTimeoutOrNull(KNOWN_ADDRESS_WAIT_MS) { runCatching { node.remoteAddr(id) }.getOrNull() } ?: return
-        report.knownRelay = runCatching { known.relayUrl() != null }.getOrNull()
-        report.knownDirect = runCatching { known.directAddresses().size }.getOrNull()
-    }
-
-    /**
-     * Runs the steps of [ConnectionCheck]: this phone's network, a bound endpoint, its home
-     * relay, then the computer. The connection in use answers for the computer; otherwise one
-     * dial is made and its connection closed. Recorded as one `remote_check` record.
-     */
-    suspend fun check(context: Context, server: ConnectionStore.PairedServer): ConnectionCheck.Result {
-        val started = SystemClock.elapsedRealtime()
-        diagnostics.record("remote_check", "started", 0, 0, mapOf("target" to DialReport.shortId(server.id)))
-        val network = network(context)
-        val node = try { endpoint(context) } catch (error: CancellationException) { throw error } catch (error: Throwable) { null }
-        val relay = when {
-            node == null -> ConnectionCheck.Relay.NO_ENDPOINT
-            withTimeoutOrNull(CHECK_RELAY_WAIT_MS) { node.online() } != null -> ConnectionCheck.Relay.REACHED
-            else -> ConnectionCheck.Relay.NOT_REACHED
-        }
-        val computer = when {
-            node == null -> ConnectionCheck.Computer.NOT_CHECKED
-            live() != null -> ConnectionCheck.Computer.CONNECTED
-            else -> try {
-                val store = ConnectionStore(context.applicationContext)
-                val opened = dial(context, store, server, 0, CHECK_DIAL_MS, DialReport.Purpose.CHECK)
-                val relayed = runCatching { opened.paths().any { it.isSelected && it.isRelay } }.getOrDefault(false)
-                abandon(opened)
-                if (relayed) ConnectionCheck.Computer.RELAY else ConnectionCheck.Computer.DIRECT
-            } catch (error: Unavailable) {
-                when (error.failure) {
-                    Failure.NOT_TRUSTED -> ConnectionCheck.Computer.NOT_TRUSTED
-                    Failure.INCOMPATIBLE -> ConnectionCheck.Computer.INCOMPATIBLE
-                    Failure.UNREACHABLE, Failure.STORAGE -> ConnectionCheck.Computer.UNREACHABLE
-                }
-            }
-        }
-        val result = ConnectionCheck.Result(network, relay, computer)
-        diagnostics.record("remote_check", ConnectionCheck.outcome(result), 0, SystemClock.elapsedRealtime() - started,
-            ConnectionCheck.fields(result) + ("target" to DialReport.shortId(server.id)))
-        return result
+    /** One call into the node, its failure as a [Failure]. */
+    private suspend fun <T> call(block: suspend () -> T): T = try {
+        block()
+    } catch (error: RemoteException) {
+        throw Unavailable(when (error) {
+            is RemoteException.Unreachable -> Failure.UNREACHABLE
+            is RemoteException.NotTrusted -> Failure.NOT_TRUSTED
+            is RemoteException.Incompatible -> Failure.INCOMPATIBLE
+            is RemoteException.Storage -> Failure.STORAGE
+        })
+    } catch (error: Unavailable) {
+        throw error
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        // A panic in the library arrives as an internal error; the screens treat it as
+        // an unreachable computer rather than ending the app.
+        diagnostics.record("remote_library_call", "failed", 0, 0, mapOf("error_class" to error.javaClass.simpleName))
+        throw Unavailable(Failure.UNREACHABLE)
     }
 
     /** The transport this phone dials over; never an address or a network name. */
     private fun network(context: Context): NetworkKind = runCatching {
-        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return NetworkKind.UNKNOWN
-        val active = manager.activeNetwork ?: return NetworkKind.NONE
-        val capabilities = manager.getNetworkCapabilities(active) ?: return NetworkKind.UNKNOWN
-        NetworkKind.of(
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return UNKNOWN_NETWORK
+        val active = manager.activeNetwork ?: return NetworkKind(Transport.NONE, validated = false, vpn = false)
+        val capabilities = manager.getNetworkCapabilities(active) ?: return UNKNOWN_NETWORK
+        networkKind(
             wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
             cellular = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
             ethernet = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
             vpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
             validated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
         )
-    }.getOrDefault(NetworkKind.UNKNOWN)
+    }.getOrDefault(UNKNOWN_NETWORK)
+
+    private val UNKNOWN_NETWORK = NetworkKind(Transport.UNKNOWN, validated = false, vpn = false)
 
     /**
-     * Records when the connection in use stops receiving from the computer while
-     * the app is on screen, which "Connecting…" logic cannot see: the connection
-     * still looks open. The end record says whether this phone kept sending and
-     * losing packets meanwhile, which tells a dead return path from a computer
-     * that stopped answering. Healthy connections stay quiet.
+     * What the node keeps in and learns from this app. Called on the library's threads;
+     * a call that is not declared to fail never throws, or the library would stop.
      */
-    // TODO: once a stall's cause is known from these records, decide whether a
-    // stall should replace the endpoint as a return to the screen does.
-    private fun watchReceive(opened: Connection, attempt: Int) = scope.launch {
-        val watch = ReceiveWatch()
-        var atStall: ConnectionStats? = null
-        while (connection === opened && opened.closeReason() == null) {
-            val stats = runCatching { opened.stats() }.getOrNull() ?: break
-            val change = watch.sample(SystemClock.elapsedRealtime(), stats.udpRxDatagrams, hiddenAt == 0L)
-            if (change is ReceiveWatch.Change.Stalled) atStall = stats
-            if (change != null) recordReceive(change, attempt, opened, stats, atStall)
-            delay(ReceiveWatch.SAMPLE_MS)
+    private class AndroidRemoteHost(private val context: Context) : RemoteHost {
+        private val diagnostics = AndroidDiagnostics()
+
+        override fun deviceKey(): ByteArray? = stored { ConnectionStore(context).deviceKey() }
+
+        override fun saveDeviceKey(key: ByteArray) = stored { ConnectionStore(context).saveDeviceKey(key) }
+
+        /** The paired computer chosen for remote work, which the workspace and attention use. */
+        override fun computerInUse(): String? = runCatching { ConnectionStore(context).pairedServer()?.id }.getOrNull()
+
+        override fun relay(computer: String): String? = runCatching { ConnectionStore(context).relay(computer) }.getOrNull()
+
+        override fun saveRelay(computer: String, relay: String) = stored { ConnectionStore(context).saveRelay(computer, relay) }
+
+        override fun network(): NetworkKind = RemoteNode.network(context)
+
+        override fun log(event: String, fields: String) {
+            runCatching { diagnostics.recordFields(event, fields) }
         }
-        val ended = watch.end(SystemClock.elapsedRealtime()) ?: return@launch
-        recordReceive(ended, attempt, opened, runCatching { opened.stats() }.getOrNull(), atStall)
-    }
 
-    private fun recordReceive(change: ReceiveWatch.Change, attempt: Int, opened: Connection, stats: ConnectionStats?, atStall: ConnectionStats?) {
-        val (outcome, silentMs) = when (change) {
-            is ReceiveWatch.Change.Stalled -> "stalled" to change.silentMs
-            is ReceiveWatch.Change.Resumed -> "resumed" to change.silentMs
-            is ReceiveWatch.Change.Hidden -> "hidden" to change.silentMs
-            is ReceiveWatch.Change.Ended -> "ended" to change.silentMs
+        /** Android Keystore failures, as the one storage failure the node understands. */
+        private inline fun <T> stored(block: () -> T): T = try {
+            block()
+        } catch (error: RuntimeException) {
+            throw StorageException.Unavailable()
         }
-        val fields = HashMap<String, Any>()
-        val selected = runCatching { opened.paths().firstOrNull { it.isSelected } }.getOrNull()
-        fields["route"] = when { selected == null -> "none"; selected.isRelay -> "relay"; else -> "direct" }
-        if (selected != null) fields["rtt_ms"] = selected.rttMs.toLong()
-        if (stats != null) {
-            fields["rx_datagrams"] = stats.udpRxDatagrams
-            fields["tx_datagrams"] = stats.udpTxDatagrams
-            fields["lost_packets"] = stats.lostPackets
-            if (atStall != null && change !is ReceiveWatch.Change.Stalled) {
-                fields["tx_during_stall"] = stats.udpTxDatagrams - atStall.udpTxDatagrams
-                fields["lost_during_stall"] = stats.lostPackets - atStall.lostPackets
-            }
-        }
-        diagnostics.record("remote_connection_receive", outcome, attempt, silentMs, fields)
+    }
+}
+
+/** Loads the node's library and gives it this app's context for DNS. */
+internal object RemoteLibrary {
+    @Volatile private var loaded = false
+
+    @Synchronized fun load(context: Context) {
+        if (loaded) return
+        System.loadLibrary("openaide_android_remote")
+        // The resolver reads Android's nameservers through the app context.
+        installContext(context.applicationContext)
+        loaded = true
     }
 
-    /** Keeps the relay the computer answered through, so the next connect can skip the address lookup. */
-    private suspend fun rememberRelay(node: Endpoint, store: ConnectionStore, id: EndpointId, serverId: String, used: String?, attempt: Int) {
-        val current = runCatching { node.remoteAddr(id)?.relayUrl() }.getOrNull()
-        val outcome = when {
-            !ReconnectPolicy.validRelay(current) -> "unavailable"
-            current == used -> "unchanged"
-            runCatching { store.saveRelay(serverId, current) }.isSuccess -> "saved"
-            else -> "storage_unavailable"
-        }
-        diagnostics.record("remote_connect_address", outcome, attempt, 0)
-    }
-
-    /** The open connection, unless its endpoint is about to be replaced. */
-    private fun live(): Connection? = connection?.takeIf { stale == null && it.closeReason() == null }
-
-    /** Forgets a connection a stream could not be opened on; returns why it ended. */
-    fun drop(failed: Connection): Failure {
-        if (connection === failed) connection = null
-        return failure(failed.closeReason() ?: "")
-    }
-
-    /** Ends the connection after the user forgets the computer or pairs another. */
-    fun disconnect() {
-        val current = connection ?: return
-        connection = null
-        runCatching { current.close(0L, "forgotten".toByteArray()) }
-        diagnostics.record("remote_connect", "disconnected", attempts, 0)
-    }
-
-    private fun failure(closeReason: String): Failure = when {
-        listOf("untrusted", "removed", "refused").any { closeReason.contains(it) } -> Failure.NOT_TRUSTED
-        closeReason.contains("unknown protocol") -> Failure.INCOMPATIBLE
-        else -> Failure.UNREACHABLE
-    }
-
-    private const val REFUSAL_WAIT_MS = 400L
-    private const val KNOWN_ADDRESS_WAIT_MS = 500L
-    private const val CHECK_RELAY_WAIT_MS = 5_000L
-    private const val CHECK_DIAL_MS = 8_000L
+    @JvmStatic private external fun installContext(context: Context)
 }
