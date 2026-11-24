@@ -320,6 +320,74 @@ fn forgetting_a_computer_stops_its_gateway_and_removes_it() {
 }
 
 #[test]
+fn a_computer_forgotten_while_a_browser_reconnects_is_not_reached_again() {
+    let computer = remote_computer();
+    let folder = tempfile::tempdir().unwrap();
+    let (log, logged) = recording();
+    let (gateway, _events) = computer.web_app_logged(folder.path(), log);
+    let paired = computer.run(gateway.pair(&computer.code(), None)).unwrap();
+    let attempts = logged("remote_connect_started");
+
+    // The test holds the Computer's slot, as a connect under way does. Each task
+    // waiting for the slot holds a reference to it, which is the gate.
+    let slot = gateway.slot(&paired.id);
+    let held = computer.run(slot.clone().lock_owned());
+    let waiting = Arc::strong_count(&slot);
+    let forgetting = computer.runtime.spawn({
+        let gateway = gateway.clone();
+        let id = paired.id.clone();
+        async move { gateway.forget(&id).await }
+    });
+    wait_until("the forget waits for the slot", || {
+        Arc::strong_count(&slot) == waiting + 1
+    });
+    // The forget stopping the gateway drops the browser's socket; the browser
+    // asks again before the forget is done.
+    let connecting = computer.runtime.spawn({
+        let gateway = gateway.clone();
+        let id = paired.id.clone();
+        async move { gateway.connect(&id).await }
+    });
+    wait_until("the connect waits for the slot", || {
+        Arc::strong_count(&slot) == waiting + 2
+    });
+    drop(held);
+
+    computer.run(forgetting).unwrap().unwrap();
+    let refused = computer.run(connecting).unwrap().unwrap_err();
+    assert_eq!(refused.reason, "not_paired");
+    assert_eq!(logged("remote_connect_started"), attempts);
+    assert!(gateway.computers().unwrap().is_empty());
+}
+
+#[test]
+fn a_connection_that_ended_is_opened_again_before_it_is_handed_out() {
+    let computer = remote_computer();
+    let folder = tempfile::tempdir().unwrap();
+    let (log, logged) = recording();
+    let (gateway, _events) = computer.web_app_logged(folder.path(), log);
+    let paired = computer.run(gateway.pair(&computer.code(), None)).unwrap();
+    let first = computer.run(gateway.connect(&paired.id)).unwrap();
+    // The connection the running gateway keeps ends, as it does when the
+    // Computer goes away.
+    computer.run(async {
+        let slot = gateway.slot(&paired.id);
+        let slot = slot.lock().await;
+        let client = &slot.running.as_ref().unwrap().client;
+        client
+            .connection()
+            .await
+            .unwrap()
+            .close(0u32.into(), b"gone");
+    });
+
+    let attempts = logged("remote_connect_started");
+    let again = computer.run(gateway.connect(&paired.id)).unwrap();
+    assert_eq!(logged("remote_connect_started"), attempts + 1);
+    assert_eq!(again, first, "the running gateway is handed out again");
+}
+
+#[test]
 fn the_folder_keeps_its_key_and_list_private_and_across_restarts() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("web-app");
