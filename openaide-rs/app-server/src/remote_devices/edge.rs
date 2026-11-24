@@ -19,7 +19,7 @@ use openaide_remote_core::{
 use tokio::sync::mpsc;
 
 use super::bridge::{self, BridgeTarget};
-use super::network_watch::{self, describe, is_direct, path_name, watch_path, RouteTally};
+use super::network_watch::{self, describe, path_name, sample, watch_path, RouteTally};
 use super::relay_check::{self, CheckOutcome, RelayCheck, RelayHealth};
 use super::{EdgeCommand, RemoteDevices};
 use crate::client_lifecycle::AppServerTime;
@@ -350,7 +350,7 @@ async fn handle_incoming(
     if connection.alpn() == PAIRING_ALPN {
         accept_invite(connection, devices).await;
     } else if connection.alpn() == application_alpn() {
-        serve_device(connection, devices, target, connections).await;
+        serve_device(connection, devices, target, connections, started.elapsed()).await;
     } else if connection.alpn() == relay_check::RELAY_CHECK_ALPN {
         relay_check::answer(connection);
     } else {
@@ -430,12 +430,44 @@ fn transport_code(error: &ConnectionError) -> Option<u64> {
     }
 }
 
-/// Serves one trusted connection: each stream it opens is one request.
+/// Why a served connection ended, as stable names and numbers. The reason text a
+/// peer sends with its close is free-form, so it stays out of the logs.
+#[derive(Debug, PartialEq, Eq)]
+struct ConnectionEnd {
+    kind: &'static str,
+    /// The peer's application close code, or the QUIC number of a transport close.
+    code: Option<u64>,
+}
+
+impl ConnectionEnd {
+    /// The device lost its trust while connected, and the edge stopped serving it.
+    const UNTRUSTED: Self = Self {
+        kind: "untrusted",
+        code: None,
+    };
+
+    fn of(error: &ConnectionError) -> Self {
+        let code = match error {
+            ConnectionError::ApplicationClosed(close) => Some(close.error_code.into_inner()),
+            ConnectionError::ConnectionClosed(close) => Some(close.error_code.into()),
+            _ => transport_code(error),
+        };
+        Self {
+            kind: connection_error_kind(error),
+            code,
+        }
+    }
+}
+
+/// Serves one trusted connection: each stream it opens is one request. `handshake`
+/// is the time the edge spent on the connection's handshake. The device's own wait
+/// before that, to find and reach the edge, is known only to the device.
 async fn serve_device(
     connection: Connection,
     devices: RemoteDevices,
     target: BridgeTarget,
     connections: Connections,
+    handshake: Duration,
 ) {
     let device = connection.remote_id();
     let device_label = device.fmt_short().to_string();
@@ -454,17 +486,17 @@ async fn serve_device(
         .or_default()
         .push(connection.clone());
     let started = Instant::now();
-    let initial_path = describe(&connection);
+    let tally = Arc::new(Mutex::new(RouteTally::new(started)));
+    let initial_path = sample(&connection, &tally);
     logging::info(
         "remote_device_connected",
-        // Named `route` because the log redacts every field called `path`.
-        serde_json::json!({ "device": device_label, "route": path_name(&initial_path) }),
+        serde_json::json!({
+            "device": device_label,
+            // Named `route` because the log redacts every field called `path`.
+            "route": path_name(&initial_path),
+            "handshake_ms": u64::try_from(handshake.as_millis()).unwrap_or(u64::MAX),
+        }),
     );
-    let tally = Arc::new(Mutex::new(RouteTally::new(started)));
-    tally
-        .lock()
-        .expect("route tally lock poisoned")
-        .observe(is_direct(&initial_path), started);
     devices.device_connected(&device, initial_path);
     let path_watch = tokio::spawn(watch_path(
         connection.clone(),
@@ -473,16 +505,21 @@ async fn serve_device(
     ));
 
     let mut streams: u64 = 0;
-    while let Ok((send, recv)) = connection.accept_bi().await {
+    let end = loop {
+        let (send, recv) = match connection.accept_bi().await {
+            Ok(stream) => stream,
+            Err(error) => break ConnectionEnd::of(&error),
+        };
         // Removal closes the connection, but a stream may already be in flight.
         if !devices.is_trusted(&device) {
-            break;
+            break ConnectionEnd::UNTRUSTED;
         }
         streams += 1;
         let devices = devices.clone();
         let target = target.clone();
         let device_label = device_label.clone();
-        let stalled_connection = connection.clone();
+        let stream_connection = connection.clone();
+        let tally = tally.clone();
         let stream = streams;
         tokio::spawn(async move {
             let on_head = |head: &bridge::TrustedHead| {
@@ -491,8 +528,11 @@ async fn serve_device(
                 }
             };
             let on_stall =
-                |stall| log_write_stall(&stalled_connection, &device_label, stream, stall);
+                |stall| log_write_stall(&stream_connection, &device_label, stream, stall);
             let result = bridge::forward(recv, send, &target, on_head, on_stall).await;
+            // A request's bytes are counted as it ends, so a short connection is
+            // measured without waiting for the path watch.
+            sample(&stream_connection, &tally);
             if let Err(error) = result {
                 // A closed stream is how a device abandons a request; only the
                 // other classes point at a fault.
@@ -507,7 +547,7 @@ async fn serve_device(
                 }
             }
         });
-    }
+    };
 
     path_watch.abort();
     if let Some(open) = connections
@@ -518,12 +558,20 @@ async fn serve_device(
         open.retain(|other| other.stable_id() != connection.stable_id());
     }
     devices.device_disconnected(&device, AppServerTime::now().0);
+    // UDP payload in both directions over every path, QUIC's own overhead included.
+    let stats = connection.stats();
     let mut fields = serde_json::json!({
         "device": device_label,
         "duration_ms": elapsed_ms(started),
         "streams": streams,
+        "close_kind": end.kind,
+        "close_code": end.code,
+        "tx_bytes": stats.udp_tx.bytes,
+        "rx_bytes": stats.udp_rx.bytes,
+        "lost_packets": stats.lost_packets,
     });
-    // How long the connection was direct shows whether hole punching ever succeeded.
+    // How long the connection was direct shows whether hole punching ever succeeded,
+    // and the relayed bytes show what the relay had to carry.
     let route = tally
         .lock()
         .expect("route tally lock poisoned")
