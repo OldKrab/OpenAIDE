@@ -110,13 +110,11 @@ internal class RemoteAttention(private val context: Context, private val events:
         val response = try {
             runBlocking {
                 withTimeout(timeoutMs) {
-                    val connection = RemoteNode.connection(context)
-                    val stream = try { connection.openBi() } catch (error: Throwable) {
-                        throw RemoteNode.Unavailable(RemoteNode.drop(connection))
+                    RemoteNode.open(context).use { stream ->
+                        stream.writeAll(request)
+                        stream.finish()
+                        stream.readToEnd(AttentionWire.MAX_RESPONSE_BYTES.toUInt())
                     }
-                    stream.send().writeAll(request)
-                    stream.send().finish()
-                    stream.recv().readToEnd(AttentionWire.MAX_RESPONSE_BYTES.toUInt())
                 }
             }
         } catch (error: RemoteNode.Unavailable) {

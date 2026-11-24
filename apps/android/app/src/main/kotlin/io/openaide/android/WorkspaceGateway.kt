@@ -2,8 +2,7 @@ package io.openaide.android
 
 import android.content.Context
 import android.os.SystemClock
-import computer.iroh.BiStream
-import computer.iroh.Connection
+import io.openaide.android.remote.Stream
 import java.io.InputStream
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -19,7 +18,7 @@ import kotlinx.coroutines.runBlocking
  *
  * It answers Frontend requests from the APK and carries App Server requests to
  * the App Server, exactly as the Web Shell's proxy does on a computer: over one
- * iroh stream per request to the paired computer, or over loopback with the
+ * stream per request to the paired computer, or over loopback with the
  * held token to the App Server in Termux or the SSH forward to an SSH Computer.
  * Recovery after a lost connection stays where it already is: the Frontend's
  * resumable session retries, and each retry asks [RemoteNode] or the
@@ -119,14 +118,14 @@ internal object WorkspaceGateway {
         val upstream = workers.submit {
             try {
                 runBlocking {
-                    stream.send().writeAll(GatewayHttp.forwarded(head, target) + bodyStart)
+                    stream.writeAll(GatewayHttp.forwarded(head, target) + bodyStart)
                     val buffer = ByteArray(CHUNK_BYTES)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        stream.send().writeAll(buffer.copyOf(count))
+                        stream.writeAll(buffer.copyOf(count))
                     }
-                    stream.send().finish()
+                    stream.finish()
                 }
             } catch (error: Throwable) {
                 // Either side ended the request; the response side reports the outcome.
@@ -137,7 +136,7 @@ internal object WorkspaceGateway {
             val output = socket.getOutputStream()
             runBlocking {
                 while (true) {
-                    val chunk = stream.recv().read(CHUNK_BYTES.toUInt())
+                    val chunk = stream.read(CHUNK_BYTES.toUInt())
                     if (chunk.isEmpty()) break
                     output.write(chunk)
                     output.flush()
@@ -151,6 +150,8 @@ internal object WorkspaceGateway {
             // Closing the socket ends the request reader, which may still wait on the WebView.
             runCatching { socket.close() }
             upstream.cancel(true)
+            // The library frees the stream once the request side's last call returns.
+            stream.close()
             // Healthy requests stay quiet: a session polls and reconnects continuously.
             if (outcome == "stream_failed") {
                 diagnostics.record("workspace_gateway_request", outcome, request, SystemClock.elapsedRealtime() - started)
@@ -229,17 +230,8 @@ internal object WorkspaceGateway {
         throw HeldServer.Unavailable("unreachable")
     }
 
-    /** Opens a stream, replacing a connection that died since the last request once. */
-    private fun open(context: Context): BiStream = runBlocking {
-        var failure = RemoteNode.Failure.UNREACHABLE
-        repeat(2) {
-            val connection: Connection = RemoteNode.connection(context)
-            try { return@runBlocking connection.openBi() }
-            catch (error: Throwable) { failure = RemoteNode.drop(connection) }
-            if (failure != RemoteNode.Failure.UNREACHABLE) throw RemoteNode.Unavailable(failure)
-        }
-        throw RemoteNode.Unavailable(failure)
-    }
+    /** Opens a stream; the node replaces a connection that died since the last request once. */
+    private fun open(context: Context): Stream = runBlocking { RemoteNode.open(context) }
 
     private fun readHead(input: InputStream): Pair<String, ByteArray>? {
         val buffer = java.io.ByteArrayOutputStream(1024)

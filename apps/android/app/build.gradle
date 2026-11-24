@@ -76,15 +76,15 @@ android {
         buildConfigField 'String', 'SSH_APP_SERVER_SHA256', "\"${sshAppServerSha256}\""
         buildConfigField 'String', 'SSH_APP_SERVER_VERSION', "\"${sshAppServerVersion}\""
         buildConfigField 'boolean', 'SSH_APP_SERVER_BUNDLED', "${sshArchive != null}"
-        // The iroh library is about 14 MB per architecture; phones are ARM64.
+        // The Rust libraries are built for ARM64 only, the architecture phones use.
         ndk { abiFilters 'arm64-v8a' }
     }
-    // The SSH library is built with this NDK; the Termux runtime uses the same one.
+    // The Rust libraries are built with this NDK; the Termux runtime uses the same one.
     ndkVersion '27.2.12479018'
     sourceSets { main { assets.srcDirs frontendAssets, runtimeAssets, sshAssets } }
     kotlinOptions { jvmTarget = '17' }
     packaging {
-        resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}', 'darwin-aarch64/**', 'win32-x86-64/**', 'linux-*/**'] }
+        resources { excludes += ['/META-INF/{AL2.0,LGPL2.1}'] }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -139,12 +139,15 @@ def copySshAppServer = tasks.register('copySshAppServer') {
 }
 
 /**
- * Builds the SSH client library (openaide-rs/android-ssh) for phones and generates its
- * Kotlin bindings from that same library, so the two cannot disagree.
+ * Builds the Rust libraries for phones and generates each one's Kotlin bindings from
+ * that same library, so the two cannot disagree: the SSH client (openaide-rs/android-ssh)
+ * and the Remote Device node (openaide-rs/android-remote). Each library is built on its
+ * own, so the features one enables in a shared crate do not reach the other.
  */
-abstract class BuildSshLibrary extends DefaultTask {
+abstract class BuildRustLibraries extends DefaultTask {
     @javax.inject.Inject abstract ExecOperations getExec()
     @InputFiles @PathSensitive(PathSensitivity.RELATIVE) abstract ConfigurableFileCollection getSources()
+    @Input abstract ListProperty<String> getPackages()
     @Input abstract Property<String> getNdkDirectory()
     @Internal abstract DirectoryProperty getWorkspace()
     @OutputDirectory abstract DirectoryProperty getJniLibs()
@@ -154,45 +157,50 @@ abstract class BuildSshLibrary extends DefaultTask {
         def root = workspace.get().asFile
         def os = System.getProperty('os.name').toLowerCase()
         def host = os.contains('linux') ? 'linux-x86_64' : os.contains('mac') ? 'darwin-x86_64' : null
-        if (host == null) throw new GradleException('Build the Android SSH library on Linux or macOS')
+        if (host == null) throw new GradleException('Build the Android Rust libraries on Linux or macOS')
         def toolchain = new File(ndkDirectory.get(), "toolchains/llvm/prebuilt/${host}/bin")
         if (!toolchain.isDirectory()) throw new GradleException('Install the Android NDK named by ndkVersion')
         def clang = new File(toolchain, 'aarch64-linux-android26-clang').absolutePath
-        exec.exec {
-            workingDir root
-            environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER', clang
-            environment 'CC_aarch64_linux_android', clang
-            environment 'AR_aarch64_linux_android', new File(toolchain, 'llvm-ar').absolutePath
-            commandLine 'cargo', 'build', '--locked', '--release', '-p', 'openaide-android-ssh', '--lib', '--target', 'aarch64-linux-android'
-        }
         def targetDirectory = System.getenv('CARGO_TARGET_DIR') ? new File(System.getenv('CARGO_TARGET_DIR')) : new File(root, 'target')
-        def library = new File(targetDirectory, 'aarch64-linux-android/release/libopenaide_android_ssh.so')
         def abi = jniLibs.get().dir('arm64-v8a').asFile
         jniLibs.get().asFile.deleteDir()
         bindings.get().asFile.deleteDir()
         abi.mkdirs()
-        java.nio.file.Files.copy(library.toPath(), new File(abi, library.name).toPath())
-        exec.exec {
-            workingDir root
-            commandLine 'cargo', 'run', '--locked', '-q', '-p', 'openaide-android-ssh', '--bin', 'uniffi-bindgen', '--',
-                'generate', '--library', library.absolutePath, '--language', 'kotlin', '--no-format', '--out-dir', bindings.get().asFile.absolutePath
+        packages.get().each { String crate ->
+            exec.exec {
+                workingDir root
+                environment 'CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER', clang
+                environment 'CC_aarch64_linux_android', clang
+                environment 'AR_aarch64_linux_android', new File(toolchain, 'llvm-ar').absolutePath
+                commandLine 'cargo', 'build', '--locked', '--release', '-p', crate, '--lib', '--target', 'aarch64-linux-android'
+            }
+            def library = new File(targetDirectory, "aarch64-linux-android/release/lib${crate.replace('-', '_')}.so")
+            java.nio.file.Files.copy(library.toPath(), new File(abi, library.name).toPath())
+            // One generator serves every library: it reads the interface embedded in each.
+            exec.exec {
+                workingDir root
+                commandLine 'cargo', 'run', '--locked', '-q', '-p', 'openaide-android-ssh', '--bin', 'uniffi-bindgen', '--',
+                    'generate', '--library', library.absolutePath, '--language', 'kotlin', '--no-format', '--out-dir', bindings.get().asFile.absolutePath
+            }
         }
     }
 }
 def repository = rootProject.file('../..')
-def buildSshLibrary = tasks.register('buildSshLibrary', BuildSshLibrary) {
+def buildRustLibraries = tasks.register('buildRustLibraries', BuildRustLibraries) {
     workspace.set(repository)
+    packages.set(['openaide-android-ssh', 'openaide-android-remote'])
     sources.from(new File(repository, 'Cargo.lock'), new File(repository, 'Cargo.toml'))
-    sources.from(fileTree(new File(repository, 'openaide-rs/android-ssh')) { exclude 'target/**' })
-    sources.from(fileTree(new File(repository, 'openaide-rs/remote-client')) { exclude 'target/**' })
+    ['android-ssh', 'android-remote', 'remote-client', 'remote-core'].each { crate ->
+        sources.from(fileTree(new File(repository, "openaide-rs/${crate}")) { exclude 'target/**' })
+    }
     ndkDirectory.set(androidComponents.sdkComponents.ndkDirectory.map { it.asFile.absolutePath })
-    jniLibs.set(layout.buildDirectory.dir('generated/ssh/jniLibs'))
-    bindings.set(layout.buildDirectory.dir('generated/ssh/kotlin'))
+    jniLibs.set(layout.buildDirectory.dir('generated/rust/jniLibs'))
+    bindings.set(layout.buildDirectory.dir('generated/rust/kotlin'))
 }
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->
-    variant.sources.jniLibs.addGeneratedSourceDirectory(buildSshLibrary) { it.jniLibs }
+    variant.sources.jniLibs.addGeneratedSourceDirectory(buildRustLibraries) { it.jniLibs }
     // Kotlin compiles the .kt files of Java source directories too.
-    variant.sources.java.addGeneratedSourceDirectory(buildSshLibrary) { it.bindings }
+    variant.sources.java.addGeneratedSourceDirectory(buildRustLibraries) { it.bindings }
     afterEvaluate {
         tasks.named("merge${variant.name.capitalize()}Assets") { dependsOn copyFrontend, copyBundledRuntime, copySshAppServer }
         // Release builds run the "vital" lint tasks, which read the same assets.
@@ -201,7 +209,8 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     }
 }
 dependencies {
-    implementation 'computer.iroh:iroh-android:1.1.0'
+    // The generated Rust bindings call their libraries through JNA; the aar carries its Android natives.
+    implementation 'net.java.dev.jna:jna:5.15.0@aar'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
     // The scanner library calls into androidx.core but does not declare it.
     implementation 'androidx.core:core:1.13.1'
