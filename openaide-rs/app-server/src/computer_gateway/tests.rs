@@ -1,6 +1,8 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
 use openaide_app_server_protocol::devices::RemoteAccessState;
@@ -19,20 +21,29 @@ use crate::test_sync::{wait_until, WATCHDOG};
 const LOCAL_TOKEN: &str = "local-token";
 
 /// A Computer: an App Server edge on the in-memory network, in front of a
-/// listener that answers every request with the request head it received.
+/// listener that answers every request with the request head it received, or,
+/// while `silent`, holds each request unanswered.
 struct RemoteComputer {
     _root: tempfile::TempDir,
     devices: RemoteDevices,
     lookup: MemoryLookup,
+    silent: Arc<AtomicBool>,
     runtime: tokio::runtime::Runtime,
 }
 
 fn remote_computer() -> RemoteComputer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    let silent = Arc::new(AtomicBool::new(false));
+    let listening = silent.clone();
     std::thread::spawn(move || {
+        let mut held = Vec::new();
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
+            if listening.load(Ordering::SeqCst) {
+                held.push(stream);
+                continue;
+            }
             let mut head = Vec::new();
             let mut byte = [0u8; 1];
             while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
@@ -59,6 +70,7 @@ fn remote_computer() -> RemoteComputer {
         _root: root,
         devices,
         lookup,
+        silent,
         runtime: tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -94,6 +106,16 @@ impl RemoteComputer {
         folder: &std::path::Path,
         log: Logger,
     ) -> (Arc<ComputerGateway>, Events) {
+        self.web_app_answering_within(folder, log, super::ANSWER_WITHIN)
+    }
+
+    /// A Web App that waits `within` for a Computer reached before to answer.
+    fn web_app_answering_within(
+        &self,
+        folder: &std::path::Path,
+        log: Logger,
+        within: Duration,
+    ) -> (Arc<ComputerGateway>, Events) {
         let network = Network::Local(self.lookup.clone());
         let endpoint = self.run(async move {
             let endpoint = network
@@ -107,9 +129,20 @@ impl RemoteComputer {
             endpoint
         });
         let folder = Folder::open(folder).unwrap();
-        let (gateway, events) =
+        let (mut gateway, events) =
             ComputerGateway::with_endpoint(folder, endpoint, "web-host".to_string(), log);
+        gateway.answer_within = within;
         (Arc::new(gateway), events)
+    }
+
+    /// The App Server stops answering while its connection stays open, as when
+    /// the Computer stops without closing it.
+    fn stop_answering(&self) {
+        self.silent.store(true, Ordering::SeqCst);
+    }
+
+    fn answer_again(&self) {
+        self.silent.store(false, Ordering::SeqCst);
     }
 
     fn run<T>(&self, future: impl std::future::Future<Output = T>) -> T {
@@ -385,6 +418,41 @@ fn a_connection_that_ended_is_opened_again_before_it_is_handed_out() {
     let again = computer.run(gateway.connect(&paired.id)).unwrap();
     assert_eq!(logged("remote_connect_started"), attempts + 1);
     assert_eq!(again, first, "the running gateway is handed out again");
+}
+
+#[test]
+fn a_computer_that_stopped_answering_is_refused_before_a_browser_moves_to_it() {
+    let computer = remote_computer();
+    let folder = tempfile::tempdir().unwrap();
+    let (log, logged) = recording();
+    // The silent Computer holds every request, so its round trip can only run out;
+    // the answering one replies in about a millisecond.
+    // timing: expiry — the silent Computer's round trip is waited out.
+    let within = Duration::from_secs(2);
+    let (gateway, _events) = computer.web_app_answering_within(folder.path(), log, within);
+    let paired = computer.run(gateway.pair(&computer.code(), None)).unwrap();
+    let first = computer.run(gateway.connect(&paired.id)).unwrap();
+    let attempts = logged("remote_connect_started");
+
+    // A Computer that answers keeps its connection and its gateway.
+    assert_eq!(computer.run(gateway.connect(&paired.id)).unwrap(), first);
+    assert_eq!(logged("remote_round_trip_completed"), 1);
+    assert_eq!(logged("remote_connect_started"), attempts);
+
+    computer.stop_answering();
+    let refused = computer.run(gateway.connect(&paired.id)).unwrap_err();
+    assert_eq!(refused.reason, "unreachable");
+    assert_eq!(
+        logged("remote_connect_started"),
+        attempts,
+        "the connection still looked open"
+    );
+
+    // The next switch reaches the Computer anew.
+    computer.answer_again();
+    let again = computer.run(gateway.connect(&paired.id)).unwrap();
+    assert_ne!(again, first, "the silent connection's gateway was stopped");
+    assert_eq!(logged("remote_connect_started"), attempts + 1);
 }
 
 #[test]

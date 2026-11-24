@@ -17,11 +17,11 @@ mod tests;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use openaide_remote_client::{
     bind, messages, redeem, Endpoint, Failure, Gateway, InviteCode, Logger, PublicKey,
-    RemoteClient, SecretKey,
+    RemoteClient, SecretKey, CONNECT_TIMEOUT,
 };
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -31,6 +31,9 @@ use wire::{Call, ComputerInUse, Connection, Event, Outgoing, Refusal, Request};
 
 /// The model the other Computer lists for this device, beside the serving machine's name.
 const MODEL: &str = "OpenAIDE Web App";
+/// How long a Computer reached before may take to answer before a browser moves
+/// to it: as long as reaching it anew may take.
+const ANSWER_WITHIN: Duration = CONNECT_TIMEOUT;
 
 pub struct ComputerGateway {
     folder: Folder,
@@ -43,6 +46,7 @@ pub struct ComputerGateway {
     slots: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Slot>>>>,
     events: mpsc::UnboundedSender<Event>,
     log: Logger,
+    answer_within: Duration,
 }
 
 /// One per Computer paired or reached here, kept until this process stops, so a
@@ -66,7 +70,7 @@ enum Reached {
 
 struct Running {
     gateway: Gateway,
-    /// The gateway's client, asked for its connection before the gateway is handed out again.
+    /// The gateway's client, asked for an answer before the gateway is handed out again.
     client: Arc<RemoteClient>,
     /// Set by the gateway when the Computer refuses this connection.
     refused: Arc<OnceLock<Failure>>,
@@ -109,6 +113,7 @@ impl ComputerGateway {
             slots: Mutex::new(HashMap::new()),
             events,
             log,
+            answer_within: ANSWER_WITHIN,
         };
         (gateway, received)
     }
@@ -179,18 +184,13 @@ impl ComputerGateway {
         };
         if let Some(current) = slot.running.as_ref() {
             let failure = match current.refused.get().copied() {
-                // A connection that ended since is opened again before the gateway
-                // is handed out, so a browser only moves to a Computer that answers
-                // (ADR-0070).
-                // TODO: a Computer that stopped without closing the connection (a
-                // crash, or its network dropping) still looks connected here until
-                // QUIC's idle timeout ends it, 15 to 30 s with iroh's defaults, so a
-                // switch then moves the page onto it and the page reports it not
-                // responding. One request over the reused connection, such as the
-                // App Server's probe, would find it now; that needs a RemoteClient
-                // round trip the Desktop and Android would share, so agree on it first.
-                None => match current.client.connection().await {
-                    Ok(_) => return Ok(connection_of(&current.gateway)),
+                // The Computer answers once more before the gateway is handed out,
+                // so a browser only moves to a Computer that answers (ADR-0070): a
+                // connection that ended is opened again, and one that only looks
+                // open because its Computer stopped without closing it gives no
+                // answer.
+                None => match current.client.round_trip(self.answer_within).await {
+                    Ok(()) => return Ok(connection_of(&current.gateway)),
                     Err(failure) => failure,
                 },
                 Some(failure) => failure,
@@ -198,7 +198,8 @@ impl ComputerGateway {
             if let Some(previous) = slot.running.take() {
                 previous.gateway.stop().await;
             }
-            // Opening it again was this connect's attempt.
+            // The round trip was this connect's attempt: it opened an ended
+            // connection again, or waited as long as a new one may take.
             if failure == Failure::Unreachable {
                 return Err(unusable(failure));
             }

@@ -14,7 +14,11 @@ use openaide_remote_core::{
 };
 
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(20);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long reaching a paired App Server may take before it counts as unreachable.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// A CORS preflight: every App Server answers it before any handler runs, so it
+/// asks for an answer and nothing else.
+const ROUND_TRIP_REQUEST: &[u8] = b"OPTIONS /probe HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
 /// The App Server completes the handshake before it checks the key, so a removed
 /// device learns it from the close that follows.
 const REFUSAL_WAIT: Duration = Duration::from_millis(400);
@@ -296,6 +300,63 @@ impl RemoteClient {
             }
         }
         Err(failure)
+    }
+
+    /// Asks the App Server for one answer over the live connection, opening one
+    /// when there is none, and fails when none arrives `within` that time.
+    ///
+    /// A computer that stopped without closing the connection (a crash, or its
+    /// network dropping) leaves it looking open until QUIC's idle timeout ends
+    /// it, 15 to 30 s later; a round trip finds it now. A connection that gave
+    /// no answer is dropped, so the next request opens a new one.
+    pub async fn round_trip(&self, within: Duration) -> Result<(), Failure> {
+        let started = Instant::now();
+        (self.log)("remote_round_trip_started", serde_json::json!({}));
+        let result = self.exchange_round_trip(within).await;
+        let mut fields = serde_json::json!({
+            "outcome": match &result {
+                Ok(()) => "answered",
+                Err((failure, _)) => failure.class(),
+            },
+            "duration_ms": elapsed_ms(started),
+        });
+        if let Err((_, stage)) = &result {
+            fields["stage"] = (*stage).into();
+        }
+        (self.log)("remote_round_trip_completed", fields);
+        result.map_err(|(failure, _)| failure)
+    }
+
+    /// Fails with the reason and the stage it was reached at.
+    async fn exchange_round_trip(&self, within: Duration) -> Result<(), (Failure, &'static str)> {
+        let connection = self
+            .connection()
+            .await
+            .map_err(|failure| (failure, "connect"))?;
+        let exchange = async {
+            let (mut send, mut recv) = connection.open_bi().await.map_err(|_| "open")?;
+            send.write_all(ROUND_TRIP_REQUEST)
+                .await
+                .map_err(|_| "send")?;
+            send.finish().map_err(|_| "send")?;
+            // Any HTTP response is an answer; the status does not matter here.
+            let mut answer = [0u8; 5];
+            recv.read_exact(&mut answer).await.map_err(|_| "answer")?;
+            if &answer != b"HTTP/" {
+                return Err("answer");
+            }
+            Ok(())
+        };
+        let stage = match tokio::time::timeout(within, exchange).await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(stage)) => stage,
+            Err(_) => "timeout",
+        };
+        let failure = connection
+            .close_reason()
+            .map_or(Failure::Unreachable, |reason| failure_of(&reason));
+        self.drop_connection(&connection).await;
+        Err((failure, stage))
     }
 
     async fn drop_connection(&self, failed: &Connection) {
