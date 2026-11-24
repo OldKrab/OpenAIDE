@@ -125,6 +125,9 @@ jobs:
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31
         with:
           shared-key: android-ssh
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
         with:
           distribution: temurin
@@ -245,6 +248,10 @@ jobs:
           toolchain: 1.97.1
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
         with:
           distribution: temurin
