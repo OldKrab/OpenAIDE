@@ -20,6 +20,7 @@ import {
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
   CLIENT_HEARTBEAT,
+  DIAGNOSTICS_RECORD_CLIENT_EVENTS,
   MCP_CREATE_SERVER,
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_FORK,
@@ -346,6 +347,8 @@ describe("app controller callbacks", () => {
   it("includes a new workspace root when creating a task for an unseen project", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
+      // A failed first Send records `new_task_send_failed` through the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return {};
       if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 } };
       throw new Error(method);
@@ -575,6 +578,8 @@ describe("app controller callbacks", () => {
     const request = vi.fn((method: string) => {
       if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
       if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
+      // Uploads forward their lifecycle events to the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     const state = preparedNewTaskState("task_ready");
@@ -682,6 +687,7 @@ describe("app controller callbacks", () => {
       if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot("task_recovered", "Recovered task") });
       }
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     const fileBrowser = callbacks({
@@ -697,7 +703,7 @@ describe("app controller callbacks", () => {
       signal: new AbortController().signal,
     })).resolves.toBeUndefined();
 
-    expect(upload).toHaveBeenCalledWith("task_recovered", expect.any(File), expect.any(Function), expect.any(AbortSignal));
+    expect(upload).toHaveBeenCalledWith("task_recovered", expect.any(File), expect.any(Function), expect.any(AbortSignal), { kind: "file" });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "taskInput:attachment:addAppServer",
       taskId: "task_recovered",
@@ -755,11 +761,15 @@ describe("app controller callbacks", () => {
       snapshot: state.snapshot as TaskSnapshot,
     });
     const request = vi.fn((method: string) => {
+      // A failed first Send records `new_task_send_failed` through the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       if (method === TASK_SEND) return Promise.reject(new AppServerProtocolError({
         error: { code: "attachmentHandleInvalid", message: "Attachment handle expired.", recoverable: true },
       }));
       if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
       if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
+      // Uploads forward their lifecycle events to the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
     frontendShellState.files = {
@@ -1014,6 +1024,8 @@ describe("app controller callbacks", () => {
   it("does not let an older first-send rejection reclaim a newer prepared lease", async () => {
     const pendingSend = deferred<never>();
     const request = vi.fn((method: string) => {
+      // A failed first Send records `new_task_send_failed` through the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       // Preparing again for the same context returns the Task this client already leases.
       if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshotForContext("task_a", "project_1", "codex") });
@@ -1051,6 +1063,8 @@ describe("app controller callbacks", () => {
     const second = deferred<SendResult>();
     let acquired = 0;
     const request = vi.fn((method: string, params: unknown) => {
+      // A failed first Send records `new_task_send_failed` through the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return Promise.resolve({});
       if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot(++acquired === 1 ? "task_a" : "task_b", "New task") });
       }
@@ -1267,6 +1281,8 @@ describe("app controller callbacks", () => {
   it("keeps the prepared Task route and restores its draft when first send fails", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
+      // A failed first Send records `new_task_send_failed` through the App Server log.
+      if (method === DIAGNOSTICS_RECORD_CLIENT_EVENTS) return {};
       if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === TASK_SEND) throw new Error("send failed");
       throw new Error(method);

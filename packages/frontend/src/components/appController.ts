@@ -10,6 +10,7 @@ import {
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { currentFrontendShell } from "../services/frontendShell";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import { reportDraftTexts, reportUnsentInput } from "../services/unsentInput";
 import { composerDraftTexts, hasUnsentComposerInput } from "./composerDraftPolicy";
 import {
@@ -34,6 +35,7 @@ import {
   PROJECT_RENAME,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_LIST,
+  type BackendConnection,
   type ProjectId,
   type AgentId,
   type WorktreeId,
@@ -432,7 +434,15 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
           type: "submit:error",
           message: message ?? "Images can be attached after the Task is open.",
         }),
-        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectAgent: (agentId, agentLabel) => {
+          // Marks when the pick reached the controller, ahead of the Prepared Task swap it causes.
+          recordFrontendLifecycleEvent(request ? backendConnection as Pick<BackendConnection, "request"> : undefined, "new_task_agent_selected", {
+            agent_id: agentId,
+            previous_agent_id: state.newTask.selection.agentId,
+            prepared_task_id: newTaskSnapshot?.task.task_id,
+          });
+          dispatch({ type: "newTask:agent", agentId, agentLabel });
+        },
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
         selectProject: (project) => dispatch({ type: "newTask:project", project }),
         selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),

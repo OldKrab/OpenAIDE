@@ -3732,12 +3732,24 @@ dependencies = [
  "flate2",
  "iroh",
  "openaide-app-server-protocol",
+ "openaide-remote-core",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tar",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "openaide-remote-core"
+version = "0.0.0"
+dependencies = [
+ "data-encoding",
+ "iroh",
+ "openaide-app-server-protocol",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

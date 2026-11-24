@@ -566,6 +566,90 @@
   margin: 6px 0;
 }
 
+/* The connection a pairing dialog makes: this device uses that computer (ADR-0081). */
+.settings-pairing-direction {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.settings-pairing-end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 112px;
+}
+
+.settings-pairing-end-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--oa-border);
+  border-radius: 12px;
+  color: var(--oa-text);
+}
+
+.settings-pairing-end[data-unknown] .settings-pairing-end-icon {
+  border-style: dashed;
+}
+
+.settings-pairing-end small {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oa-text);
+  font-size: 12px;
+  font-weight: 550;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-pairing-end[data-unknown] small {
+  color: var(--oa-muted);
+  font-weight: 400;
+}
+
+.settings-pairing-uses {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 10px;
+  color: var(--oa-muted);
+}
+
+.settings-pairing-uses small {
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+/* Where the other side's control is, as the path of controls to follow there. */
+.settings-confirm > p.settings-pairing-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--oa-muted);
+  font-size: 12.5px;
+}
+
+.settings-pairing-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-pairing-crumb {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  font-weight: 550;
+}
+
 .settings-code {
   border-radius: 8px;
   background: var(--oa-panel);

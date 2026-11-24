@@ -2,6 +2,7 @@ import {
   TASK_ACQUIRE,
   TASK_ACQUIRE_IN_WORKTREE,
   TASK_RELEASE,
+  type AttachmentHandleId,
   type BackendConnection,
   type TaskId,
   type TaskSnapshot as ProtocolTaskSnapshot,
@@ -14,17 +15,24 @@ import {
   taskAcquireParams,
 } from "../state/newTaskPreparationContext";
 import type { AppState } from "../state/store";
+import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
+import type { NewTaskController } from "./newTaskController";
+import { draftAttachmentHandleIds } from "./newTaskDraftCarry";
 
 type PrepareNewTaskOptions = {
   acceptPreparedTask?: (task: ProtocolTaskSnapshot) => boolean;
-  discardPreparedTask?: (taskId: TaskId) => Promise<void>;
+  /** `carryDraftHandles` are held for the successor instead of released. */
+  discardPreparedTask?: (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => Promise<void>;
   preparedTask?: ProtocolTaskSnapshot;
   reuseSnapshot?: boolean;
   snapshotIntent?: "open" | "refresh";
 };
 
 type PrepareNewTaskDependencies = {
+  attachmentResources?: ComposerAttachmentResourceOwner;
   backendConnection?: Partial<Pick<BackendConnection, "request">>;
+  /** Owns draft handles carried from discarded Prepared Tasks; omitted, nothing is carried. */
+  newTaskController?: NewTaskController;
   dispatch: (action: AppAction) => void;
   onPreparedTask?: (task: ProtocolTaskSnapshot, taskId: TaskId) => void;
   state: AppState;
@@ -32,7 +40,7 @@ type PrepareNewTaskDependencies = {
 
 /** Acquires one empty Task that belongs to the current immutable preparation context. */
 export async function prepareNewTask(
-  { backendConnection, dispatch, onPreparedTask, state }: PrepareNewTaskDependencies,
+  { attachmentResources, backendConnection, dispatch, newTaskController, onPreparedTask, state }: PrepareNewTaskDependencies,
   options: PrepareNewTaskOptions = {},
 ) {
   const request = backendConnection?.request;
@@ -40,9 +48,9 @@ export async function prepareNewTask(
   const projectId = state.newTask.selection.projectId;
   if (!projectId) throw new Error("Workspace unavailable. Refresh and try again.");
 
-  const discardPreparedTask = async (taskId: TaskId) => {
+  const discardPreparedTask = async (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => {
     if (options.discardPreparedTask) {
-      await options.discardPreparedTask(taskId);
+      await options.discardPreparedTask(taskId, carryDraftHandles);
       return;
     }
     try {
@@ -55,7 +63,8 @@ export async function prepareNewTask(
   };
   let preparedTask = options.preparedTask;
   if (preparedTask && !preparedProtocolTaskMatchesSelection(preparedTask, state)) {
-    await discardPreparedTask(preparedTask.task.taskId as TaskId);
+    const staleTaskId = preparedTask.task.taskId as TaskId;
+    await discardPreparedTask(staleTaskId, draftAttachmentHandleIds(state, staleTaskId));
     preparedTask = undefined;
   }
   // A matching empty Task needs no separate read: `task/acquire` returns the Prepared
@@ -67,7 +76,8 @@ export async function prepareNewTask(
     && !state.snapshot.task.has_messages
     && !preparedSnapshotMatchesSelection(state)
   ) {
-    await discardPreparedTask(state.snapshot.task.task_id as TaskId);
+    const staleTaskId = state.snapshot.task.task_id as TaskId;
+    await discardPreparedTask(staleTaskId, draftAttachmentHandleIds(state, staleTaskId));
   }
   preparedTask ??= state.newTask.selection.worktreeId
     ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
@@ -77,6 +87,15 @@ export async function prepareNewTask(
     throw new Error("Prepared Task does not match the current New Task context.");
   }
   const taskId = preparedTask.task.taskId as TaskId;
+  if (newTaskController && newTaskController.carriedAttachmentCount() > 0) {
+    // Handles must belong to this Task before a Send that awaits it names them.
+    await newTaskController.transferCarriedAttachments({
+      attachmentResources,
+      backendConnection: backendConnection as Pick<BackendConnection, "request">,
+      dispatch,
+      toTaskId: taskId,
+    });
+  }
   if (options.acceptPreparedTask && !options.acceptPreparedTask(preparedTask)) {
     return { task: preparedTask, taskId };
   }

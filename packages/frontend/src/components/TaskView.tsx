@@ -28,7 +28,7 @@ import {
   userMessageNavigationPreview,
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
-import { appServerAttachmentHandles, appServerComposerImages } from "../state/composerOptions";
+import { composerMessageContent } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
@@ -242,9 +242,7 @@ export function TaskView({
   const workspaceAvailable = snapshot.task.workspace_available !== false;
   const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
   const imageAttachments = taskInput.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = taskInput.context.filter((attachment) => attachment.kind !== "image");
-  const attachmentsSendable = appServerComposerImages(imageAttachments) !== undefined
-    && appServerAttachmentHandles(resourceAttachments) !== undefined
+  const attachmentsSendable = composerMessageContent(taskInput.context) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const baseAvailability = composerAvailability({
     allowEditingWhileSendBlocked: true,

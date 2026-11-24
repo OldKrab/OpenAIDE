@@ -15,14 +15,13 @@ mkdir -p "$root"
 
 # Claude Code ships only as a glibc binary and Termux is not glibc. Termux's glibc
 # packages can run it once the binary names their loader. The binary is the one the
-# Claude adapter of this app version was built against, taken from the adapter's
-# package, and lives outside the app's data folder because the command is Termux-wide.
+# Claude adapter of this app version runs: the app passes the SDK version its runtime
+# lockfile pins. It lives outside the app's data folder because the command is Termux-wide.
 claude_home="$PREFIX/opt/openaide-claude"
 # Names the step that stopped the Claude install, so a phone that cannot run it can be diagnosed.
 claude_failed() { echo "openaide_android_install claude=unavailable step=$1" >> "$root/install.log"; return 1; }
 install_claude() {
-    test -n "${OPENAIDE_CLAUDE_ACP_VERSION:-}" || { claude_failed adapter_version; return 1; }
-    sdk=$(npm view "@openaide/claude-agent-acp@$OPENAIDE_CLAUDE_ACP_VERSION" 'dependencies.@anthropic-ai/claude-agent-sdk' 2>/dev/null)
+    sdk="${OPENAIDE_CLAUDE_SDK_VERSION:-}"
     case "$sdk" in ''|*[!0-9.]*) claude_failed sdk_version; return 1 ;; esac
     pkg install -y glibc-repo >/dev/null 2>&1 || { claude_failed glibc_repo; return 1; }
     pkg install -y glibc-runner termux-exec-glibc >/dev/null 2>&1 || { claude_failed glibc_packages; return 1; }

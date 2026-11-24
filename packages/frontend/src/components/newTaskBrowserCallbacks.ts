@@ -17,7 +17,9 @@ import {
   releaseAttachmentResources,
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
-import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
+import { appServerAttachment, localImageAttachment, uploadedImageAttachment } from "../state/composerOptions";
+import type { FileUploadKind } from "../services/fileUploadHttp";
+import { uploadComposerFile } from "../services/composerUploads";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type {
@@ -34,6 +36,7 @@ import {
   disposableNewTaskControllerId,
   type NewTaskController,
 } from "./newTaskController";
+import { draftAttachmentHandleIds } from "./newTaskDraftCarry";
 import { currentFrontendShell } from "../services/frontendShell";
 
 type NewTaskBrowserDependencies = Pick<
@@ -108,8 +111,9 @@ function createFileBrowserCallbacks({
   const assertOperationCurrent = () => {
     if (!operationIsCurrent()) throw new SupersededNewTaskFileBrowserOperation();
   };
-  const discardNewTask = (taskId: TaskId) => newTaskController.discard({
+  const discardNewTask = (taskId: TaskId, carryDraftHandles?: readonly AttachmentHandleId[]) => newTaskController.discard({
     attachmentResources,
+    carryDraftHandles,
     dispatch,
     lease: newTaskController.currentLease(taskId),
     request,
@@ -160,11 +164,11 @@ function createFileBrowserCallbacks({
     // controller. Validate it before discarding anything; releasing first makes
     // the subsequent upload target an ID that App Server has already deleted.
     if (staleTaskId && staleTaskId !== pendingResult?.taskId) {
-      await discardNewTask(staleTaskId);
+      await discardNewTask(staleTaskId, draftAttachmentHandleIds(state, staleTaskId));
     }
     assertOperationCurrent();
     const prepared = await prepareNewTask(
-      { backendConnection, dispatch, state },
+      { attachmentResources, backendConnection, dispatch, newTaskController, state },
       {
         acceptPreparedTask: (task) =>
           operationIsCurrent()
@@ -211,7 +215,7 @@ function createFileBrowserCallbacks({
     ...(currentFrontendShell()?.photoCapture ? { photoCapture: true as const } : {}),
     ...(files ? { attachmentMode: files.kind, attachFiles: async (
       selectedFiles: File[],
-      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number },
+      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number; kind?: FileUploadKind },
     ) => {
       const pickerLease = newTaskController.currentLease(preparedTaskId);
       // A native file picker can suspend browser timers past the App Server's
@@ -226,7 +230,7 @@ function createFileBrowserCallbacks({
       const attachments = files.kind === "nativePicker"
         ? await files.pick(lease.taskId)
         : selectedFiles.length === 1
-          ? [await files.upload(lease.taskId, selectedFiles[0], options.onProgress, options.signal)]
+          ? [await uploadComposerFile(files, backendConnection, lease.taskId, selectedFiles[0], options)]
           : [];
       // After Task acquisition, the controller lease—not a render-scoped callback
       // token—owns the upload. Harmless New Task rerenders can replace callback
@@ -247,7 +251,9 @@ function createFileBrowserCallbacks({
         dispatch({
           type: "taskInput:attachment:addAppServer",
           taskId: lease.taskId,
-          attachment: appServerAttachment(attachment),
+          attachment: options.kind === "image" && selectedFiles[0]
+            ? uploadedImageAttachment(attachment, selectedFiles[0])
+            : appServerAttachment(attachment),
         });
       }
       for (const attachment of attachments.slice(options.maxFiles)) {

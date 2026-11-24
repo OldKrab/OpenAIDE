@@ -1,6 +1,6 @@
 # Remote Devices Are App Server Clients
 
-Status: accepted
+Status: accepted; join request removed by ADR-0081
 
 An App Shell on another machine, such as the Mobile App on a phone, connects to the App Server as a regular client. It ships its own Frontend, speaks the App Server Protocol, and is trusted by a key pair instead of an account. OpenAIDE runs no sign-in service and stores no password: a Remote Device is trusted because a device that was already trusted paired it.
 

@@ -138,7 +138,11 @@ pub(super) fn handle_terminal_socket(
         bytes_in: AtomicU64::new(0),
         bytes_out: AtomicU64::new(0),
     };
-    let mut reader = MessageReader::new(BufReader::new(stream.try_clone()?), MAX_MESSAGE_BYTES);
+    // Read through `stream` itself, never a clone. On Windows a cloned socket
+    // keeps the receive timeout it had when cloned, so the idle deadline set
+    // below would not reach it and the hello deadline would stay in force.
+    let stream: &TcpStream = stream;
+    let mut reader = MessageReader::new(BufReader::new(stream), MAX_MESSAGE_BYTES);
 
     let shell = match read_hello(&mut reader, handler) {
         Ok(shell) => shell,
@@ -177,11 +181,12 @@ pub(super) fn handle_terminal_socket(
     }
     stream.set_read_timeout(Some(READ_IDLE_TIMEOUT))?;
 
-    std::thread::scope(|scope| {
+    let client_silence = std::thread::scope(|scope| {
         scope.spawn(|| pump(&shell, &socket, attach.output));
-        read(&mut reader, &shell, &socket);
+        let client_silence = read(&mut reader, &shell, &socket);
         // Dropping the viewer's channel wakes the pump now instead of at its next ping.
         shell.detach(viewer_id);
+        client_silence
     });
     logging::info(
         "terminal_socket_closed",
@@ -192,19 +197,23 @@ pub(super) fn handle_terminal_socket(
             "bytes_in": socket.bytes_in.load(Ordering::Relaxed),
             "bytes_out": socket.bytes_out.load(Ordering::Relaxed),
             "duration_ms": started_at.elapsed().as_millis(),
+            // A read timeout whose silence is shorter than its limit means the
+            // deadline in force was not the one configured.
+            "client_silence_ms": client_silence.as_millis(),
+            "read_idle_limit_ms": READ_IDLE_TIMEOUT.as_millis(),
         }),
     );
     Ok(())
 }
 
 fn read_hello(
-    reader: &mut MessageReader<BufReader<TcpStream>>,
+    reader: &mut MessageReader<BufReader<&TcpStream>>,
     handler: &LocalHttpAppHandler,
 ) -> Result<Arc<Shell>, (&'static str, Option<u16>)> {
     let hello = match reader.read() {
         Ok(Incoming::Text(text)) => serde_json::from_str::<ClientMessage>(&text).ok(),
         Ok(_) => None,
-        Err(error) => return Err((read_failure_reason(&error), None)),
+        Err(error) => return Err((read_failure_reason(&error, "hello_timeout"), None)),
     };
     let Some(ClientMessage::Hello { token, cols, rows }) = hello else {
         return Err(("invalid_hello", Some(CLOSE_PROTOCOL_VIOLATION)));
@@ -252,17 +261,25 @@ fn pump(shell: &Shell, socket: &Socket, output: std::sync::mpsc::Receiver<Vec<u8
     }
 }
 
-fn read(reader: &mut MessageReader<BufReader<TcpStream>>, shell: &Shell, socket: &Socket) {
+/// Reads client messages until the socket ends. Returns how long the client
+/// had been silent by then.
+fn read(
+    reader: &mut MessageReader<BufReader<&TcpStream>>,
+    shell: &Shell,
+    socket: &Socket,
+) -> Duration {
+    let mut last_received = Instant::now();
     loop {
         let incoming = match reader.read() {
             Ok(incoming) => incoming,
             Err(error) => {
                 let code =
                     (error.kind() == ErrorKind::InvalidData).then_some(CLOSE_PROTOCOL_VIOLATION);
-                socket.end(read_failure_reason(&error), code);
-                return;
+                socket.end(read_failure_reason(&error, "read_timeout"), code);
+                break;
             }
         };
+        last_received = Instant::now();
         match incoming {
             Incoming::Binary(bytes) => {
                 socket
@@ -270,7 +287,7 @@ fn read(reader: &mut MessageReader<BufReader<TcpStream>>, shell: &Shell, socket:
                     .fetch_add(bytes.len() as u64, Ordering::Relaxed);
                 if !bytes.is_empty() && !shell.write_input(bytes) {
                     socket.end("terminal_ended", Some(CLOSE_TERMINAL_ENDED));
-                    return;
+                    break;
                 }
             }
             Incoming::Text(text) => match serde_json::from_str::<ClientMessage>(&text) {
@@ -285,7 +302,7 @@ fn read(reader: &mut MessageReader<BufReader<TcpStream>>, shell: &Shell, socket:
                 }
                 _ => {
                     socket.end("invalid_message", Some(CLOSE_PROTOCOL_VIOLATION));
-                    return;
+                    break;
                 }
             },
             Incoming::Ping(payload) => {
@@ -294,18 +311,21 @@ fn read(reader: &mut MessageReader<BufReader<TcpStream>>, shell: &Shell, socket:
             Incoming::Pong => {}
             Incoming::Close => {
                 socket.end("client_closed", Some(1000));
-                return;
+                break;
             }
         }
         if socket.closed.load(Ordering::Acquire) {
-            return;
+            break;
         }
     }
+    last_received.elapsed()
 }
 
-fn read_failure_reason(error: &std::io::Error) -> &'static str {
+/// `timed_out` names the deadline that was in force, so a log tells the hello
+/// deadline from the idle one.
+fn read_failure_reason(error: &std::io::Error, timed_out: &'static str) -> &'static str {
     match error.kind() {
-        ErrorKind::WouldBlock | ErrorKind::TimedOut => "read_timeout",
+        ErrorKind::WouldBlock | ErrorKind::TimedOut => timed_out,
         ErrorKind::UnexpectedEof => "peer_closed",
         ErrorKind::InvalidData => "protocol_violation",
         _ => "read_failed",

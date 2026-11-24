@@ -980,6 +980,61 @@ test("copies fenced Markdown code independently at desktop and constrained width
   expect(geometry.buttonInsidePre).toBe(true);
 });
 
+test("keeps a wide box diagram's lines and columns intact on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:wide-diagram");
+
+  // The Agent sends the diagram in one chunk, so its closing row marks the complete reply.
+  const block = page.locator(".agent-markdown-code-block").filter({ hasText: "└────────────────────┘" });
+  await expect(block).toBeVisible();
+  const layout = await block.evaluate(async (element) => {
+    await document.fonts.ready;
+    const pre = element.querySelector("pre");
+    const text = pre?.querySelector("code")?.firstChild;
+    if (!pre || !text) throw new Error("Code block structure is incomplete.");
+    const range = document.createRange();
+    const charBounds = (offset) => {
+      range.setStart(text, offset);
+      range.setEnd(text, offset + 1);
+      return range.getBoundingClientRect();
+    };
+    const lines = text.data.replace(/\n$/, "").split("\n");
+    // One cell width from the first line, which mixes box-drawing glyphs only.
+    const firstLine = lines[0];
+    const cell = (charBounds(firstLine.length - 1).right - charBounds(0).left) / firstLine.length;
+    let offset = 0;
+    let wrappedLines = 0;
+    let columnDrift = 0;
+    for (const line of lines) {
+      const origin = charBounds(offset);
+      for (let index = 0; index < line.length; index += 1) {
+        const bounds = charBounds(offset + index);
+        if (Math.abs(bounds.top - origin.top) > 1) {
+          wrappedLines += 1;
+          break;
+        }
+        columnDrift = Math.max(columnDrift, Math.abs(bounds.left - origin.left - index * cell));
+      }
+      offset += line.length + 1;
+    }
+    return {
+      columnDrift,
+      lineCount: lines.length,
+      pageOverflows: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      preScrolls: pre.scrollWidth > pre.clientWidth,
+      wrappedLines,
+    };
+  });
+  expect(layout.lineCount).toBe(8);
+  // Wrapping folds each row at its spaces and scrambles the boxes; the block scrolls instead.
+  expect(layout.wrappedLines).toBe(0);
+  expect(layout.preScrolls).toBe(true);
+  expect(layout.pageOverflows).toBe(false);
+  // Letters, arrows, and box-drawing glyphs share one cell width, so every column lines up.
+  expect(layout.columnDrift).toBeLessThanOrEqual(0.5);
+});
+
 test("flashes copied inline code only at the click and leaves the bubble to confirm", async ({ context, page }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
   await page.setViewportSize({ width: 1_200, height: 800 });
@@ -1536,6 +1591,33 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     }
   });
 }
+
+test("uploads Images larger than the inline limits and sends them by handle", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await page.getByRole("button", { name: "Add context" }).click();
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByRole("menuitem", { name: /Attach images/ }).click(),
+  ]);
+  // Bytes after a PNG's end chunk are ignored by decoders; they make each photo-sized, together
+  // past the 5 MiB per-Image and 8 MiB per-message inline limits.
+  const photo = (width) => Buffer.concat([encodedPng(width, 100), Buffer.alloc(6 * 1024 * 1024, 7)]);
+  await chooser.setFiles([
+    { name: "first.png", mimeType: "image/png", buffer: photo(400) },
+    { name: "second.png", mimeType: "image/png", buffer: photo(200) },
+  ]);
+
+  const attached = page.getByLabel("Attached context");
+  await expect(attached.getByLabel("Open first.png")).toBeVisible();
+  await expect(attached.getByLabel("Open second.png")).toBeVisible();
+  await expect(attached.getByLabel("Open first.png").locator("img")).toHaveAttribute("src", /^blob:/);
+  await page.getByRole("textbox", { name: "Message" }).fill("Two photos");
+  await expect(page.getByLabel("Send message")).toBeEnabled();
+  await page.getByLabel("Send message").click();
+  await expect(page).toHaveURL(/\/task\/task_/);
+  await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toHaveCount(2);
+  await expect(page.getByLabel("Task status: Idle")).toBeVisible();
+});
 
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);

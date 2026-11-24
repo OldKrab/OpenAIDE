@@ -7,6 +7,7 @@ use openaide_app_server_protocol::attachment::{
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentResourceId, AttachmentRevealParams,
+    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
     PreSendAttachment,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
@@ -100,6 +101,21 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         })
     }
 
+    fn create_uploaded_image(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _path: String,
+        _label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Image uploads are unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn create_pasted_image(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -129,6 +145,20 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: AttachmentReleaseParams,
     ) -> Result<AttachmentReleaseResult, ProtocolError>;
+
+    /// Moves a draft's handles to the Prepared Task that replaced their Task.
+    fn transfer_handles(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: AttachmentTransferParams,
+    ) -> Result<AttachmentTransferResult, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "attachment transfer is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 
     fn resolve_reveal_target(
         &self,
@@ -288,6 +318,23 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
             .map_err(protocol_error_from_attachment_runtime)
     }
 
+    fn create_uploaded_image(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        path: String,
+        label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        self.read_task_for_client(task_id.as_str(), client_instance_id)?;
+        self.attachments
+            .create_uploaded_image(
+                AttachmentOwner::new(client_instance_id, task_id),
+                path,
+                label,
+            )
+            .map_err(protocol_error_from_attachment_runtime)
+    }
+
     fn create_pasted_image(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -346,6 +393,61 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         Ok(self
             .attachments
             .release_resources(&owner, &params.resources))
+    }
+
+    fn transfer_handles(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: AttachmentTransferParams,
+    ) -> Result<AttachmentTransferResult, ProtocolError> {
+        let started = std::time::Instant::now();
+        // Only the destination needs a live lease: the replaced Prepared Task was usually
+        // released first, and each handle's client-and-Task owner proves it may move.
+        if let Err(error) =
+            self.read_task_for_client(params.to_task_id.as_str(), client_instance_id)
+        {
+            logging::warn(
+                "attachment_transfer_completed",
+                json!({
+                    "from_task_id": params.from_task_id.as_str(),
+                    "to_task_id": params.to_task_id.as_str(),
+                    "requested_count": params.handles.len(),
+                    "outcome": "rejected",
+                    "error_kind": error.code,
+                    "duration_ms": started.elapsed().as_millis(),
+                }),
+            );
+            return Err(error);
+        }
+        let result = self.attachments.transfer_handles(
+            AttachmentOwner::new(client_instance_id, &params.from_task_id),
+            AttachmentOwner::new(client_instance_id, &params.to_task_id),
+            &params.handles,
+        );
+        let count = |status| {
+            result
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.status == status)
+                .count()
+        };
+        let transferred = count(AttachmentTransferStatus::Transferred);
+        let fields = json!({
+            "from_task_id": params.from_task_id.as_str(),
+            "to_task_id": params.to_task_id.as_str(),
+            "requested_count": params.handles.len(),
+            "transferred_count": transferred,
+            "missing_count": count(AttachmentTransferStatus::Missing),
+            "forbidden_count": count(AttachmentTransferStatus::Forbidden),
+            "outcome": if transferred == params.handles.len() { "transferred" } else { "partial" },
+            "duration_ms": started.elapsed().as_millis(),
+        });
+        if transferred == params.handles.len() {
+            logging::info("attachment_transfer_completed", fields);
+        } else {
+            logging::warn("attachment_transfer_completed", fields);
+        }
+        Ok(result)
     }
 
     fn resolve_reveal_target(
@@ -576,6 +678,9 @@ fn protocol_error_from_attachment_runtime(error: AttachmentRuntimeError) -> Prot
         AttachmentRuntimeError::TooLarge => validation_error("data", "Attachment is too large"),
         AttachmentRuntimeError::InvalidImage => {
             validation_error("data", "Pasted image payload is invalid")
+        }
+        AttachmentRuntimeError::UnsupportedImage => {
+            validation_error("data", "Images must be PNG, JPEG, GIF, or WebP")
         }
         AttachmentRuntimeError::ReadFailed(message) => ProtocolError {
             code: ProtocolErrorCode::Internal,

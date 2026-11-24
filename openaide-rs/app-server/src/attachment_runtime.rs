@@ -20,6 +20,7 @@ mod ownership;
 mod path_validation;
 mod reservation;
 mod resources;
+mod uploaded_image;
 
 pub(crate) use ownership::AttachmentOwner;
 pub(crate) use reservation::AttachmentSendReservation;
@@ -117,6 +118,8 @@ pub(crate) enum AttachmentRuntimeError {
     NotText,
     TooLarge,
     InvalidImage,
+    /// An uploaded Image whose bytes are not PNG, JPEG, GIF, or WebP.
+    UnsupportedImage,
     ReadFailed(String),
 }
 
@@ -264,6 +267,46 @@ impl AttachmentRuntime {
                 label: registered.label,
             },
         })
+    }
+
+    /// Registers a completed image upload; the handle owns the file from here on.
+    pub(crate) fn create_uploaded_image(
+        &self,
+        owner: impl Into<AttachmentOwner>,
+        path: impl Into<PathBuf>,
+        label: String,
+    ) -> Result<PreSendAttachment, AttachmentRuntimeError> {
+        let accepted = uploaded_image::accept_uploaded_image(path)?;
+        let label = safe_image_label(label);
+        let size_bytes = accepted.size_bytes;
+        let mime_type = accepted.mime_type;
+        let owner = owner.into();
+        let mut state = self
+            .state
+            .lock()
+            .expect("attachment runtime mutex poisoned");
+        state.prune_expired(Instant::now());
+        state.next_id += 1;
+        let handle_id = AttachmentHandleId::from(format!("attachment-handle-{}", state.next_id));
+        state.handles.insert(
+            handle_id.as_str().to_string(),
+            PreSendAttachmentHandle {
+                owner,
+                label: label.clone(),
+                target: AttachmentTarget::UploadedImage {
+                    file: accepted.file,
+                    mime_type,
+                    size_bytes,
+                },
+                expires_at: self.expires_at(),
+            },
+        );
+        drop(state);
+        crate::logging::info(
+            "attachment_uploaded_image_registered",
+            serde_json::json!({ "mime_type": mime_type, "size_bytes": size_bytes }),
+        );
+        Ok(PreSendAttachment { handle_id, label })
     }
 
     /// Registers an exact user-selected local file without granting directory browsing.
@@ -539,6 +582,19 @@ impl ResolvedSendAttachments {
         const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
         const MESSAGE_IMAGE_MAX_BYTES: usize = 8 * 1024 * 1024;
 
+        // Upload shells send Images as handles without these caps; only inline Images
+        // (VS Code, and Queue items edited back into the Composer) still meet them.
+        let rejected = |reason: &str| {
+            crate::logging::warn(
+                "send_inline_images_rejected",
+                serde_json::json!({
+                    "reason": reason,
+                    "image_count": images.len(),
+                    "base64_bytes": images.iter().map(|image| image.data.len()).sum::<usize>(),
+                }),
+            );
+            AttachmentRuntimeError::TooLarge
+        };
         let mut total = 0usize;
         let mut attachments = Vec::with_capacity(images.len());
         for image in images {
@@ -548,12 +604,12 @@ impl ResolvedSendAttachments {
                         crate::media::MediaDataError::Invalid => {
                             AttachmentRuntimeError::InvalidImage
                         }
-                        crate::media::MediaDataError::TooLarge => AttachmentRuntimeError::TooLarge,
+                        crate::media::MediaDataError::TooLarge => rejected("image_too_large"),
                     })?;
             total = total
                 .checked_add(size)
                 .filter(|total| *total <= MESSAGE_IMAGE_MAX_BYTES)
-                .ok_or(AttachmentRuntimeError::TooLarge)?;
+                .ok_or_else(|| rejected("message_too_large"))?;
             attachments.push(Attachment {
                 kind: "image".to_string(),
                 label: resources::safe_image_label(image.label.clone()),

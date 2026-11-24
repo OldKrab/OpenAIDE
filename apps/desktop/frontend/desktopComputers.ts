@@ -52,8 +52,9 @@ export function createDesktopComputers(
       // Forgetting the computer in use moves the window to this computer first.
       if (await settle(await invoke<NativeSwitchOutcome>("desktop_remote_forget", { id, operationId: null })) !== "switched") await read();
     },
-    async pair(code) {
-      if (await settle(await invoke<NativeSwitchOutcome>("desktop_remote_pair", { code, operationId: null })) !== "switched") await read();
+    async pair(code, inUse) {
+      const outcome = await invoke<NativeSwitchOutcome>("desktop_remote_pair", { code, inUse: inUse ?? null, operationId: null });
+      if (await settle(outcome) !== "switched") await read();
     },
     // SSH Computers (ADR-0069) are rows of the same list, marked by their `ssh` destination.
     ssh: {

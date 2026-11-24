@@ -16,6 +16,9 @@ LegalCopyright = "Copyright OpenAIDE contributors"
 agent-client-protocol.workspace = true
 base64.workspace = true
 openaide-app-server-protocol.workspace = true
+openaide-remote-core.workspace = true
+# The client side, for the gateway the Web App runs (ADR-0082).
+openaide-remote-client = { workspace = true, features = ["pairing"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -33,7 +36,6 @@ nucleo-matcher.workspace = true
 tempfile.workspace = true
 zstd.workspace = true
 iroh.workspace = true
-data-encoding.workspace = true
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ctrlc = "3.4"
@@ -46,13 +48,18 @@ signal-hook = { version = "0.4", default-features = false }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp"] }
 
+[build-dependencies]
+# The build script verifies staged adapter digests before embedding them (ADR-0079).
+serde_json.workspace = true
+sha2 = "0.11"
+
 [target.'cfg(windows)'.build-dependencies]
 tauri-winres = "=0.3.7"
 
 [dev-dependencies]
 # A relay run in the test, for the edge's relay check.
 iroh = { workspace = true, features = ["test-utils"] }
-# The Rust client of Remote Devices is proven against the real edge.
-openaide-remote-client = { path = "../remote-client" }
+# Tests bind on in-memory addresses or on a relay they run.
+openaide-remote-core = { workspace = true, features = ["test-network"] }
 # Paused time lets deadline contracts run on a controlled clock.
 tokio = { workspace = true, features = ["test-util"] }

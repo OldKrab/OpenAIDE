@@ -23,7 +23,7 @@ export function createViteProxy({ port, transformResponse, unavailableMessage })
       let headers = responseHeaders(response);
       let body = Buffer.from(await response.arrayBuffer());
       if (transformResponse) {
-        ({ body, headers } = await transformResponse({ body, headers, url }));
+        ({ body, headers } = await transformResponse({ body, headers, req, url }));
       }
       headers["content-length"] = String(body.byteLength);
       res.writeHead(response.status, headers);

@@ -351,6 +351,22 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:wide-diagram")) {
+    const diagram = [
+      "┌─────┬──────┬───────┐   ┌─────┬───────┐   ┌─────┬───────┐",
+      "│Shell│Client│Server │   │Shell│Server │   │Shell│Driver │",
+      "├─────┴──────┴───────┤   ├─────┴───────┤   ├─────┴───────┤",
+      "│ queue   events     │   │ queue       │   │ queue       │",
+      "│ store              │←─→│ store       │   │ store       │",
+      "├────────────────────┤   ├─────────────┤   ├─────────────┤",
+      "│ Agent              │   │ Agent       │   │ Agent       │",
+      "└────────────────────┘   └─────────────┘   └─────────────┘",
+    ].join("\n");
+    textUpdate(sessionId, "agent_message_chunk", `Three layouts:\n\n\`\`\`\n${diagram}\n\`\`\``, `agent-${promptNumber}`);
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
   if (text.includes("smoke:footer-after-list")) {
     textUpdate(
       sessionId,

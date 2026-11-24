@@ -38,7 +38,7 @@ const REMOTE_ACCESS_WAIT: Duration = Duration::from_secs(20);
 const USAGE: &str = "\
 Usage:
   openaide-app-server remote [--pair]       Keep this computer reachable by its paired devices until stopped
-  openaide-app-server remote pair           Show a pairing code for a new device
+  openaide-app-server remote pair           Show a pairing code that lets one more device use this computer
   openaide-app-server remote devices        List the paired devices
   openaide-app-server remote remove <number> [--yes]
                                             Remove a paired device by its number in the list
@@ -383,7 +383,8 @@ fn show_pairing_code(client: &mut LocalClient) -> Result<(), Failure> {
             println!("{picture}");
         }
     }
-    println!("Pairing code (paste it in the app on the other device):\n");
+    println!("Pairing code. On the other device, open Settings › Remote › Use another computer");
+    println!("(or the first screen of a new phone) and paste or scan it:\n");
     println!("{}\n", invite.code);
     println!(
         "It works once and for {} minutes. Anyone who has it can use this computer.",

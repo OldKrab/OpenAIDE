@@ -137,10 +137,14 @@ Linux process utilities. To build the workspace, install:
 - Rust 1.97.1
 - VS Code 1.100 or newer when testing the extension
 
-Install dependencies and verify the workspace:
+Install dependencies and verify the workspace. The App Server embeds the
+built-in Agent adapters from the git submodules under `adapters/`;
+`npm run build:adapters` initializes and builds them, and the backend scripts run
+it before Cargo. A direct `cargo build` without it stops and names the command.
 
 ```sh
 npm ci
+npm run build:adapters
 npm run check
 npm run test
 npm run build

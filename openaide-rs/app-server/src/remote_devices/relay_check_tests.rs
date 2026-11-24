@@ -2,7 +2,9 @@ use iroh::test_utils::run_relay_server;
 use iroh::SecretKey;
 
 use super::*;
-use crate::remote_devices::edge::{bind, EdgeNetwork};
+use openaide_remote_core::Network;
+
+use crate::remote_devices::edge::bind;
 
 #[test]
 fn rebinds_after_consecutive_unreached_checks_only() {
@@ -24,7 +26,7 @@ fn a_skipped_check_neither_counts_nor_clears_failures() {
 }
 
 /// The edge as the App Server binds it, answering checks the way its accept loop does.
-async fn edge_on(network: &EdgeNetwork) -> Endpoint {
+async fn edge_on(network: &Network) -> Endpoint {
     let edge = bind(SecretKey::generate(), network).await.unwrap();
     edge.online().await;
     let accepting = edge.clone();
@@ -42,7 +44,7 @@ async fn edge_on(network: &EdgeNetwork) -> Endpoint {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_check_reaches_an_edge_through_its_relay() {
     let (map, _url, _relay) = run_relay_server().await.unwrap();
-    let network = EdgeNetwork::Relay(map);
+    let network = Network::Relay(map);
     let edge = edge_on(&network).await;
 
     let outcome = network_check(&network).check(&edge.addr()).await;
@@ -55,7 +57,7 @@ async fn a_check_reaches_an_edge_through_its_relay() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_check_does_not_reach_an_edge_the_relay_no_longer_carries() {
     let (map, _url, _relay) = run_relay_server().await.unwrap();
-    let network = EdgeNetwork::Relay(map);
+    let network = Network::Relay(map);
     let edge = edge_on(&network).await;
     let address = edge.addr();
     edge.close().await;
@@ -68,6 +70,16 @@ async fn a_check_does_not_reach_an_edge_the_relay_no_longer_carries() {
     );
 }
 
-fn network_check(network: &EdgeNetwork) -> RelayCheck {
-    network.relay_check().expect("a relay network is checked")
+fn network_check(network: &Network) -> RelayCheck {
+    RelayCheck::on(network).expect("a relay network is checked")
+}
+
+#[test]
+fn only_growth_in_the_throttled_count_is_reported() {
+    let mut seen = 0;
+
+    assert_eq!(throttled_since(&mut seen, 0), None);
+    assert_eq!(throttled_since(&mut seen, 2), Some(2));
+    assert_eq!(throttled_since(&mut seen, 2), None);
+    assert_eq!(throttled_since(&mut seen, 3), Some(1));
 }

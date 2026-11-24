@@ -1,5 +1,5 @@
 [workspace]
-members = ["openaide-rs/android-ssh", "openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client"]
+members = ["openaide-rs/android-remote", "openaide-rs/android-ssh", "openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client", "openaide-rs/remote-core"]
 resolver = "2"
 
 [workspace.package]
@@ -10,6 +10,7 @@ publish = false
 [workspace.dependencies]
 openaide-app-server-protocol = { path = "openaide-rs/app-server-protocol" }
 openaide-remote-client = { path = "openaide-rs/remote-client", default-features = false }
+openaide-remote-core = { path = "openaide-rs/remote-core" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
@@ -30,7 +31,7 @@ nucleo-matcher = "0.3.1"
 zstd = "0.14"
 data-encoding = "2.11"
 # Remote Devices reach the App Server by public key (ADR-0062).
-iroh = { version = "1.3", default-features = false, features = ["tls-ring", "portmapper"] }
+iroh = { version = "1.3", default-features = false, features = ["tls-ring", "portmapper", "metrics", "unstable-net-report"] }
 
 # Development builds keep line tables for this workspace's crates, so backtraces still
 # show file and line, and drop debug info for dependencies. A full `cargo test --no-run`

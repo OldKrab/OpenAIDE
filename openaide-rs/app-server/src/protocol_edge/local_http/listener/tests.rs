@@ -317,6 +317,7 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
             |_stream, _request| panic!("chunk upload must not enter session polling"),
             |stream, request| {
                 assert_eq!(request.upload_id.as_deref(), Some("upload-1"));
+                assert_eq!(request.upload_kind.as_deref(), Some("image"));
                 assert_eq!(request.upload_offset, Some(524_288));
                 assert_eq!(request.upload_size, Some(1_500_000));
                 assert_eq!(request.content_length, 6);
@@ -336,7 +337,7 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
 
     let response = send(
         addr,
-        "POST /upload/chunk HTTP/1.1\r\nX-OpenAIDE-Upload-Id: upload-1\r\nX-OpenAIDE-Upload-Offset: 524288\r\nX-OpenAIDE-Upload-Size: 1500000\r\nContent-Length: 6\r\n\r\nsecond",
+        "POST /upload/chunk HTTP/1.1\r\nX-OpenAIDE-Upload-Id: upload-1\r\nX-OpenAIDE-Upload-Kind: image\r\nX-OpenAIDE-Upload-Offset: 524288\r\nX-OpenAIDE-Upload-Size: 1500000\r\nContent-Length: 6\r\n\r\nsecond",
     );
     server.join().unwrap();
 
@@ -431,6 +432,8 @@ fn options_preflight_returns_cors_headers_without_delegating() {
     assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
     assert!(response.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"));
     assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name"));
+    // Browsers must be allowed to send the header that marks a Composer Image upload.
+    assert!(response.contains("X-OpenAIDE-Upload-Kind"));
     assert!(called_rx.try_recv().is_err());
 }
 

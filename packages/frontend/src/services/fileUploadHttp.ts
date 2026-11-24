@@ -24,11 +24,15 @@ export type FileUploadLog = (
   fields: Record<string, string | number>,
 ) => void;
 
+/** `image` asks the App Server to register a Composer Image; `file` a File Attachment. */
+export type FileUploadKind = "file" | "image";
+
 export type FileUploadRequest = {
   target: FileUploadTarget;
   taskId: string;
   file: File;
   clientInstanceId: string;
+  kind?: FileUploadKind;
   onProgress: (progress: FileUploadProgress) => void;
   signal: AbortSignal;
   log?: FileUploadLog;
@@ -56,11 +60,13 @@ export async function uploadFileOverHttp(request: FileUploadRequest): Promise<Pr
   const startedAt = performance.now();
   let mode: "single" | "chunked" = chunkPreferredFiles.has(file) ? "chunked" : "single";
   let attemptCount = 1;
-  log?.("info", "file_upload_started", { operation_id: operationId, mode, bytes: file.size });
+  const kind = request.kind ?? "file";
+  log?.("info", "file_upload_started", { operation_id: operationId, mode, kind, bytes: file.size });
   const finished = (outcome: string) => ({
     operation_id: operationId,
     outcome,
     mode,
+    kind,
     attempt_count: attemptCount,
     duration_ms: Math.round(performance.now() - startedAt),
   });
@@ -84,20 +90,27 @@ export async function uploadFileOverHttp(request: FileUploadRequest): Promise<Pr
   } catch (error) {
     if (isAbort(error)) log?.("info", "file_upload_completed", finished("cancelled"));
     else {
-      log?.("warn", "file_upload_completed", {
-        ...finished("failure"),
-        error_kind: error instanceof UploadError ? error.kind : "unexpected",
-        ...(error instanceof UploadError && error.status !== undefined ? { status: error.status } : {}),
-      });
+      log?.("warn", "file_upload_completed", { ...finished("failure"), ...uploadFailureFields(error) });
     }
     throw error;
   }
 }
 
-async function uploadFileOnce({ target, taskId, file, clientInstanceId, onProgress, signal }: FileUploadRequest) {
+/**
+ * Classifies a failed upload for logs: the transport's failure class and, when the request was
+ * answered, its HTTP status. The shell's transport log and the Composer's event forwarded to the
+ * App Server both use it, so one failure reads the same in each. Never the message: it may
+ * carry App Server or intermediary text.
+ */
+export function uploadFailureFields(error: unknown): Record<string, string | number> {
+  if (!(error instanceof UploadError)) return { error_kind: error instanceof Error ? error.name : typeof error };
+  return error.status === undefined ? { error_kind: error.kind } : { error_kind: error.kind, status: error.status };
+}
+
+async function uploadFileOnce({ target, taskId, file, clientInstanceId, kind, onProgress, signal }: FileUploadRequest) {
   const response = await sendUploadRequest({
     url: target.url,
-    headers: { ...target.headers, ...uploadHeaders(taskId, file, clientInstanceId) },
+    headers: { ...target.headers, ...uploadHeaders(taskId, file, clientInstanceId, kind) },
     body: file,
     signal,
     onProgress: (loaded, total) => onProgress({
@@ -117,7 +130,7 @@ async function uploadFileOnce({ target, taskId, file, clientInstanceId, onProgre
   return attachmentFromResponse(response.body);
 }
 
-async function uploadFileInChunks({ target, taskId, file, clientInstanceId, onProgress, signal }: FileUploadRequest) {
+async function uploadFileInChunks({ target, taskId, file, clientInstanceId, kind, onProgress, signal }: FileUploadRequest) {
   const uploadId = newUploadId();
   let offset = 0;
   let sentChunk = false;
@@ -130,7 +143,7 @@ async function uploadFileInChunks({ target, taskId, file, clientInstanceId, onPr
         url: chunkUrl(target),
         headers: {
           ...target.headers,
-          ...uploadHeaders(taskId, file, clientInstanceId),
+          ...uploadHeaders(taskId, file, clientInstanceId, kind),
           "X-OpenAIDE-Upload-Id": uploadId,
           "X-OpenAIDE-Upload-Offset": String(chunkOffset),
           "X-OpenAIDE-Upload-Size": String(file.size),
@@ -236,12 +249,15 @@ function uploadHeaders(
   taskId: string,
   file: File,
   clientInstanceId: string,
-) {
+  kind: FileUploadKind = "file",
+): Record<string, string> {
   return {
     "Content-Type": "application/octet-stream",
     "X-OpenAIDE-Client-Instance-Id": clientInstanceId,
     "X-OpenAIDE-Task-Id": taskId,
     "X-OpenAIDE-File-Name": encodeURIComponent(file.name || "Attached file"),
+    // The App Server reads the media type from the bytes; the header only selects the handle kind.
+    ...(kind === "image" ? { "X-OpenAIDE-Upload-Kind": "image" } : {}),
   };
 }
 

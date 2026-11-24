@@ -4,26 +4,24 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use iroh::endpoint::{
-    presets, ConnectError, ConnectWithOptsError, Connection, ConnectionError, RecvStream,
-    SendStream,
+    ConnectError, ConnectWithOptsError, Connection, ConnectionError, QuicTransportConfig,
+    RecvStream, SendStream,
 };
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher};
-use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
-use serde::{Deserialize, Serialize};
+use openaide_remote_core::{
+    application_alpn, clamp_label, close, InviteCode, InviteRequest, Network, PairingResult,
+    PAIRING_ALPN, PAIRING_MESSAGE_LIMIT,
+};
 
-use crate::pairing_code::{clamp_label, InviteCode};
-
-const PAIRING_ALPN: &[u8] = b"openaide/pair/1";
-const PAIRING_MESSAGE_LIMIT: usize = 4096;
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(20);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long reaching a paired App Server may take before it counts as unreachable.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// A CORS preflight: every App Server answers it before any handler runs, so it
+/// asks for an answer and nothing else.
+const ROUND_TRIP_REQUEST: &[u8] = b"OPTIONS /probe HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
 /// The App Server completes the handshake before it checks the key, so a removed
 /// device learns it from the close that follows.
-const REFUSAL_WAIT: Duration = Duration::from_millis(400);
-/// Close codes the App Server's edge uses.
-const CLOSE_UNTRUSTED: u32 = 1;
-const CLOSE_REMOVED: u32 = 2;
-const CLOSE_UNKNOWN_PROTOCOL: u32 = 3;
+pub(crate) const REFUSAL_WAIT: Duration = Duration::from_millis(400);
 
 pub use crate::Logger;
 
@@ -36,6 +34,9 @@ pub enum Failure {
     NotTrusted,
     #[error("the computer runs an incompatible version")]
     Incompatible,
+    /// This device's own key could not be read or kept; the computer was not tried.
+    #[error("this device's secure storage is unavailable")]
+    Storage,
 }
 
 impl Failure {
@@ -44,6 +45,7 @@ impl Failure {
             Self::Unreachable => "unreachable",
             Self::NotTrusted => "not_trusted",
             Self::Incompatible => "incompatible",
+            Self::Storage => "storage",
         }
     }
 }
@@ -53,29 +55,6 @@ impl Failure {
 pub struct PairedServer {
     pub id: PublicKey,
     pub name: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InviteRequest<'a> {
-    secret: String,
-    name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PairingResult {
-    trusted: bool,
-    #[serde(default)]
-    server_name: Option<String>,
-}
-
-/// The major version is part of the name, so an incompatible App Server fails
-/// the handshake instead of a request.
-pub fn application_alpn() -> Vec<u8> {
-    format!("openaide/app-server/{}", APP_SERVER_PROTOCOL_VERSION.major).into_bytes()
 }
 
 pub fn new_device_key() -> SecretKey {
@@ -101,11 +80,32 @@ pub fn device_key_from_text(text: &str) -> Option<SecretKey> {
 /// Logs each time the endpoint gains or loses its home relay, for as long as it
 /// lives: without a relay a remote App Server can be reached only directly.
 pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
-    let endpoint = Endpoint::builder(presets::N0)
+    bind_on(&Network::Public, key, log).await
+}
+
+/// Binds as [`bind`] does, on `network`; tests pass a network of their own.
+pub(crate) async fn bind_on(
+    network: &Network,
+    key: SecretKey,
+    log: Logger,
+) -> Result<Endpoint, Failure> {
+    let endpoint = network
+        .builder()
         .secret_key(key)
+        // Phones on mobile data lose the direct path as soon as a bulk send starts while
+        // segmentation offload is on, and fall back to the relay (iroh issue #4647).
+        // TODO: re-enable once iroh detects networks that drop segmented datagrams.
+        .transport_config(
+            QuicTransportConfig::builder()
+                .enable_segmentation_offload(false)
+                .build(),
+        )
         .bind()
         .await
         .map_err(|_| Failure::Unreachable)?;
+    network.on_bound(&endpoint);
+    crate::watch_relay_rate_limits(&endpoint, log.clone(), "remote_endpoint_relay_rate_limited");
+    crate::watch_net_report(&endpoint, log.clone(), "remote_endpoint_network_changed");
     let mut statuses = endpoint.home_relay_status();
     tokio::spawn(async move {
         let mut connected = None;
@@ -153,8 +153,8 @@ pub async fn redeem(
             let (mut send, mut recv) = connection.open_bi().await.ok()?;
             let request = InviteRequest {
                 secret: invite.secret_text(),
-                name: &name,
-                model: model.as_deref(),
+                name: name.clone(),
+                model: model.clone(),
             };
             send.write_all(&serde_json::to_vec(&request).ok()?)
                 .await
@@ -316,6 +316,63 @@ impl RemoteClient {
         Err(failure)
     }
 
+    /// Asks the App Server for one answer over the live connection, opening one
+    /// when there is none, and fails when none arrives `within` that time.
+    ///
+    /// A computer that stopped without closing the connection (a crash, or its
+    /// network dropping) leaves it looking open until QUIC's idle timeout ends
+    /// it, 15 to 30 s later; a round trip finds it now. A connection that gave
+    /// no answer is dropped, so the next request opens a new one.
+    pub async fn round_trip(&self, within: Duration) -> Result<(), Failure> {
+        let started = Instant::now();
+        (self.log)("remote_round_trip_started", serde_json::json!({}));
+        let result = self.exchange_round_trip(within).await;
+        let mut fields = serde_json::json!({
+            "outcome": match &result {
+                Ok(()) => "answered",
+                Err((failure, _)) => failure.class(),
+            },
+            "duration_ms": elapsed_ms(started),
+        });
+        if let Err((_, stage)) = &result {
+            fields["stage"] = (*stage).into();
+        }
+        (self.log)("remote_round_trip_completed", fields);
+        result.map_err(|(failure, _)| failure)
+    }
+
+    /// Fails with the reason and the stage it was reached at.
+    async fn exchange_round_trip(&self, within: Duration) -> Result<(), (Failure, &'static str)> {
+        let connection = self
+            .connection()
+            .await
+            .map_err(|failure| (failure, "connect"))?;
+        let exchange = async {
+            let (mut send, mut recv) = connection.open_bi().await.map_err(|_| "open")?;
+            send.write_all(ROUND_TRIP_REQUEST)
+                .await
+                .map_err(|_| "send")?;
+            send.finish().map_err(|_| "send")?;
+            // Any HTTP response is an answer; the status does not matter here.
+            let mut answer = [0u8; 5];
+            recv.read_exact(&mut answer).await.map_err(|_| "answer")?;
+            if &answer != b"HTTP/" {
+                return Err("answer");
+            }
+            Ok(())
+        };
+        let stage = match tokio::time::timeout(within, exchange).await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(stage)) => stage,
+            Err(_) => "timeout",
+        };
+        let failure = connection
+            .close_reason()
+            .map_or(Failure::Unreachable, |reason| failure_of(&reason));
+        self.drop_connection(&connection).await;
+        Err((failure, stage))
+    }
+
     async fn drop_connection(&self, failed: &Connection) {
         let mut current = self.connection.lock().await;
         if current
@@ -335,19 +392,19 @@ impl RemoteClient {
     }
 }
 
-fn failure_of(reason: &ConnectionError) -> Failure {
+pub(crate) fn failure_of(reason: &ConnectionError) -> Failure {
     let ConnectionError::ApplicationClosed(close) = reason else {
         return Failure::Unreachable;
     };
     match u32::try_from(close.error_code.into_inner()) {
-        Ok(CLOSE_UNTRUSTED | CLOSE_REMOVED) => Failure::NotTrusted,
-        Ok(CLOSE_UNKNOWN_PROTOCOL) => Failure::Incompatible,
+        Ok(close::UNTRUSTED | close::REMOVED) => Failure::NotTrusted,
+        Ok(close::UNKNOWN_PROTOCOL) => Failure::Incompatible,
         _ => Failure::Unreachable,
     }
 }
 
 /// Names how far a failed attempt got, from the error's variant alone.
-fn connect_stage(error: &ConnectError) -> &'static str {
+pub(crate) fn connect_stage(error: &ConnectError) -> &'static str {
     match error {
         ConnectError::Connect { source, .. } => match source {
             ConnectWithOptsError::NoAddress { .. } => "no_address",
@@ -372,7 +429,7 @@ fn relay_connected(endpoint: &Endpoint) -> bool {
 /// transport reports only as text.
 // TODO: match the transport's crypto error code once iroh exposes it on the
 // connect error; the wording is not a contract.
-fn names_no_protocol(error: &str) -> bool {
+pub(crate) fn names_no_protocol(error: &str) -> bool {
     error.contains("error 120") || error.contains("any known protocol")
 }
 
@@ -388,6 +445,6 @@ fn path_name(connection: &Connection) -> &'static str {
     }
 }
 
-fn elapsed_ms(started: Instant) -> u64 {
+pub(crate) fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }

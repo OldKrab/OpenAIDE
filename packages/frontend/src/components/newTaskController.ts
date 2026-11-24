@@ -1,5 +1,6 @@
 import {
   TASK_RELEASE,
+  type AttachmentHandleId,
   type BackendConnection,
   type TaskId,
 } from "@openaide/app-server-client";
@@ -7,6 +8,7 @@ import type { ComposerAttachmentResourceOwner } from "../services/attachmentReso
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
 import type { ConfigOptionsCatalog, TaskSnapshot } from "@openaide/app-shell-contracts";
+import { NewTaskDraftCarry } from "./newTaskDraftCarry";
 
 export type NewTaskLease = Readonly<{
   generation: number;
@@ -16,6 +18,11 @@ export type NewTaskLease = Readonly<{
 
 type NewTaskDisposal = {
   attachmentResources?: ComposerAttachmentResourceOwner;
+  /**
+   * Handles the unsent draft keeps showing after this Task is replaced. They are held for
+   * the successor instead of released; see `transferCarriedAttachments`.
+   */
+  carryDraftHandles?: readonly AttachmentHandleId[];
   dispatch: (action: AppAction) => void;
   lease?: NewTaskLease;
   request?: NonNullable<BackendConnection["request"]>;
@@ -38,6 +45,7 @@ export class NewTaskController {
   // Send protection is independent of the current controller lease. A newer New Task
   // must not make an older in-flight Send disposable before its one request settles.
   private readonly sendProtections = new Set<TaskId>();
+  private readonly draftCarry = new NewTaskDraftCarry();
 
   getSnapshot = () => this.cachedSnapshot;
 
@@ -239,6 +247,15 @@ export class NewTaskController {
     return !sendProtected && !this.disposals.has(taskId as TaskId);
   }
 
+  /** Moves handles held by earlier discards into the Task this client just acquired. */
+  transferCarriedAttachments(options: Parameters<NewTaskDraftCarry["transferTo"]>[0]) {
+    return this.draftCarry.transferTo(options);
+  }
+
+  carriedAttachmentCount() {
+    return this.draftCarry.pendingCount();
+  }
+
   /** Drops identities that are not comparable after the state root changes. */
   replaceStateRoot() {
     const hadSnapshot = this.cachedSnapshot !== undefined;
@@ -250,6 +267,7 @@ export class NewTaskController {
     this.cachedSnapshot = undefined;
     this.disposals.clear();
     this.sendProtections.clear();
+    this.draftCarry.clear();
     if (hadSnapshot) this.emit();
   }
 
@@ -262,13 +280,15 @@ export class NewTaskController {
     this.current = undefined;
     this.expiredLeaseTaskId = lease.taskId;
     this.replacementRequired = undefined;
+    // Lease expiry also discards this client's attachment handles on the App Server.
+    this.draftCarry.clear();
     if (this.cachedSnapshot?.task.task_id === lease.taskId) this.cachedSnapshot = undefined;
     this.emit();
     return lease.taskId;
   }
 
   /** Discards an empty Task at most once and only for its current lease. */
-  discard({ attachmentResources, dispatch, lease, request, taskId }: NewTaskDisposal) {
+  discard({ attachmentResources, carryDraftHandles, dispatch, lease, request, taskId }: NewTaskDisposal) {
     if (!this.isDisposable(taskId)) return Promise.resolve();
     if (lease && !this.isCurrent(lease)) return Promise.resolve();
     const existing = this.disposals.get(taskId);
@@ -278,6 +298,8 @@ export class NewTaskController {
       this.cachedSnapshot = undefined;
       this.emit();
     }
+    // Hold before releasing: the release below skips held handles.
+    this.draftCarry.hold(attachmentResources, taskId, carryDraftHandles ?? []);
     attachmentResources?.releaseTask(taskId);
     // Local ownership ends synchronously; backend acknowledgement may settle after routing.
     dispatch({ type: "taskInput:clear", taskId });

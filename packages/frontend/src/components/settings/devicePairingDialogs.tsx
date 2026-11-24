@@ -1,15 +1,19 @@
-import type {
-  DevicesCreateInviteResult,
-  DevicesPreviewJoinRequestResult,
-  RemoteDeviceSummary,
-} from "@openaide/app-server-client";
-import { Copy } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { DeviceCollectionSnapshot, DevicesCreateInviteResult, RemoteDeviceSummary } from "@openaide/app-server-client";
+import { ArrowRight, Copy, Monitor, MonitorSmartphone, Smartphone } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { encode } from "uqr";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
+import type { ComputerInUse } from "../../services/computers";
 import { copyText } from "../clipboard";
 import { PopupDialog } from "../Popup";
 import { errorSentence, SettingsButton, SettingsInlineError } from "./settingsKit";
+
+/*
+ * The two pairing dialogs of ADR-0081. Pairing has one direction: the computer to be
+ * used shows a code ("Add a device"), and the device that will use it enters the code
+ * ("Use another computer"). Each dialog draws that direction and names the other
+ * side's control as a path, so the user knows where the code goes.
+ */
 
 /** Names the public service at the moment pairing starts to use it (ADR 0062). */
 function ConnectionNote() {
@@ -21,12 +25,64 @@ function ConnectionNote() {
   );
 }
 
-/** Shows a single-use code for a new device to scan or type. */
-export function InviteDialog({
+type PairingEnd = { name: string; icon: ReactNode } | { unknown: string };
+
+const computerIcon = <Monitor aria-hidden="true" size={20} strokeWidth={1.6} />;
+
+/** This device as one end of the connection. */
+function thisDevice(device: "computer" | "phone"): PairingEnd {
+  return device === "phone"
+    ? { name: "This phone", icon: <Smartphone aria-hidden="true" size={20} strokeWidth={1.6} /> }
+    : { name: "This computer", icon: computerIcon };
+}
+
+/** The connection as the object it is: which device uses which computer. An end not known yet is an empty slot. */
+function PairingDirection({ from, to }: { from: PairingEnd; to: PairingEnd }) {
+  const end = (value: PairingEnd) => "unknown" in value ? (
+    <span className="settings-pairing-end" data-unknown="">
+      <span className="settings-pairing-end-icon" />
+      <small>{value.unknown}</small>
+    </span>
+  ) : (
+    <span className="settings-pairing-end">
+      <span className="settings-pairing-end-icon">{value.icon}</span>
+      <small>{value.name}</small>
+    </span>
+  );
+  const name = (value: PairingEnd) => "unknown" in value ? `a ${value.unknown.toLowerCase()}` : value.name;
+  return (
+    <div aria-label={`${name(from)} uses ${name(to)}`} className="settings-pairing-direction" role="img">
+      {end(from)}
+      <span aria-hidden="true" className="settings-pairing-uses"><ArrowRight size={16} /><small>uses</small></span>
+      {end(to)}
+    </div>
+  );
+}
+
+/** The other side's step as the path of controls the user follows there. */
+function PairingPath({ lead, steps, tail }: { lead: string; steps: string[]; tail?: string }) {
+  return (
+    <p aria-label={`${lead} ${steps.join(", then ")}${tail ? `, ${tail}` : ""}`} className="settings-pairing-path">
+      <span aria-hidden="true">{lead}</span>
+      {steps.map((step, index) => (
+        <span aria-hidden="true" className="settings-pairing-step" key={step}>
+          {index ? <span className="settings-pairing-step-separator">›</span> : null}
+          <span className="settings-pairing-crumb">{step}</span>
+        </span>
+      ))}
+      {tail ? <span aria-hidden="true">{tail}</span> : null}
+    </p>
+  );
+}
+
+/** Shows a single-use code that lets one more device use `computer`, the computer in use. */
+export function AddDeviceDialog({
+  computer,
   devices,
   intents,
   onClose,
 }: {
+  computer: string;
   devices: RemoteDeviceSummary[];
   intents: RemoteDeviceIntents;
   onClose: () => void;
@@ -58,22 +114,31 @@ export function InviteDialog({
   }, [expired, invite]);
   // A device that was not in the list when the dialog opened means the code was used.
   const paired = devices.find((device) => !knownDeviceIds.current.has(device.deviceId));
+  const title = `Add a device to ${computer}`;
 
   return (
-    <PopupDialog className="settings-confirm settings-pairing" label="Pairing code" onOpenChange={(open) => { if (!open) onClose(); }} open>
-      <strong>{paired ? "Device added" : "Pair a new device"}</strong>
-      <p>{paired ? `${paired.name} can now use this OpenAIDE.` : "In OpenAIDE on the new device, scan this code or type it in."}</p>
+    <PopupDialog className="settings-confirm settings-pairing" label={title} onOpenChange={(open) => { if (!open) onClose(); }} open>
+      <strong>{paired ? `${paired.name} can use ${computer}` : title}</strong>
+      <PairingDirection
+        from={paired ? { name: paired.name, icon: <MonitorSmartphone aria-hidden="true" size={20} strokeWidth={1.6} /> } : { unknown: "New device" }}
+        to={{ name: computer, icon: computerIcon }}
+      />
       {paired ? null : invite && !expired ? (
         <>
           <PairingQr code={invite.code} />
           <code aria-label="Pairing code text" className="settings-code">{groupCode(invite.code)}</code>
           <p className="settings-dialog-note">Works once · expires in {formatCountdown(invite.expiresAtMs - now)}</p>
+          <PairingPath
+            lead="On the other device:"
+            steps={["Settings", "Remote", "Use another computer"]}
+            tail="or the first screen of a new phone."
+          />
           <ConnectionNote />
         </>
       ) : expired ? (
-        <p>This code expired. Create a new one to continue.</p>
+        <p>This code expired. Make a new one to continue.</p>
       ) : error ? null : (
-        <p role="status">Creating a pairing code…</p>
+        <p role="status">Making a pairing code…</p>
       )}
       {error ? <SettingsInlineError>{error}</SettingsInlineError> : null}
       <footer>
@@ -95,70 +160,62 @@ export function InviteDialog({
   );
 }
 
-/** Trusts a device from the code it shows, after the user has seen what the code names. */
-export function JoinDialog({ intents, onClose }: { intents: RemoteDeviceIntents; onClose: () => void }) {
+/**
+ * Spends the code another computer shows. The shell checks the code first, so a code
+ * from the computer in use (named by `devices`) is refused before it is spent; success
+ * moves the shell to that computer's work, and the work here keeps running.
+ */
+export function UseAnotherComputerDialog({
+  device,
+  devices,
+  onClose,
+  pair: spend,
+}: {
+  device: "computer" | "phone";
+  /** The devices snapshot of the App Server in use; its key is absent until that computer first made a code. */
+  devices: DeviceCollectionSnapshot | undefined;
+  onClose: () => void;
+  pair: (code: string, inUse?: ComputerInUse) => Promise<void>;
+}) {
+  const inUse = devices?.serverKey ? { key: devices.serverKey, name: devices.serverName } : undefined;
   const [code, setCode] = useState("");
-  const [preview, setPreview] = useState<DevicesPreviewJoinRequestResult>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const run = async (action: () => Promise<void>, fallback: string) => {
+  const pair = async () => {
+    if (busy || !code.trim()) return;
     setBusy(true);
     setError(undefined);
     try {
-      await action();
+      await spend(code, inUse);
+      onClose();
     } catch (cause) {
-      setError(errorSentence(cause, fallback));
-    } finally {
+      setError(errorSentence(cause, "Pairing failed. Try again."));
       setBusy(false);
     }
   };
-  const review = () => run(async () => setPreview(await intents.previewJoinRequest(code.trim())), "This code could not be read.");
-  const approve = () => run(async () => {
-    await intents.approveJoinRequest(code.trim());
-    onClose();
-  }, "Unable to add the device.");
-
   return (
-    <PopupDialog className="settings-confirm settings-pairing" label="Add a device by code" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
-      <strong>{preview ? `Add ${preview.name}?` : "Enter the code from the device"}</strong>
-      <p>{preview ? "Check that this is your device." : "OpenAIDE on the new device shows it on its first screen."}</p>
-      {preview ? (
-        <>
-          <dl className="settings-facts">
-            <div><dt>Device</dt><dd>{preview.name}{preview.model && preview.model !== preview.name ? ` · ${preview.model}` : ""}</dd></div>
-            <div><dt>Connects to</dt><dd>{preview.serverName}</dd></div>
-          </dl>
-          <p>
-            {preview.alreadyTrusted
-              ? "This device is already paired. Adding it again tells it where to connect."
-              : "It will have full access to this OpenAIDE: Tasks, files, and Agents. The name is reported by the device and is not verified."}
-          </p>
-          <ConnectionNote />
-        </>
-      ) : (
-        <textarea
-          aria-label="Code from the device"
-          autoCapitalize="characters"
-          autoComplete="off"
-          autoFocus
-          className="settings-code-input"
-          onChange={(event) => setCode(event.currentTarget.value)}
-          placeholder="OAJ1…"
-          rows={3}
-          spellCheck={false}
-          value={code}
-        />
-      )}
+    <PopupDialog className="settings-confirm settings-pairing" label="Use another computer" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
+      <strong>Use another computer</strong>
+      <PairingDirection from={thisDevice(device)} to={{ unknown: "Computer" }} />
+      <textarea
+        aria-label="Code from the computer"
+        autoCapitalize="characters"
+        autoComplete="off"
+        autoFocus
+        className="settings-code-input"
+        onChange={(event) => setCode(event.currentTarget.value)}
+        // A code is one word, so Enter spends it as soon as it is pasted.
+        onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void pair(); } }}
+        placeholder="OAI1…"
+        rows={3}
+        spellCheck={false}
+        value={code}
+      />
       {error ? <SettingsInlineError>{error}</SettingsInlineError> : null}
+      <PairingPath lead="Get the code on the computer:" steps={["Settings", "Remote", "Add a device"]} />
       <footer>
-        <SettingsButton disabled={busy} onClick={preview ? () => { setPreview(undefined); setError(undefined); } : onClose}>
-          {preview ? "Back" : "Cancel"}
-        </SettingsButton>
-        {preview ? (
-          <SettingsButton busy={busy} onClick={() => void approve()} variant="primary">{busy ? "Adding…" : "Add device"}</SettingsButton>
-        ) : (
-          <SettingsButton disabled={busy || !code.trim()} onClick={() => void review()} variant="primary">Continue</SettingsButton>
-        )}
+        <SettingsButton disabled={busy} onClick={onClose}>Cancel</SettingsButton>
+        <SettingsButton busy={busy} disabled={!code.trim()} onClick={() => void pair()} variant="primary">{busy ? "Connecting…" : "Connect"}</SettingsButton>
       </footer>
     </PopupDialog>
   );

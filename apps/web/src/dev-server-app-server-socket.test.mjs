@@ -107,11 +107,13 @@ async function startProxy(t, upstream, startAppServer = async () => {}) {
   const events = [];
   const record = (event, fields) => events.push({ event, fields });
   const proxy = createAppServerSocketProxy({
-    startAppServer,
-    currentEndpoint: () => ({
-      url: new URL(`http://127.0.0.1:${upstreamPort}/rpc`),
-      authToken: "app-server-token",
-    }),
+    async resolveEndpoint() {
+      await startAppServer();
+      return {
+        url: new URL(`http://127.0.0.1:${upstreamPort}/rpc`),
+        authToken: "app-server-token",
+      };
+    },
     logger: { info: record, warn: record },
   });
   const server = http.createServer();

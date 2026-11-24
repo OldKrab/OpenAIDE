@@ -1,13 +1,12 @@
 import type { DeviceCollectionSnapshot, RemoteDeviceSummary } from "@openaide/app-server-client";
-import { Laptop, Monitor, Plus, QrCode, Server, Smartphone, Wifi } from "lucide-react";
+import { Laptop, Monitor, Plus, Server, Smartphone, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { RemoteDeviceIntents } from "../../intents/remoteDeviceIntents";
 import { computerName, currentComputer, useComputers, type ComputersCapability, type ComputersSnapshot, type ShellComputer, type SshComputerStatus } from "../../services/computers";
 import { computerSwitch, useComputerSwitch } from "../../services/computerSwitch";
 import type { PhoneSshComputer } from "../../services/connectionSettings";
 import { currentFrontendShell } from "../../services/frontendShell";
-import { PopupDialog } from "../Popup";
-import { InviteDialog, JoinDialog } from "./devicePairingDialogs";
+import { AddDeviceDialog, UseAnotherComputerDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
 import { settingsInfo } from "./settingsInfo";
 import { AddSshComputerDialog, UpdateSshComputerDialog, useSshStatus } from "./sshComputers";
@@ -21,7 +20,7 @@ export type RemoteSectionProps = {
 };
 
 type Dialog =
-  | { kind: "pair" }
+  | { kind: "use-another-computer" }
   | { kind: "forget"; computer: ShellComputer }
   | { kind: "add-ssh" }
   | { kind: "update-ssh" }
@@ -29,13 +28,13 @@ type Dialog =
   | { kind: "stop-phone-ssh"; computer: PhoneSshComputer }
   | { kind: "forget-phone-ssh"; computer: PhoneSshComputer }
   | { kind: "update-phone-ssh" }
-  | { kind: "invite" }
-  | { kind: "join" }
+  | { kind: "add-device"; computer: string }
   | { kind: "remove"; device: RemoteDeviceSummary };
 
 /**
- * Both directions of remote use on one page: which computer this shell is
- * connected to, and which devices may connect to that computer.
+ * Both sides of remote use on one page (ADR-0081): which computer this shell uses,
+ * ending in "Use another computer", and which devices use that computer, with
+ * "Add a device".
  */
 export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectionProps): SettingsSection | undefined {
   const capability = currentFrontendShell()?.computers;
@@ -55,8 +54,8 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
   const groups: SettingsGroup[] = [];
   if (capability) {
     groups.push(computersGroup(computers, phone, {
-      onPair: () => {
-        if (capability.pair) setDialog({ kind: "pair" });
+      onUseAnotherComputer: () => {
+        if (capability.pair) setDialog({ kind: "use-another-computer" });
         else void computers.openPairing();
       },
       open: setDialog,
@@ -78,7 +77,14 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
     groups,
     overlay: dialog ? (
       <>
-        {dialog.kind === "pair" && capability?.pair ? <PairComputerDialog pair={capability.pair} onClose={close} /> : null}
+        {dialog.kind === "use-another-computer" && capability?.pair ? (
+          <UseAnotherComputerDialog
+            device={device}
+            devices={devices}
+            onClose={close}
+            pair={capability.pair}
+          />
+        ) : null}
         {dialog.kind === "forget" ? (
           <SettingsConfirm
             confirmLabel="Forget"
@@ -151,8 +157,9 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             status={phone.state.ssh}
           />
         ) : null}
-        {dialog.kind === "invite" && deviceIntents ? <InviteDialog devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} /> : null}
-        {dialog.kind === "join" && deviceIntents ? <JoinDialog intents={deviceIntents} onClose={close} /> : null}
+        {dialog.kind === "add-device" && deviceIntents ? (
+          <AddDeviceDialog computer={dialog.computer} devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} />
+        ) : null}
         {dialog.kind === "remove" && deviceIntents ? (
           <SettingsConfirm
             confirmLabel="Remove device"
@@ -226,7 +233,7 @@ function useSettingsComputers(capability: ComputersCapability | undefined): Sett
 }
 
 type ComputersView = {
-  onPair(): void;
+  onUseAnotherComputer(): void;
   open(dialog: Dialog): void;
   /** The shell can start the App Server on SSH Computers. */
   canAddSsh: boolean;
@@ -340,6 +347,19 @@ function computersGroup(computers: SettingsComputers, phone: PhoneConnection | u
       ),
     });
   }
+  // Last, so the list reads as the computers this device can use (ADR-0081). It waits
+  // while a switch is under way, like every other row's action.
+  if (snapshot) {
+    rows.push({
+      id: "use-another-computer",
+      label: "Use another computer",
+      // A phone reads the code with its camera; a computer has it pasted.
+      description: snapshot.device === "phone" ? "Scan the code it shows" : "Enter the code it shows",
+      keywords: "pair code connect remote computer add",
+      leading: <Plus aria-hidden="true" size={18} strokeWidth={1.6} />,
+      onOpen: busy ? undefined : view.onUseAnotherComputer,
+    });
+  }
   const state = phone?.state;
   const pairFailed = computers.failed?.id === "pair" ? computers.failed.message : undefined;
   const loadError = snapshot?.error;
@@ -361,7 +381,6 @@ function computersGroup(computers: SettingsComputers, phone: PhoneConnection | u
             Add SSH computer
           </SettingsButton>
         ) : null}
-        <SettingsButton disabled={busy} icon={<Plus aria-hidden="true" size={14} />} onClick={view.onPair}>Pair a computer</SettingsButton>
       </>
     ),
     notice: (
@@ -398,13 +417,10 @@ function devicesGroup(
   const paired = devices?.devices ?? [];
   return {
     id: "devices",
-    title: `Devices paired with ${owner}`,
+    title: `Devices using ${owner}`,
     info: settingsInfo.devices,
     actions: devices ? (
-      <>
-        <SettingsButton onClick={() => open({ kind: "join" })}>Enter code</SettingsButton>
-        <SettingsButton icon={<QrCode aria-hidden="true" size={14} />} onClick={() => open({ kind: "invite" })} variant="primary">Show code</SettingsButton>
-      </>
+      <SettingsButton icon={<Plus aria-hidden="true" size={14} />} onClick={() => open({ kind: "add-device", computer: owner })} variant="primary">Add a device</SettingsButton>
     ) : undefined,
     notice: devices?.remoteAccess === "failed" ? (
       <SettingsInlineError>Remote access could not start, so paired devices cannot connect. Check the network and restart OpenAIDE.</SettingsInlineError>
@@ -429,45 +445,6 @@ function devicesGroup(
       };
     }),
   };
-}
-
-/** Spends a code another computer shows; success moves the shell to that computer's work. */
-function PairComputerDialog({ pair: spend, onClose }: { pair: (code: string) => Promise<void>; onClose: () => void }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const pair = async () => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await spend(code);
-      onClose();
-    } catch (cause) {
-      setError(errorSentence(cause, "Pairing failed. Try again."));
-      setBusy(false);
-    }
-  };
-  return (
-    <PopupDialog className="settings-confirm" label="Pair with another computer" onOpenChange={(open) => { if (!open && !busy) onClose(); }} open>
-      <strong>Pair a computer</strong>
-      <p>On the other computer, open Settings, Remote, choose Show code, then copy it here. OpenAIDE then opens that computer's projects.</p>
-      <textarea
-        aria-label="Pairing code"
-        autoFocus
-        className="settings-code-input"
-        onChange={(event) => setCode(event.currentTarget.value)}
-        placeholder="OAI1…"
-        rows={3}
-        spellCheck={false}
-        value={code}
-      />
-      {error ? <SettingsInlineError>{error}</SettingsInlineError> : null}
-      <footer>
-        <SettingsButton disabled={busy} onClick={onClose}>Cancel</SettingsButton>
-        <SettingsButton busy={busy} disabled={!code.trim()} onClick={() => void pair()} variant="primary">{busy ? "Pairing…" : "Pair"}</SettingsButton>
-      </footer>
-    </PopupDialog>
-  );
 }
 
 function formatMoment(timestampMs: number) {

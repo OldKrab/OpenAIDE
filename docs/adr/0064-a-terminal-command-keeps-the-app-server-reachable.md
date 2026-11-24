@@ -1,6 +1,6 @@
 # A Terminal Command Keeps the App Server Reachable
 
-Status: accepted
+Status: accepted; the short-code reasoning refined by ADR-0081
 
 A computer can be made reachable by its Remote Devices ([ADR-0062](0062-remote-devices-are-app-server-clients.md)) from a terminal, with no window on it. This answers the question ADR-0062 left open: when an App Server may outlive its App Shells.
 

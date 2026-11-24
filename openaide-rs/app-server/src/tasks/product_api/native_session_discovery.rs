@@ -258,7 +258,6 @@ impl TaskProductApi {
         let mut page_count = 0_usize;
         let mut has_more = false;
         let mut complete = false;
-        let mut authoritative = true;
         let mut stop_reason = "error";
         let outcome = (|| {
             loop {
@@ -280,7 +279,6 @@ impl TaskProductApi {
                         )
                         .map_err(protocol_error_from_runtime)?;
                     page_count = page_count.saturating_add(1);
-                    authoritative &= result.authoritative;
                     let mut new_identity_count = 0_usize;
                     for session in &result.sessions {
                         if !seen_session_ids.insert(session.session_id.clone()) {
@@ -318,7 +316,7 @@ impl TaskProductApi {
                             "outcome": "failed", "page_number": page_count + 1,
                             "duration_ms": page_started.elapsed().as_millis(),
                             "error_kind": &error.code,
-                            "eligible_count": visible_session_ids.len(), "authoritative": authoritative,
+                            "eligible_count": visible_session_ids.len(),
                         }),
                     );
                 }
@@ -345,7 +343,7 @@ impl TaskProductApi {
                     break;
                 }
             }
-            if complete && authoritative {
+            if complete {
                 self.reconcile_completed_session_scan(
                     reconciliation,
                     &seen_session_ids,
@@ -372,7 +370,6 @@ impl TaskProductApi {
             "visible_session_count": visible_session_ids.len(),
             "has_more": has_more,
             "complete": complete,
-            "authoritative": authoritative,
         });
         if outcome.is_ok() {
             crate::logging::info("native_session_context_refresh_completed", fields);

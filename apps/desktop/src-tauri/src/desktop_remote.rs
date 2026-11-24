@@ -274,25 +274,35 @@ pub(crate) fn desktop_remote_snapshot(
         .collect())
 }
 
+/// The computer this window uses, as the Frontend knows it from the devices snapshot.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComputerInUse {
+    key: String,
+    name: String,
+}
+
 /// Spends the invite another computer shows, then switches to that computer.
+/// A code made by the computer already in use is refused before it is spent,
+/// so the device it was meant for can still use it (ADR-0081).
 #[tauri::command]
 pub(crate) async fn desktop_remote_pair(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     remote_state: tauri::State<'_, DesktopRemoteState>,
     code: String,
+    in_use: Option<ComputerInUse>,
     operation_id: Option<String>,
 ) -> Result<&'static str, String> {
     let invite = remote::InviteCode::decode(&code).map_err(|error| {
-        match error {
-            remote::PairingCodeError::WrongKind => {
-                "That code adds a device to a computer. On the other computer, open Settings → Remote and choose Show code."
-            }
-            remote::PairingCodeError::Malformed => "The code is incomplete. Copy it again.",
-            remote::PairingCodeError::NotAPairingCode => "That is not an OpenAIDE pairing code.",
-        }
-        .to_string()
+        let (reason, message) = remote::messages::refused_code(error);
+        desktop_log!("desktop_remote_pair_refused reason={reason}");
+        message.to_string()
     })?;
+    if let Some(in_use) = in_use.filter(|in_use| invite.is_from(&in_use.key)) {
+        desktop_log!("desktop_remote_pair_refused reason=own_code");
+        return Err(remote::messages::own_code(&in_use.name));
+    }
     let endpoint = remote_state.endpoint().await?;
     let paired = remote::redeem(
         &endpoint,
@@ -302,13 +312,7 @@ pub(crate) async fn desktop_remote_pair(
         &logger(),
     )
     .await
-    .map_err(|failure| match failure {
-        remote::Failure::NotTrusted => {
-            "This code has expired or was already used. Show a new code on the other computer."
-                .to_string()
-        }
-        other => message(other, "The other computer"),
-    })?;
+    .map_err(remote::messages::pairing_failed)?;
     let id = paired.id.to_string();
     {
         let mut preferences = state
@@ -433,17 +437,7 @@ fn report_failure(app: &tauri::AppHandle, name: &str, failure: remote::Failure) 
 }
 
 fn message(failure: remote::Failure, name: &str) -> String {
-    match failure {
-        remote::Failure::Unreachable => format!(
-            "{name} is unreachable. Make sure OpenAIDE is open on it and both computers are online."
-        ),
-        remote::Failure::NotTrusted => {
-            format!("This computer was removed from {name}. Pair with it again in Settings.")
-        }
-        remote::Failure::Incompatible => format!(
-            "OpenAIDE on this computer and on {name} are different versions. Update both, then try again."
-        ),
-    }
+    remote::messages::unusable(failure, name)
 }
 
 /// Prints the client's metadata-only events in this shell's log format.

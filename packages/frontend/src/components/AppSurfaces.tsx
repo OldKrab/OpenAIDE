@@ -25,6 +25,7 @@ import { computerLink } from "./ComputerSwitcher";
 import { ConnectionProblemView, connectionComputerFor } from "./ConnectionProblemView";
 import { WorkbenchConnectionSurface, connectionSurfaceTaskListError, connectionSurfaceTitle } from "./ComputerSwitchPage";
 import { ComputerSwitchConfirm } from "./ComputerSwitchConfirm";
+import { useAnotherComputerDialog } from "./useAnotherComputerDialog";
 import { useComputerPlace } from "./useComputerPlace";
 import { currentComputer, useComputers } from "../services/computers";
 import { computerSwitch, useComputerSwitch } from "../services/computerSwitch";
@@ -282,6 +283,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     snapshot: computers,
   });
   const computerSwitchConfirm = switchComputer ? <ComputerSwitchConfirm snapshot={computers} switcher={switchComputer} /> : null;
+  const anotherComputer = useAnotherComputerDialog({ capability: frontendShell?.computers, device: computers?.device ?? "computer", devices: settings.devices, openSettings: openComputerSettings });
   const desktopTitleBar = desktopWindow
     ? <DesktopTitleBar integrated={desktopTaskHeaderIntegrated} window={desktopWindow} />
     : undefined;
@@ -481,7 +483,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           computerLink={computerLinkState}
           computers={computers}
           computerSwitcherRequest={computerSwitcherRequest}
-          onManageComputers={openComputerSettings}
+          onUseAnotherComputer={anotherComputer.open}
           computerSwitch={switchComputer}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
@@ -490,6 +492,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         {projectFolderDialog}
         {projectRemoveDialog}
         {computerSwitchConfirm}
+        {anotherComputer.dialog}
       </main>
     );
   }
@@ -638,7 +641,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         computerLink={computerLinkState}
         computers={computers}
         computerSwitcherRequest={computerSwitcherRequest}
-        onManageComputers={closeAfter(openComputerSettings)}
+        onUseAnotherComputer={closeAfter(anotherComputer.open)}
         computerSwitch={switchComputer}
         showArchived={navigation.showArchived}
         taskListError={connectionSurfaceTaskListError(appServerError, navigation.taskListError)}
@@ -672,6 +675,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
          {projectFolderDialog}
          {projectRemoveDialog}
         {computerSwitchConfirm}
+        {anotherComputer.dialog}
         <MobileWorkbenchBar
           coverTitle={coverTitle}
           navigationButtonRef={mobileNavigationButtonRef}

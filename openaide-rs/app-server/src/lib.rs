@@ -6,6 +6,7 @@ pub mod app_server_process;
 pub(crate) mod attachment_runtime;
 pub(crate) mod chat_history;
 pub mod client_lifecycle;
+pub mod computer_gateway;
 pub mod diagnostics;
 pub mod file_viewer;
 pub mod instance_env;

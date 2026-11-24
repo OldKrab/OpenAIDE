@@ -20,6 +20,7 @@ const icons = {
   power: '<path d="M12 3v8M7 6.5a7 7 0 1 0 10 0"/>',
   share: '<path d="M12 15V4M8 8l4-4 4 4M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
 };
 function icon(name, extra = '') { return `<svg class="i ${extra}" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`; }
 function send(action, fields = {}) { window.OpenAIDESetup.send(JSON.stringify({ action, ...fields })); }
@@ -28,7 +29,15 @@ function button(label, action, style = 'primary') { return `<button class="${sty
 function heading(title, description = '') { return `<h1>${title}</h1>${description ? `<p class="intro">${description}</p>` : ''}`; }
 // Where to click on the computer, shown as a path instead of a sentence.
 function path(...steps) {
-  return `<p class="path" aria-label="On your computer: ${steps.join(', then ')}">${steps.map(step => `<span>${step}</span>`).join(icon('chevron', 'sep'))}</p>`;
+  return `<p class="path" aria-label="${steps.join(', then ')}">${steps.map(step => `<span>${step}</span>`).join(icon('chevron', 'sep'))}</p>`;
+}
+// The connection as the object it is (ADR-0081): this phone uses a computer that stays an
+// empty slot until its code is read.
+function direction() {
+  return '<div class="direction" role="img" aria-label="This phone uses a computer">'
+    + `<span class="end">${icon('phone')}<small>This phone</small></span>`
+    + `<span class="uses">${icon('arrow')}<small>uses</small></span>`
+    + '<span class="end unknown"><span class="slot"></span><small>Computer</small></span></div>';
 }
 function item(kind, glyph, title, detail, target, value) {
   const attribute = kind === 'choice' ? `data-screen="${target}"` : `data-action="${target}"`;
@@ -61,7 +70,6 @@ const network = 'The connection uses iroh over QUIC. It goes directly between th
 const info = {
   welcome: ['What’s the difference?', 'Where agents work', 'On a remote computer, work keeps running when your phone is locked or OpenAIDE is closed. On this phone, agents run locally in Termux.', 'Projects and conversations stay on the device where the agents work. You can switch later in Settings.'],
   remote: ['How pairing works', 'How pairing works', 'Each device has its own key. Pairing tells your computer to trust this phone’s key, and the connection is encrypted end to end. There is no account or password.', 'A code works once and expires after a few minutes. You can remove this phone any time in Settings → Remote on your computer.', network],
-  join: ['How pairing works', 'How pairing works', 'This code identifies your phone. Your computer asks you to confirm before it trusts it, and the connection is encrypted end to end.', 'The code is only valid while this screen is open.', network],
   settings: ['How the connection works', 'How the connection works', 'Your phone and computer each have their own key, and the connection is encrypted end to end with those keys. There is no account or password.', network],
   local: ['What gets checked?', 'Working on this phone', 'OpenAIDE checks the Termux connection, the tools it needs, a signed-in agent (Codex or Claude) and storage, and prepares what is missing.', 'Keep Termux installed. Closing its terminal window is fine; force-stopping Termux interrupts local work.'],
   background: ['How does this affect battery?', 'Background work', 'Protection keeps the phone awake only while agents are working and is released when work is idle. Running agents still use battery and data, so plug in for long tasks.', 'Do not force-stop OpenAIDE or Termux during work. Some phones also need background activity allowed in their own battery settings.'],
@@ -86,15 +94,10 @@ function closeSheet() {
 sheet.addEventListener('click', event => { if (event.target === sheet || event.target.closest('.sheet-close')) closeSheet(); });
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSheet(); });
 
-// This phone's code is disclosed only while its screen is open.
-function enter(next) {
-  if (next === 'local') send('check');
-  if (next === 'join') send('join');
-}
-function leave(previous) { if (previous === 'join') send('join_stop'); }
+// Opening the phone's own screen checks it again.
+function enter(next) { if (next === 'local') send('check'); }
 function go(next) {
   rememberCode();
-  leave(screen);
   history.push(screen);
   screen = next;
   render();
@@ -116,7 +119,6 @@ window.back = () => {
   if (closeSheet()) return;
   if (state.busy) { explainBlockedBack(); return; }
   rememberCode();
-  leave(screen);
   if (!history.length) { send('close'); return; }
   screen = history.pop();
   render();
@@ -141,11 +143,11 @@ function localStep() {
   if (!state.permission) return { index: 1, title: 'Connect to Termux', detail: 'Android will ask once to let OpenAIDE start your tools in Termux.', action: 'grant', label: 'Allow connection' };
   if (!state.checks) return { index: 1, title: 'Allow the connection in Termux', detail: 'Paste the copied setup command in Termux and press Enter, then come back.', action: 'access', label: 'Copy setup & open Termux' };
   const checks = state.checks;
-  if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work needs an ARM64 phone. A remote computer works on this device.', action: 'remote_screen', label: 'Connect to a computer' };
+  if (!checks.arm64) return { index: 2, title: 'Use a remote computer', detail: 'Local work needs an ARM64 phone. A remote computer works on this device.', action: 'remote_screen', label: 'Use another computer' };
   if (!checks.storage || !checks.space) return { index: 2, title: 'Your phone needs more room', detail: 'Free at least 512 MB in Termux’s storage. Your projects are not removed.', action: 'check', label: 'Check again' };
   if (checks.agent && !checks.agentVersion) return { index: 2, title: 'Your agent needs an update', detail: 'Install the Android-compatible Codex 0.153.3 in Termux, then check again.', action: 'termux', label: 'Open Termux' };
   // A test build may leave out the App Server for this phone; installing would fail later.
-  if (!checks.runtime && !state.phoneAvailable) return { index: 2, title: 'This build can’t set up this phone', detail: 'This build of OpenAIDE does not include the App Server for this phone. Install a release build, or connect to a computer instead.', action: 'remote_screen', label: 'Connect to a computer' };
+  if (!checks.runtime && !state.phoneAvailable) return { index: 2, title: 'This build can’t set up this phone', detail: 'This build of OpenAIDE does not include the App Server for this phone. Install a release build, or use another computer instead.', action: 'remote_screen', label: 'Use another computer' };
   if (['node', 'nodeVersion', 'npm', 'git', 'agent', 'agentVersion', 'runtime'].some(key => !checks[key])) return { index: 2, title: 'Prepare your workspace', detail: 'OpenAIDE installs the tools it needs in Termux. Your projects and history stay in place.', action: 'install', label: 'Install & continue' };
   if (!checks.authenticated) return { index: 3, title: 'Sign in to your agent', detail: 'Paste the copied sign-in command in Termux, finish signing in, then come back.', action: 'signin', label: 'Copy sign-in & open Termux' };
   return { index: 4, title: 'Your phone is ready', detail: '', action: 'local', label: state.remote ? 'Use this phone' : 'Open workspace' };
@@ -154,7 +156,8 @@ function render() {
   if (screen === 'welcome') {
     page.innerHTML = heading('Where will your<br>agents work?')
       + '<div class="group">'
-      + choice('computer', 'Remote computer', 'Pair with a code', 'remote')
+      // Pairing has one direction (ADR-0081): the computer shows a code and this phone reads it.
+      + choice('computer', 'Use another computer', 'Scan the code it shows', 'remote')
       + choiceAction('server', 'SSH computer', sshDetail(), 'ssh_add')
       + choice('phone', 'This phone', 'Runs in Termux', 'local')
       + '</div>' + hint();
@@ -171,7 +174,7 @@ function render() {
         : computerRow(computer)).join('')
       + ssh.map(sshRow).join('')
       + '</div><div class="group">'
-      + row('qr', computers.length ? 'Add another computer' : 'Add a computer', 'remote_screen', '', 'Pair with a code')
+      + row('qr', 'Use another computer', 'remote_screen', '', 'Scan the code it shows')
       + row('server', 'Add an SSH computer', 'ssh_add', '', sshDetail())
       + '</div><div class="group">'
       // A paired computer's Tasks only notify here; work on this phone or an SSH Computer
@@ -194,13 +197,14 @@ function render() {
   } else if (screen === 'remote') {
     // Computers already paired can be used again without a new code.
     const known = (state.computers || []).filter(computer => !computer.current);
-    page.innerHTML = heading('Pair with your computer', 'On your computer, open') + path('Settings', 'Remote', 'Show code') + hint()
+    page.innerHTML = heading('Use another computer') + direction()
+      + '<p class="intro">Get the code on the computer:</p>' + path('Settings', 'Remote', 'Add a device') + hint()
       + known.map(computer => `<div class="panel"><span class="copy"><h2>${escape(computer.name || 'Your computer')}</h2><small>Already paired</small></span><button class="mini" data-action="use_computer" data-id="${escape(computer.id)}">Use</button></div>`).join('')
       + '<div class="actions">'
       + (firstRun ? '' : '<p class="caution">Switching closes this view. Unsent drafts are lost.</p>')
-      + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Pairing code" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Pair</button></form>`
+      + `<form id="pair-form" ${pasteOpen ? '' : 'hidden'}><textarea id="code" name="code" rows="3" aria-label="Code from the computer" placeholder="OAI1…" autocapitalize="characters" autocomplete="off" spellcheck="false" required></textarea><button class="secondary" type="submit">Connect</button></form>`
       + button('Scan code', 'scan')
-      + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button><button class="link" data-action="join_screen">Show my code</button></div>`
+      + `<div class="alternatives"><button class="link" id="paste-toggle" aria-expanded="${pasteOpen}" aria-controls="pair-form">Enter code</button></div>`
       + '</div>';
     document.getElementById('code').value = codeDraft;
     document.getElementById('pair-form').addEventListener('submit', event => { event.preventDefault(); rememberCode(); send('pair', { code: codeDraft }); });
@@ -210,11 +214,6 @@ function render() {
       render();
       if (pasteOpen) document.getElementById('code').focus();
     });
-  } else if (screen === 'join') {
-    const join = state.join;
-    page.innerHTML = heading('Show this code', 'On your computer, open') + path('Settings', 'Remote', 'Enter code')
-      + (join ? `<div class="qr" role="img" aria-label="Pairing code"><svg viewBox="-2 -2 ${join.qr.size + 4} ${join.qr.size + 4}" shape-rendering="crispEdges"><path d="${escape(join.qr.path)}"/></svg></div><p class="code">${escape(join.text)}</p><p class="waiting"><span class="pulse" aria-hidden="true"></span>Waiting for your computer</p>${hint()}`
-        : '<p class="waiting"><span class="pulse" aria-hidden="true"></span>Preparing this phone’s code…</p>');
   } else if (screen === 'background') {
     // One setting: it keeps local work running, or a paired computer's Task notifications arriving.
     const remote = state.remote;

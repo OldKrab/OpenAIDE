@@ -401,7 +401,7 @@ body[data-input-modality="pointer"] button:focus-visible {
 
   /* One line per Project: the name leads at title weight, the count trails in muted
      text, so a Project reads as the parent of the lighter Task rows under it. */
-  body[data-shell="web"] .project-task-group-toggle span {
+  body[data-shell="web"] .project-task-group-toggle > span {
     flex: 1;
     display: flex;
     align-items: baseline;

@@ -32,13 +32,12 @@ fn invite_secret(devices: &RemoteDevices, now_ms: u64) -> [u8; INVITE_SECRET_LEN
     InviteCode::decode(&invite.code).unwrap().secret
 }
 
-fn join_code(seed: u8, name: &str) -> String {
-    JoinCode {
-        device: device(seed),
-        name: name.to_string(),
-        model: Some("Model X".to_string()),
-    }
-    .encode()
+/// Trusts `device(seed)` the only way a device is trusted: by spending a fresh invite.
+fn pair(devices: &RemoteDevices, seed: u8, name: &str, now_ms: u64) {
+    let secret = invite_secret(devices, now_ms);
+    devices
+        .redeem_invite(&device(seed), &secret, name, None, now_ms + 1)
+        .unwrap();
 }
 
 #[test]
@@ -158,68 +157,29 @@ fn cancelling_an_unused_invite_drops_the_identity() {
 }
 
 #[test]
-fn a_join_request_is_previewed_before_it_is_trusted() {
+fn the_snapshot_names_the_key_a_code_carries_only_while_remote_access_is_in_use() {
     let fixture = fixture();
-    let code = join_code(3, "Tablet");
+    assert_eq!(fixture.devices.snapshot().server_key, None);
 
-    let preview = fixture.devices.preview_join_request(&code).unwrap();
-
-    assert_eq!(preview.device_id, device(3).to_string());
-    assert_eq!(preview.name, "Tablet");
-    assert_eq!(preview.model.as_deref(), Some("Model X"));
-    assert!(!preview.already_trusted);
-    assert!(!fixture.devices.is_trusted(&device(3)));
-}
-
-#[test]
-fn approving_a_join_request_trusts_the_device_and_announces_it() {
-    let fixture = fixture();
-
-    fixture
-        .devices
-        .approve_join_request(&join_code(3, "Tablet"), "Phone".to_string(), 4_000)
-        .unwrap();
-
-    assert!(fixture.devices.is_trusted(&device(3)));
-    assert!(fixture.devices.endpoint_secret_key().is_some());
-    assert_eq!(fixture.commands.try_recv(), Ok(EdgeCommand::Reconcile));
-    assert_eq!(
-        fixture.commands.try_recv(),
-        Ok(EdgeCommand::AnnounceTrust(device(3)))
-    );
-    assert_eq!(
-        fixture.devices.snapshot().devices[0].added_by.as_deref(),
-        Some("Phone")
-    );
-}
-
-#[test]
-fn an_invite_code_is_refused_as_a_join_request() {
-    let fixture = fixture();
     let invite = fixture
         .devices
         .create_invite("desk".to_string(), 1)
         .unwrap();
+    let server = InviteCode::decode(&invite.code).unwrap().server;
+    assert_eq!(
+        fixture.devices.snapshot().server_key,
+        Some(server.to_string())
+    );
 
-    let error = fixture
-        .devices
-        .approve_join_request(&invite.code, "desk".to_string(), 2)
-        .unwrap_err();
-
-    assert_eq!(error.code, ProtocolErrorCode::ValidationFailed);
+    fixture.devices.cancel_invite();
+    assert_eq!(fixture.devices.snapshot().server_key, None);
 }
 
 #[test]
 fn removing_a_device_revokes_it_and_closes_its_connections() {
     let fixture = fixture();
-    fixture
-        .devices
-        .approve_join_request(&join_code(3, "Tablet"), "desk".to_string(), 4_000)
-        .unwrap();
-    fixture
-        .devices
-        .approve_join_request(&join_code(4, "Phone"), "desk".to_string(), 4_001)
-        .unwrap();
+    pair(&fixture.devices, 3, "Tablet", 4_000);
+    pair(&fixture.devices, 4, "Phone", 4_010);
     while fixture.commands.try_recv().is_ok() {}
 
     fixture.devices.remove(&device(3).to_string()).unwrap();

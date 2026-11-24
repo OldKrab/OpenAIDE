@@ -6,7 +6,9 @@ use openaide_app_server_protocol::ids::{RequestId, TaskId};
 use openaide_app_server_protocol::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
 };
-use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
+use openaide_app_server_protocol::snapshot::{
+    PendingRequestScope, PendingRequestSnapshot, TaskSnapshot,
+};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
 use crate::app_lifecycle::{
@@ -396,18 +398,52 @@ impl RpcGateway {
     }
 
     pub(super) fn add_pending_to_subscription_snapshot(
-        &self,
+        &mut self,
         snapshot: &mut openaide_app_server_protocol::state::SubscriptionSnapshot,
     ) {
         use openaide_app_server_protocol::state::SubscriptionSnapshot;
-        match snapshot {
+        let (task_id, requests) = match snapshot {
             SubscriptionSnapshot::Task { task } => {
                 *task = self.task_with_pending_requests(task.clone());
+                (task.task.task_id.clone(), &task.pending_requests)
             }
             SubscriptionSnapshot::TaskResume { resume } => {
                 resume.pending_requests = self.server_requests.pending_for_task(&resume.task_id);
+                (resume.task_id.clone(), &resume.pending_requests)
             }
-            _ => {}
+            _ => return,
+        };
+        if !requests.is_empty() {
+            // One subscriber's empty baseline says nothing about what other clients hold,
+            // so a snapshot can only add visibility; the Task stream withdraws it.
+            let request_count = requests.len();
+            self.mark_task_requests_visible(&task_id, request_count, "subscription_snapshot");
+        }
+    }
+
+    /// Records the request set just published on a Task's ordered stream. Every subscriber
+    /// receives that set, so an empty one ends the Task's visible requests.
+    pub(super) fn record_published_task_requests(
+        &mut self,
+        task_id: &TaskId,
+        requests: &[PendingRequestSnapshot],
+        source: &'static str,
+    ) {
+        if !requests.is_empty() {
+            self.mark_task_requests_visible(task_id, requests.len(), source);
+        } else if self.tasks_with_visible_requests.remove(task_id) {
+            log_task_requests_visibility(task_id, false, 0, source);
+        }
+    }
+
+    fn mark_task_requests_visible(
+        &mut self,
+        task_id: &TaskId,
+        request_count: usize,
+        source: &'static str,
+    ) {
+        if self.tasks_with_visible_requests.insert(task_id.clone()) {
+            log_task_requests_visibility(task_id, true, request_count, source);
         }
     }
 
@@ -481,6 +517,7 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let requests = self.server_requests.pending_for_task(task_id);
+        self.record_published_task_requests(task_id, &requests, "request_resolution");
         let client_hub = self.client_hub.clone();
         event_deliveries(self.state_stream.publish_committed(
             EventScope::Task {
@@ -552,6 +589,25 @@ impl RpcGateway {
                 .collect(),
         }
     }
+}
+
+/// Logs only visibility transitions; a pending request republished with every streamed Task
+/// update stays quiet.
+fn log_task_requests_visibility(
+    task_id: &TaskId,
+    visible: bool,
+    request_count: usize,
+    source: &'static str,
+) {
+    crate::logging::info(
+        "task_requests_visibility_changed",
+        serde_json::json!({
+            "task_id": task_id.as_str(),
+            "visible": visible,
+            "request_count": request_count,
+            "source": source,
+        }),
+    );
 }
 
 fn server_request_response_error(outcome: ResponseOutcome) -> ProtocolError {

@@ -6,12 +6,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import computer.iroh.Connection
+import io.openaide.android.remote.CodeException
+import io.openaide.android.remote.Reached
+import io.openaide.android.remote.clampLabel
+import io.openaide.android.remote.parseInvite
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 /**
  * What the shell's screens ask of the paired connection, with every answer
@@ -21,24 +20,43 @@ internal object RemotePairing {
     fun interface Paired { fun done(server: ConnectionStore.PairedServer?, problem: String?) }
     /** [reason] is the failure class in lower case, such as `unreachable`; null on success or when the gateway did not start. */
     fun interface Connected { fun done(problem: String?, reason: String?) }
-    fun interface JoinCode { fun shown(code: JSONObject?, problem: String?) }
     fun interface Checked { fun done(ok: Boolean, message: String) }
 
     private val main = Handler(Looper.getMainLooper())
+    private val diagnostics = AndroidDiagnostics()
 
-    /** Pairs with the computer whose invite the user scanned or pasted, and selects it. */
+    /**
+     * Pairs with the computer whose invite the user scanned or pasted, and selects it.
+     * A code is checked before it is spent (ADR-0081), and a refusal says what to do.
+     */
     @JvmStatic fun redeem(context: Context, code: String, callback: Paired) {
-        val invite = try { PairingCode.parseInvite(code) } catch (error: PairingCode.Invalid) {
-            callback.done(null, when (error.problem) {
-                PairingCode.Problem.WRONG_KIND -> "That code adds a device to a computer. On your computer, open Settings → Remote and choose Show code."
-                PairingCode.Problem.MALFORMED -> "The code is incomplete. Scan or paste it again."
-                PairingCode.Problem.NOT_A_PAIRING_CODE -> "That is not an OpenAIDE pairing code."
-            })
+        val invite = try { parseInvite(code) } catch (error: CodeException) {
+            when (error) {
+                is CodeException.FromOlderOpenAide -> refuse("from_older_openaide", callback,
+                    "This code comes from an older OpenAIDE. Update OpenAIDE on that device, then make a code on the computer it should use: Settings › Remote › Add a device.")
+                is CodeException.Malformed -> refuse("malformed", callback, "The code is incomplete. Scan or paste it again.")
+                is CodeException.NotAPairingCode -> refuse("not_a_pairing_code", callback, "This isn’t an OpenAIDE code.")
+            }
+            return
+        } catch (error: Throwable) {
+            // The library could not load; the code is not the problem.
+            refuse("library_unavailable", callback, message(RemoteNode.Failure.UNREACHABLE))
             return
         }
         val application = context.applicationContext
+        // The code of the computer in use was made for another device; spending it here
+        // would only pair this phone with that computer again.
+        val store = ConnectionStore(application)
+        val inUse = store.pairedServer()?.takeIf { store.usesPaired() && invite.isFrom(it.id) }
+        if (inUse != null) {
+            invite.close()
+            val name = inUse.name.ifBlank { "your computer" }
+            refuse("own_code", callback, "This is $name’s own code. Enter it on the device that should use $name.")
+            return
+        }
         RemoteNode.scope.launch {
-            try {
+            // The code's secret is freed once it is spent or refused.
+            invite.use { invite -> try {
                 val server = RemoteNode.redeem(application, invite, deviceName(application), deviceModel())
                 ConnectionStore(application).savePaired(server)
                 // A connection to a previously paired computer must not outlive the choice.
@@ -46,32 +64,12 @@ internal object RemotePairing {
                 main.post { callback.done(server, null) }
             } catch (error: RemoteNode.Unavailable) {
                 val problem = if (error.failure == RemoteNode.Failure.NOT_TRUSTED) {
-                    "This code has expired or was already used. Show a new code on your computer."
+                    "This code was already used or has expired. Make a new one on the computer."
                 } else message(error.failure)
                 main.post { callback.done(null, problem) }
-            }
+            } }
         }
     }
-
-    /** Shows this phone's own code and waits for a computer to approve it. */
-    @JvmStatic fun join(context: Context, shown: JoinCode, paired: Paired) {
-        val application = context.applicationContext
-        RemoteNode.scope.launch {
-            try {
-                val code = RemoteNode.joinCode(application, deviceName(application), deviceModel())
-                RemoteNode.awaitJoin { server ->
-                    RemoteNode.disconnect()
-                    main.post { paired.done(server, null) }
-                }
-                val presented = JSONObject().put("text", PairingCode.grouped(code)).put("qr", qr(code))
-                main.post { shown.shown(presented, null) }
-            } catch (error: RemoteNode.Unavailable) {
-                main.post { shown.shown(null, message(error.failure)) }
-            }
-        }
-    }
-
-    @JvmStatic fun stopJoin() = RemoteNode.stopJoin()
 
     /** Starts the gateway and reaches the paired computer before the workspace is shown. */
     @JvmStatic fun connect(context: Context, callback: Connected) {
@@ -81,7 +79,7 @@ internal object RemotePairing {
             val problem = if (!WorkspaceGateway.start(application, ConnectionProfile.Kind.PAIRED)) {
                 "OpenAIDE could not start its connection on this phone. Restart the app and try again."
             } else try {
-                RemoteNode.connection(application)
+                RemoteNode.connect(application)
                 null
             } catch (error: RemoteNode.Unavailable) {
                 reason = error.failure.name.lowercase()
@@ -97,8 +95,12 @@ internal object RemotePairing {
         RemoteNode.scope.launch {
             val server = ConnectionStore(application).pairedServer()
             val (ok, message) = if (server == null) false to "Pair with a computer first, then check again." else {
-                val result = RemoteNode.check(application, server)
-                (ConnectionCheck.outcome(result) == "ok") to ConnectionCheck.message(result, server.name)
+                try {
+                    val result = RemoteNode.check(application, server)
+                    (result.outcome == "ok") to ConnectionCheck.message(result, server.name)
+                } catch (error: RemoteNode.Unavailable) {
+                    false to message(error.failure, server.name)
+                }
             }
             main.post { callback.done(ok, message) }
         }
@@ -107,8 +109,8 @@ internal object RemotePairing {
     /**
      * The phone's steps for one page's [ComputerSwitch]: reach this phone's own App
      * Server or a paired computer's while the one in use stays live, then save the
-     * choice and move the connection to it. The star keeps the iroh type out of the
-     * Java signature: CI's Java 17 compiler cannot read iroh's newer class files.
+     * choice and move the connection to it. What a connect reached differs by kind,
+     * so the steps take any value and the Java signature uses a star.
      */
     @JvmStatic fun computerSwitch(context: Context, replacePage: Runnable): ComputerSwitch<*> {
         val application = context.applicationContext
@@ -166,19 +168,25 @@ internal object RemotePairing {
                         RemoteNode.disconnect()
                     } else {
                         check(store.selectPaired(target))
-                        RemoteNode.adopt(connected as Connection)
+                        RemoteNode.adopt(application, connected as Reached)
                     }
                 }
 
                 override fun discard(connected: Any?) {
                     when (connected) {
                         is SshServer.Prepared -> SshServer.discard(connected)
-                        is Connection -> RemoteNode.abandon(connected)
+                        is Reached -> RemoteNode.abandon(application, connected)
                     }
                 }
 
                 override fun replacePage() = replacePage.run()
             })
+    }
+
+    /** Answers a code that is not spent, and records which check refused it. */
+    private fun refuse(reason: String, callback: Paired, message: String) {
+        diagnostics.record("remote_pairing_code_refused", "failed", 0, 0, mapOf("reason" to reason))
+        callback.done(null, message)
     }
 
     /** A failure in words, naming the computer when it is known ("your computer" otherwise). */
@@ -199,16 +207,8 @@ internal object RemotePairing {
     /** The name the user gave this phone, as the computer will list it. */
     private fun deviceName(context: Context): String {
         val named = try { Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME) } catch (error: RuntimeException) { null }
-        return PairingCode.clampLabel(named ?: "").ifEmpty { PairingCode.clampLabel(Build.MODEL ?: "").ifEmpty { "Android device" } }
+        return clampLabel(named ?: "").ifEmpty { clampLabel(Build.MODEL ?: "").ifEmpty { "Android device" } }
     }
 
-    private fun deviceModel(): String = PairingCode.clampLabel(listOfNotNull(Build.MANUFACTURER, Build.MODEL).joinToString(" "))
-
-    /** The code as dark-module rows, drawn by the setup page without an image resource. */
-    private fun qr(code: String): JSONObject {
-        val matrix = QRCodeWriter().encode(code, BarcodeFormat.QR_CODE, 0, 0, mapOf(EncodeHintType.MARGIN to 0))
-        val path = StringBuilder()
-        for (y in 0 until matrix.height) for (x in 0 until matrix.width) if (matrix[x, y]) path.append("M").append(x).append(' ').append(y).append("h1v1h-1z")
-        return JSONObject().put("size", matrix.width).put("path", path.toString())
-    }
+    private fun deviceModel(): String = clampLabel(listOfNotNull(Build.MANUFACTURER, Build.MODEL).joinToString(" "))
 }

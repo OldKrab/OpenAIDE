@@ -81,6 +81,10 @@ pub struct RpcGateway {
     pub(crate) state_stream: StateStream,
     pub(crate) server_requests: ServerRequestRuntime,
     pub(crate) pending_event_deliveries: Vec<GatewayEventDelivery>,
+    /// Tasks whose pending requests a client may still be showing. Request resolution is not
+    /// itself a Task update, so the next Task update withdraws a set it no longer contains.
+    pub(crate) tasks_with_visible_requests:
+        std::collections::HashSet<openaide_app_server_protocol::ids::TaskId>,
     ready_catalog_agents: std::collections::HashSet<openaide_app_server_protocol::ids::AgentId>,
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
     pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
@@ -212,6 +216,7 @@ impl RpcGateway {
             state_stream,
             server_requests,
             pending_event_deliveries: Vec::new(),
+            tasks_with_visible_requests: Default::default(),
             ready_catalog_agents: Default::default(),
             shell_file_reveals,
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),

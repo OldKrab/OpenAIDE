@@ -5,9 +5,9 @@ use iroh::address_lookup::MemoryLookup;
 use openaide_app_server_protocol::devices::RemoteAccessState;
 
 use super::*;
-use crate::remote_devices::pairing_code::{InviteCode, JoinCode};
 use crate::remote_devices::RemoteDevicesWorkflow;
 use crate::test_sync::{wait_for, wait_until, WATCHDOG};
+use openaide_remote_core::{InviteCode, INVITE_SECRET_LEN};
 
 const LOCAL_TOKEN: &str = "local-token";
 
@@ -46,7 +46,7 @@ fn fixture() -> Fixture {
             address,
             auth_token: LOCAL_TOKEN.to_string(),
         },
-        EdgeNetwork::Local(lookup.clone()),
+        Network::Local(lookup.clone()),
     );
     Fixture {
         _root: root,
@@ -68,16 +68,16 @@ impl Fixture {
     }
 
     fn device_endpoint(&self, seed: u8, alpns: Vec<Vec<u8>>) -> Endpoint {
-        let lookup = self.lookup.clone();
+        let network = Network::Local(self.lookup.clone());
         self.run(async move {
-            let endpoint = Endpoint::builder(presets::Minimal)
+            let endpoint = network
+                .builder()
                 .secret_key(SecretKey::from_bytes(&[seed; 32]))
                 .alpns(alpns)
-                .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
-            lookup.add_endpoint_info(endpoint.addr());
+            network.on_bound(&endpoint);
             endpoint
         })
     }
@@ -91,11 +91,20 @@ impl Fixture {
     }
 }
 
-async fn redeem(endpoint: &Endpoint, invite: &InviteCode, secret: &[u8]) -> PairingResult {
+/// Presents `secret` to the App Server that `invite` names, as a device spending it would.
+async fn redeem(
+    endpoint: &Endpoint,
+    invite: &InviteCode,
+    secret: &[u8; INVITE_SECRET_LEN],
+) -> PairingResult {
     let connection = endpoint.connect(invite.server, PAIRING_ALPN).await.unwrap();
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
     let request = InviteRequest {
-        secret: data_encoding::BASE32_NOPAD.encode(secret),
+        secret: InviteCode {
+            server: invite.server,
+            secret: *secret,
+        }
+        .secret_text(),
         name: "Phone".to_string(),
         model: Some("Model X".to_string()),
     };
@@ -204,51 +213,6 @@ fn an_untrusted_key_is_refused_on_the_application_protocol() {
     assert!(!wrong_secret.trusted);
     assert!(!served);
     assert!(fixture.devices.snapshot().devices.is_empty());
-}
-
-#[test]
-fn an_approved_join_request_is_announced_to_the_device() {
-    let fixture = fixture();
-    let device = fixture.device_endpoint(3, vec![PAIRING_ALPN.to_vec()]);
-    let code = JoinCode {
-        device: device.id(),
-        name: "Tablet".to_string(),
-        model: None,
-    }
-    .encode();
-
-    fixture
-        .devices
-        .approve_join_request(&code, "desk".to_string(), 1)
-        .unwrap();
-
-    let (server, announced) = fixture.run(async {
-        let connection = device.accept().await.unwrap().await.unwrap();
-        let (mut send, mut recv) = connection.accept_bi().await.unwrap();
-        let message = recv.read_to_end(PAIRING_MESSAGE_LIMIT).await.unwrap();
-        send.finish().unwrap();
-        connection.closed().await;
-        (
-            connection.remote_id(),
-            serde_json::from_slice::<PairingResult>(&message).unwrap(),
-        )
-    });
-
-    assert!(announced.trusted);
-    assert_eq!(announced.server_name, Some(fixture.devices.server_name()));
-    // The device learned the App Server's key from the connection itself.
-    assert_eq!(
-        Some(server),
-        fixture
-            .devices
-            .endpoint_secret_key()
-            .map(|key| key.public())
-    );
-    let response = fixture.run(async {
-        let connection = device.connect(server, &application_alpn()).await.unwrap();
-        request(&connection, "POST /app HTTP/1.1\r\n\r\n").await
-    });
-    assert!(response.contains(LOCAL_TOKEN));
 }
 
 fn quiet() -> openaide_remote_client::Logger {
@@ -463,5 +427,35 @@ fn connection_failures_keep_a_stable_kind() {
     assert_eq!(
         connection_error_kind(&ConnectionError::VersionMismatch),
         "version_mismatch"
+    );
+}
+
+#[test]
+fn a_handshake_failure_names_its_route_and_only_a_relayed_sender() {
+    let root = tempfile::tempdir().unwrap();
+    let devices = RemoteDevices::open(root.path());
+    let sender = SecretKey::from_bytes(&[7; 32]).public();
+
+    let relayed = IncomingAddr::Relay {
+        url: "https://relay.example".parse().unwrap(),
+        endpoint_id: sender,
+    };
+    assert_eq!(
+        IncomingOrigin::of(&relayed, &devices),
+        IncomingOrigin {
+            route: "relayed",
+            device: Some(sender.fmt_short().to_string()),
+            trusted: Some(false),
+        }
+    );
+
+    let direct = IncomingAddr::Ip("192.0.2.1:4433".parse().unwrap());
+    assert_eq!(
+        IncomingOrigin::of(&direct, &devices),
+        IncomingOrigin {
+            route: "direct",
+            device: None,
+            trusted: None
+        }
     );
 }

@@ -25,6 +25,7 @@ use crate::attachment::{
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
     AttachmentRevealResult, AttachmentRevealSentParams, AttachmentRevealSentResult,
+    AttachmentTransferParams, AttachmentTransferResult,
 };
 use crate::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
@@ -508,6 +509,12 @@ protocol_method!(
     ATTACHMENT_RELEASE,
     AttachmentReleaseParams,
     AttachmentReleaseResult
+);
+protocol_method!(
+    AttachmentTransfer,
+    ATTACHMENT_TRANSFER,
+    AttachmentTransferParams,
+    AttachmentTransferResult
 );
 protocol_method!(
     AttachmentReveal,

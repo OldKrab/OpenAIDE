@@ -25,8 +25,7 @@ import type { TaskPermissionPolicy, TaskSnapshot } from "@openaide/app-shell-con
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
 import {
   appServerAttachment,
-  appServerAttachmentHandles,
-  appServerComposerImages,
+  composerMessageContent,
   localImageAttachment,
   type ComposerAttachment,
 } from "../state/composerOptions";
@@ -597,15 +596,12 @@ function createQueueTakeMutationId(): ClientMutationId {
 }
 
 function appServerComposerMessage(input: TaskComposerInput): ComposerMessage | undefined {
-  const imageAttachments = input.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = input.context.filter((attachment) => attachment.kind !== "image");
-  const images = appServerComposerImages(imageAttachments);
-  const attachments = appServerAttachmentHandles(resourceAttachments);
-  if (!images || !attachments) return undefined;
+  const content = composerMessageContent(input.context);
+  if (!content) return undefined;
   return {
     text: input.prompt,
-    ...(images.length ? { images } : {}),
-    ...(attachments.length ? { attachments } : {}),
+    ...(content.images.length ? { images: content.images } : {}),
+    ...(content.attachments.length ? { attachments: content.attachments } : {}),
   };
 }
 

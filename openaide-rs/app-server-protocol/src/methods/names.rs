@@ -48,8 +48,6 @@ pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
 pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
 pub const DEVICES_CREATE_INVITE: &str = "devices/createInvite";
 pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
-pub const DEVICES_PREVIEW_JOIN_REQUEST: &str = "devices/previewJoinRequest";
-pub const DEVICES_APPROVE_JOIN_REQUEST: &str = "devices/approveJoinRequest";
 pub const DEVICES_REMOVE: &str = "devices/remove";
 pub const TERMINALS_OPEN: &str = "terminals/open";
 pub const TERMINALS_ATTACH: &str = "terminals/attach";
@@ -63,6 +61,7 @@ pub const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE: &str = "attachment/createEmbedde
 pub const ATTACHMENT_CONFIRM_EMBEDDED: &str = "attachment/confirmEmbedded";
 pub const ATTACHMENT_REFRESH_HANDLES: &str = "attachment/refreshHandles";
 pub const ATTACHMENT_RELEASE: &str = "attachment/release";
+pub const ATTACHMENT_TRANSFER: &str = "attachment/transfer";
 pub const ATTACHMENT_REVEAL: &str = "attachment/reveal";
 pub const ATTACHMENT_REVEAL_SENT: &str = "attachment/revealSent";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
@@ -172,8 +171,6 @@ pub const CLIENT_METHODS: &[&str] = &[
     SETTINGS_RESET_TASK_HISTORY,
     DEVICES_CREATE_INVITE,
     DEVICES_CANCEL_INVITE,
-    DEVICES_PREVIEW_JOIN_REQUEST,
-    DEVICES_APPROVE_JOIN_REQUEST,
     DEVICES_REMOVE,
     TERMINALS_OPEN,
     TERMINALS_ATTACH,
@@ -187,6 +184,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     ATTACHMENT_CONFIRM_EMBEDDED,
     ATTACHMENT_REFRESH_HANDLES,
     ATTACHMENT_RELEASE,
+    ATTACHMENT_TRANSFER,
     ATTACHMENT_REVEAL,
     ATTACHMENT_REVEAL_SENT,
     SHELL_RESOLVE_FILE_REVEAL,

@@ -29,9 +29,8 @@ installation.
 
 A remote computer needs no address, account or password. On the computer, open
 **Settings → Remote → Show code**; on the phone, choose **Remote computer** and scan
-the QR code with the camera or paste its text. Where the phone cannot scan, it shows
-its own code instead, which the computer accepts under **Enter code**. A code works
-once and for a few minutes. Pairing makes the computer trust this phone's key; the
+the QR code with the camera or paste its text. A code works once and for a few
+minutes. Pairing makes the computer trust this phone's key; the
 phone keeps its private key encrypted with Android Keystore and remembers the computer's
 key and name. Any client of that computer can remove the phone under **Settings → Remote**.
 
@@ -139,8 +138,8 @@ one agent command that works in Termux: `codex` or `claude`. The managed Codex
 integration pins Codex 0.153.3; use a compatible Termux build. Neither agent
 publishes an Android build, so setup installs one that runs in Termux when it is
 missing. Codex is a pinned community build. Claude Code ships only as a glibc binary:
-setup takes the binary the app's Claude adapter was built against from the adapter's
-own npm package, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
+setup installs the binary of the Claude SDK version the app's Claude adapter
+runtime lockfile pins, keeps it in `$PREFIX/opt/openaide-claude`, and installs a `claude`
 command that starts it with Termux's glibc packages. Two things make it behave like
 any other program there. The binary names Termux's glibc loader, written into unused
 padding because tools that move the file's contents break it; started as an argument
@@ -188,15 +187,15 @@ the runtime directory so replacing runtime files does not delete task history.
 ## Build and validation
 
 Use JDK 17, Gradle 8.13, Android SDK 35 and NDK 27.2.12479018, and Rust with the
-`aarch64-linux-android` target: the build compiles the SSH library and generates its
-Kotlin bindings. The APK ships the shared Frontend, so build it first:
+`aarch64-linux-android` target: the build compiles the SSH library and the Remote
+Device node and generates their Kotlin bindings. The APK ships the shared Frontend, so build it first:
 
 ```sh
 npm run build:typescript-deps && npm run build --workspace openaide-frontend
 gradle -p apps/android testDebugUnitTest lintDebug assembleDebug
 ```
 
-The APK is built for ARM64 only. The iroh library adds about 14 MB.
+The APK is built for ARM64 only. The Remote Device node, which carries iroh, adds about 14 MB.
 
 A release pins the published Linux App Server with `-PopenaideSshAppServerSha256=HEX`;
 a build with neither property leaves SSH computers out. CI test builds carry the
@@ -206,7 +205,8 @@ carry an archive too, with the version its binary reports:
 
 A CI run that includes the App Servers also cross-compiles the App Server with the
 Android NDK and packages it as the Termux runtime.
-A pull request that touches the Android app, `android-ssh` or `remote-client` runs the
+A pull request that touches the Android app, `android-ssh`, `android-remote`, `remote-client`
+or `remote-core` runs the
 Android unit tests and lint and compiles the instrumentation tests; it builds no APK and
 uploads only its unit/lint reports, as `android-apk-diagnostics`, when it fails. The shared
 Frontend and transport tests run in `ci.yml` on every pull request. Device tests still

@@ -20,6 +20,7 @@ test("F5 builds and starts Desktop with isolated development storage", async () 
     calls.map(({ command, args, cwd }) => ({ command, args, cwd })),
     [
       { command: "npm.cmd", args: ["install"], cwd: repositoryRoot },
+      { command: "npm.cmd", args: ["run", "build:adapters"], cwd: repositoryRoot },
       {
         command: "cargo.exe",
         args: ["build", "-p", "openaide-app-server"],

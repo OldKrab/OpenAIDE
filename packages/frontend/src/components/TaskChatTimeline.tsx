@@ -167,6 +167,9 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                 data-after-activity={String(
                   previousRow?.kind === "message" && previousRow.message.message.kind === "activity",
                 )}
+                data-follows-agent-answer={
+                  followsAgentAnswer(previousRow, row) ? "true" : undefined
+                }
                 data-index={virtualRow.index}
                 data-row-key={row.key}
                 data-row-kind={row.kind}
@@ -331,6 +334,21 @@ function permissionToolSteps(items: ChatMessage[]) {
     }
   }
   return tools;
+}
+
+/**
+ * Whether a row is an Agent answer directly after another Agent answer. Nothing else marks where
+ * one message ends and the next begins, such as consecutive cycles of a held background turn, so
+ * Chat spaces them apart; paragraph spacing alone would read them as one message.
+ */
+export function followsAgentAnswer(previousRow: TaskChatTimelineRow | undefined, row: TaskChatTimelineRow) {
+  return isAgentAnswerRow(previousRow) && isAgentAnswerRow(row);
+}
+
+function isAgentAnswerRow(row: TaskChatTimelineRow | undefined) {
+  return row?.kind === "message"
+    && row.message.message.kind === "agent_message"
+    && row.message.message.role === "agent";
 }
 
 export function chatRowKey(message: ChatMessage) {

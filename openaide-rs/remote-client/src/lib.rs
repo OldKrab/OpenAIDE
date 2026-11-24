@@ -15,7 +15,13 @@ mod client;
 #[cfg(feature = "pairing")]
 mod gateway;
 #[cfg(feature = "pairing")]
-mod pairing_code;
+pub mod messages;
+#[cfg(feature = "pairing")]
+mod net_report;
+#[cfg(feature = "pairing")]
+mod node;
+#[cfg(feature = "pairing")]
+mod relay_limits;
 mod ssh;
 
 use std::sync::Arc;
@@ -25,15 +31,27 @@ pub type Logger = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
 
 #[cfg(feature = "pairing")]
 pub use client::{
-    application_alpn, bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure,
-    PairedServer, RemoteClient,
+    bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure, PairedServer,
+    RemoteClient, CONNECT_TIMEOUT,
 };
 #[cfg(feature = "pairing")]
 pub use gateway::Gateway;
 #[cfg(feature = "pairing")]
 pub use iroh::{Endpoint, PublicKey, SecretKey};
 #[cfg(feature = "pairing")]
-pub use pairing_code::{clamp_label, InviteCode, PairingCodeError};
+pub use net_report::watch_net_report;
+#[cfg(feature = "pairing")]
+pub use node::{
+    CheckComputer, CheckRelay, CheckResult, NetworkKind, NodeHost, RemoteNode, StorageUnavailable,
+    Transport,
+};
+/// The code format and protocols shared with the App Server (ADR-0081).
+#[cfg(feature = "pairing")]
+pub use openaide_remote_core::{
+    application_alpn, clamp_label, InviteCode, Network, PairingCodeError,
+};
+#[cfg(feature = "pairing")]
+pub use relay_limits::watch_relay_rate_limits;
 #[cfg(feature = "release-archive")]
 pub use ssh::archive;
 pub use ssh::{

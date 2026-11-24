@@ -1,10 +1,10 @@
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc;
 
 use serde_json::{json, Value};
 
-use crate::protocol_edge::local_http::listener::handle_app_stream;
+use crate::protocol_edge::local_http::listener::{handle_app_stream, SessionSocketTimeouts};
 use crate::protocol_edge::local_http::LocalHttpAppHandler;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use crate::storage_runtime::StateRoot;
@@ -21,6 +21,10 @@ struct Server {
 
 impl Server {
     fn start() -> Self {
+        Self::start_with(SessionSocketTimeouts::default())
+    }
+
+    fn start_with(timeouts: SessionSocketTimeouts) -> Self {
         let state_dir = tempfile::TempDir::new().expect("state dir");
         let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
         let gateway = ProtocolEdgeStdioDispatcher::new_for_test(state_root).shared_gateway();
@@ -31,7 +35,8 @@ impl Server {
             "server-1",
             "replacement-token",
             shutdown_sender,
-        );
+        )
+        .with_session_socket_timeouts(timeouts);
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
         let address = listener.local_addr().expect("listener address");
         std::thread::spawn(move || {
@@ -148,6 +153,29 @@ impl Client {
                 0x8 => return Received::Closed(u16::from_be_bytes([payload[0], payload[1]])),
                 0xA => continue,
                 opcode => panic!("unexpected opcode {opcode}"),
+            }
+        }
+    }
+
+    /// Waits for the server to drop the connection, skipping whatever it
+    /// still sends. The client's read timeout is the watchdog.
+    fn expect_dropped(&mut self) {
+        let mut bytes = [0_u8; 512];
+        loop {
+            match self.stream.read(&mut bytes) {
+                Ok(0) => return,
+                Ok(_) => continue,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                    ) =>
+                {
+                    return
+                }
+                Err(error) => {
+                    panic!("watchdog expired before the server dropped the socket: {error}")
+                }
             }
         }
     }
@@ -323,4 +351,39 @@ fn pings_are_answered_at_both_levels() {
     client.send_frame(0x89, b"probe");
     client.send(&json!({ "type": "ping" }));
     assert_eq!(client.receive()["type"], "pong");
+}
+
+/// The idle deadline must reach the handle the reader reads through. On
+/// Windows a cloned socket keeps the receive timeout it was cloned with, so a
+/// reader on a clone kept the hello deadline and dropped quiet phones early.
+#[test]
+fn a_silent_client_is_dropped_at_the_idle_deadline() {
+    let logs = crate::logging::capture_test_logs();
+    // timing: expiry — the client sends nothing after its hello and the hello
+    // deadline never expires, so only the idle deadline can end the socket.
+    let server = Server::start_with(SessionSocketTimeouts {
+        hello: crate::test_sync::NEVER,
+        read_idle: crate::test_sync::EXPIRES,
+    });
+    let (mut client, ready) = server.open(hello(None));
+
+    client.expect_dropped();
+
+    let mut lines = Vec::new();
+    let closed = crate::test_sync::wait_for("the dropped socket is logged", || {
+        lines.extend(logs.snapshot());
+        lines
+            .iter()
+            .find(|line| {
+                line["event"] == "session_socket_closed"
+                    && line["fields"]["session_id"] == ready["sessionId"]
+            })
+            .cloned()
+    });
+    assert_eq!(closed["fields"]["reason_code"], "idle_timeout", "{closed}");
+    assert_eq!(
+        closed["fields"]["read_idle_limit_ms"],
+        json!(crate::test_sync::EXPIRES.as_millis()),
+        "{closed}"
+    );
 }

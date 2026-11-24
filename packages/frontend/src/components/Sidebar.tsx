@@ -84,7 +84,8 @@ type SidebarProps = {
   computerSwitcherRequest?: number;
   /** Present when the shell can switch computers. */
   computerSwitch?: ComputerSwitch;
-  onManageComputers?: () => void;
+  /** The switcher's last item (ADR-0081). */
+  onUseAnotherComputer?: () => void;
   showArchived: boolean;
   taskListError?: string;
   tasks: TaskSummary[];
@@ -143,7 +144,7 @@ export const Sidebar = memo(function Sidebar({
   computerLink,
   computerSwitcherRequest,
   computerSwitch,
-  onManageComputers,
+  onUseAnotherComputer,
   settingsActive = false,
   showArchived,
   taskListError,
@@ -506,10 +507,10 @@ export const Sidebar = memo(function Sidebar({
               {settingsStatus ? <small>{settingsStatus}</small> : null}
             </span>
           </button>
-          {computerSwitch && onManageComputers ? (
+          {computerSwitch && onUseAnotherComputer ? (
             <ComputerSwitcher
               link={computerLink ?? "connecting"}
-              onManage={onManageComputers}
+              onUseAnotherComputer={onUseAnotherComputer}
               openRequest={computerSwitcherRequest}
               snapshot={computers}
               switcher={computerSwitch}

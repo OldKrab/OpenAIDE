@@ -10,12 +10,9 @@ use crate::agent::status_cache::AgentStatusCache;
 use crate::logging::capture_test_logs;
 use openaide_app_server_protocol::snapshot::AgentStatus;
 
-pub(super) const INDEX_FIXTURE: &[u8] = b"#!/usr/bin/env node\n";
-pub(super) const HELPER_FIXTURE: &[u8] = b"export const fixture = true;\n";
-
 #[derive(Clone, Default)]
-struct RecordingInstaller {
-    destinations: Arc<Mutex<Vec<std::path::PathBuf>>>,
+pub(super) struct RecordingInstaller {
+    pub(super) destinations: Arc<Mutex<Vec<std::path::PathBuf>>>,
 }
 
 #[test]
@@ -65,46 +62,49 @@ impl ManagedAcpInstaller for RecordingInstaller {
             .lock()
             .expect("installer destinations poisoned")
             .push(destination.to_path_buf());
-        if runtime == ManagedAcpRuntime::Claude {
-            write_claude_fixture(destination);
-            return Ok(());
-        }
-        let package_root = destination.join("node_modules/@openaide/codex-acp");
-        fs::create_dir_all(package_root.join("dist")).expect("create managed package fixture");
-        fs::write(
-            package_root.join("package.json"),
-            serde_json::json!({
-                "name": super::runtime_patch::manifest().package_name,
-                "version": super::runtime_patch::manifest().package_version,
-            })
-            .to_string(),
-        )
-        .expect("write managed package manifest");
-        fs::write(package_root.join("dist/index.js"), INDEX_FIXTURE)
-            .expect("write managed package entrypoint");
-        fs::write(
-            package_root.join("dist/openaide-session-recovery.mjs"),
-            HELPER_FIXTURE,
-        )
-        .expect("write managed recovery helper");
-        let codex_root = destination
-            .join("node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin");
-        fs::create_dir_all(&codex_root).expect("create managed native Codex fixture");
-        fs::write(codex_root.join("codex.exe"), "native Codex fixture")
-            .expect("write managed native Codex fixture");
-        if let Some(binary) = super::runtime::unix_codex_binary(destination) {
-            fs::create_dir_all(binary.parent().expect("native Codex parent"))
-                .expect("create managed native Codex fixture");
-            fs::write(binary, "native Codex fixture").expect("write managed native Codex fixture");
+        match runtime {
+            ManagedAcpRuntime::Codex => write_codex_dependencies(destination),
+            ManagedAcpRuntime::Claude => {
+                super::embedded_tests::write_claude_dependencies(destination)
+            }
         }
         Ok(())
     }
 }
 
-struct BlockingInstaller {
-    started: std::sync::mpsc::Sender<()>,
-    release: Mutex<std::sync::mpsc::Receiver<()>>,
-    recording: RecordingInstaller,
+/// Writes what `npm ci` leaves for the Codex runtime lockfile: the native Codex
+/// launcher and binaries, but never the adapter, which the provisioner unpacks.
+fn write_codex_dependencies(destination: &std::path::Path) {
+    let launcher = destination.join("node_modules/@openai/codex");
+    fs::create_dir_all(&launcher).expect("create native Codex launcher fixture");
+    fs::write(launcher.join("package.json"), "{}").expect("write native Codex launcher fixture");
+    let codex_root =
+        destination.join("node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin");
+    fs::create_dir_all(&codex_root).expect("create managed native Codex fixture");
+    fs::write(codex_root.join("codex.exe"), "native Codex fixture")
+        .expect("write managed native Codex fixture");
+    if let Some(binary) = super::runtime::unix_codex_binary(destination) {
+        fs::create_dir_all(binary.parent().expect("native Codex parent"))
+            .expect("create managed native Codex fixture");
+        fs::write(binary, "native Codex fixture").expect("write managed native Codex fixture");
+    }
+}
+
+/// The embedded Codex entrypoint's bytes, which a repaired installation restores.
+fn codex_entrypoint() -> &'static [u8] {
+    ManagedAcpRuntime::Codex
+        .embedded()
+        .files
+        .iter()
+        .find(|file| file.path == "dist/index.js")
+        .expect("the Codex adapter publishes its entrypoint")
+        .bytes
+}
+
+pub(super) struct BlockingInstaller {
+    pub(super) started: std::sync::mpsc::Sender<()>,
+    pub(super) release: Mutex<std::sync::mpsc::Receiver<()>>,
+    pub(super) recording: RecordingInstaller,
 }
 
 impl ManagedAcpInstaller for BlockingInstaller {
@@ -244,24 +244,23 @@ fn explicit_codex_launch_installs_the_locked_integration_once_and_reuses_it() {
 }
 
 #[test]
-fn patched_runtime_uses_a_separate_cache_and_preserves_the_leased_upstream_runtime() {
+fn new_adapter_build_installs_beside_a_leased_previous_runtime() {
     let storage = TempDir::new().expect("temporary storage root");
     let runtime_root = storage.path().join("agent-runtimes/codex-acp");
-    let upstream = runtime_root.join("1.2.0");
-    RecordingInstaller::default()
-        .install(ManagedAcpRuntime::Codex, &upstream)
-        .unwrap();
+    // An installation an older App Server published and still runs.
+    let previous = runtime_root.join("1.2.0-000000000000");
+    let entrypoint = previous.join("node_modules/@openaide/codex-acp/dist/index.js");
+    fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
+    fs::write(&entrypoint, "previous adapter build").unwrap();
     fs::write(
-        upstream.join(".openaide-managed"),
-        "@openaide/codex-acp@1.2.0\n",
+        previous.join(".openaide-managed"),
+        "@openaide/codex-acp@1.2.0-000000000000\n",
     )
     .unwrap();
-    let original =
-        fs::read(upstream.join("node_modules/@openaide/codex-acp/dist/index.js")).unwrap();
-    let lease = super::open_lock_file(ManagedAcpRuntime::Codex, &upstream.join(".lease")).unwrap();
+    let lease = super::open_lock_file(ManagedAcpRuntime::Codex, &previous.join(".lease")).unwrap();
     FileExt::lock_shared(&lease).unwrap();
     // Retaining only the newest previous runtime must still protect an older
-    // running owner's lease when a new managed patch cache is installed.
+    // running owner's lease when a new adapter build is installed.
     fs::create_dir_all(runtime_root.join("1.2.1")).unwrap();
     let installer = RecordingInstaller::default();
     let provisioner = ManagedAcpProvisioner::with_installer(
@@ -272,43 +271,13 @@ fn patched_runtime_uses_a_separate_cache_and_preserves_the_leased_upstream_runti
     let launch = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
 
     assert!(std::path::Path::new(&launch.config.args[0])
-        .starts_with(runtime_root.join(&super::runtime_patch::manifest().runtime_id)));
+        .starts_with(runtime_root.join(&ManagedAcpRuntime::Codex.package().runtime_id)));
     assert_eq!(installer.destinations.lock().unwrap().len(), 1);
     assert_eq!(
-        fs::read(upstream.join("node_modules/@openaide/codex-acp/dist/index.js")).unwrap(),
-        original
+        fs::read_to_string(&entrypoint).unwrap(),
+        "previous adapter build"
     );
-    assert!(upstream.join(".lease").is_file());
-}
-
-#[test]
-fn changed_adapter_or_recovery_helper_is_reinstalled_before_another_launch() {
-    for artifact in ["index.js", "openaide-session-recovery.mjs"] {
-        let storage = TempDir::new().unwrap();
-        let installer = RecordingInstaller::default();
-        let provisioner = ManagedAcpProvisioner::with_installer(
-            storage.path().to_path_buf(),
-            Arc::new(installer.clone()),
-        );
-        let first = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
-        let path = std::path::Path::new(&first.config.args[0])
-            .parent()
-            .unwrap()
-            .join(artifact);
-        // Release the fixture owner explicitly: a concurrently spawning test
-        // can briefly inherit an open flock before close-on-exec takes effect.
-        FileExt::unlock(first.lease.as_ref().unwrap().as_ref()).unwrap();
-        drop(first);
-        fs::write(path, "incomplete or unpatched runtime").unwrap();
-
-        assert!(
-            !provisioner.is_provisioned(ManagedAcpRuntime::Codex),
-            "changed {artifact} must invalidate the cache"
-        );
-        let _repaired = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
-        assert!(provisioner.is_provisioned(ManagedAcpRuntime::Codex));
-        assert_eq!(installer.destinations.lock().unwrap().len(), 2);
-    }
+    assert!(previous.join(".lease").is_file());
 }
 
 #[test]
@@ -336,110 +305,51 @@ fn invalid_current_runtime_is_preserved_until_its_running_owner_releases_the_lea
     drop(running);
 
     let _repaired = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
-    assert_eq!(fs::read(&entrypoint).unwrap(), INDEX_FIXTURE);
+    assert_eq!(fs::read(&entrypoint).unwrap(), codex_entrypoint());
     assert_eq!(installer.destinations.lock().unwrap().len(), 2);
 }
 
-struct IncompletePatchInstaller {
-    failure: &'static str,
-}
+struct FailingInstaller;
 
-impl ManagedAcpInstaller for IncompletePatchInstaller {
+impl ManagedAcpInstaller for FailingInstaller {
     fn install(
         &self,
-        _runtime: ManagedAcpRuntime,
+        runtime: ManagedAcpRuntime,
         destination: &std::path::Path,
     ) -> Result<(), String> {
-        RecordingInstaller::default().install(ManagedAcpRuntime::Codex, destination)?;
-        let dist = destination.join("node_modules/@openaide/codex-acp/dist");
-        match self.failure {
-            "installer_failure" => Err("managed patch installation failed".to_string()),
-            "unpatched_adapter" => fs::write(dist.join("index.js"), "original upstream adapter")
-                .map_err(|error| error.to_string()),
-            "missing_helper" => fs::remove_file(dist.join("openaide-session-recovery.mjs"))
-                .map_err(|error| error.to_string()),
-            _ => unreachable!(),
-        }
+        RecordingInstaller::default().install(runtime, destination)?;
+        Err("npm installation failed".to_string())
     }
 }
 
 #[test]
-fn failed_or_incomplete_patch_is_never_published_as_a_managed_runtime() {
-    for failure in ["installer_failure", "unpatched_adapter", "missing_helper"] {
-        let storage = TempDir::new().unwrap();
-        let provisioner = ManagedAcpProvisioner::with_installer(
-            storage.path().to_path_buf(),
-            Arc::new(IncompletePatchInstaller { failure }),
-        );
-        let error = provisioner
-            .prepare(AcpAgentConfig::codex())
-            .expect_err("all managed artifacts must validate before publication");
-        assert!(matches!(
-            error,
-            crate::protocol::errors::RuntimeError::NotReady(_)
-        ));
-        assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Codex));
-        let runtime_root = storage.path().join("agent-runtimes/codex-acp");
-        assert!(!runtime_root
-            .join(&super::runtime_patch::manifest().runtime_id)
-            .exists());
-        assert!(fs::read_dir(&runtime_root).unwrap().all(|entry| !entry
-            .unwrap()
-            .file_type()
-            .unwrap()
-            .is_dir()));
-
-        let retry = ManagedAcpProvisioner::with_installer(
-            storage.path().to_path_buf(),
-            Arc::new(RecordingInstaller::default()),
-        );
-        let _launch = retry.prepare(AcpAgentConfig::codex()).unwrap();
-        assert!(retry.is_provisioned(ManagedAcpRuntime::Codex));
-    }
-}
-
-struct NodePatchInstaller;
-
-impl ManagedAcpInstaller for NodePatchInstaller {
-    fn install(
-        &self,
-        _runtime: ManagedAcpRuntime,
-        destination: &std::path::Path,
-    ) -> Result<(), String> {
-        RecordingInstaller::default().install(ManagedAcpRuntime::Codex, destination)?;
-        let dist = destination.join("node_modules/@openaide/codex-acp/dist");
-        fs::write(dist.join("index.js"), "unpatched input").unwrap();
-        fs::remove_file(dist.join("openaide-session-recovery.mjs")).unwrap();
-        // A real Node stage process must finish both artifacts before Rust can
-        // validate and publish the runtime. This fixture needs no npm/network.
-        fs::write(
-            destination.join("apply-session-recovery.mjs"),
-            r#"
-import { writeFile } from 'node:fs/promises';
-import path from 'node:path';
-const dist = path.join(process.argv[2], 'node_modules/@openaide/codex-acp/dist');
-await writeFile(path.join(dist, 'index.js'), '#!/usr/bin/env node\n');
-await writeFile(path.join(dist, 'openaide-session-recovery.mjs'), 'export const fixture = true;\n');
-"#,
-        )
-        .unwrap();
-        super::runtime_patch::apply(
-            destination,
-            std::time::Instant::now() + crate::test_sync::WATCHDOG,
-        )
-    }
-}
-
-#[test]
-fn node_patch_finishes_in_staging_before_a_launch_can_use_its_artifacts() {
+fn failed_installation_is_never_published_and_a_retry_installs_again() {
     let storage = TempDir::new().unwrap();
     let provisioner = ManagedAcpProvisioner::with_installer(
         storage.path().to_path_buf(),
-        Arc::new(NodePatchInstaller),
+        Arc::new(FailingInstaller),
     );
-    let launch = provisioner.prepare(AcpAgentConfig::codex()).unwrap();
-    assert_eq!(fs::read(&launch.config.args[0]).unwrap(), INDEX_FIXTURE);
-    assert!(provisioner.is_provisioned(ManagedAcpRuntime::Codex));
+    let error = provisioner
+        .prepare(AcpAgentConfig::codex())
+        .expect_err("a failed npm installation must fail the launch");
+    assert!(matches!(
+        error,
+        crate::protocol::errors::RuntimeError::NotReady(_)
+    ));
+    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Codex));
+    let runtime_root = storage.path().join("agent-runtimes/codex-acp");
+    assert!(fs::read_dir(&runtime_root).unwrap().all(|entry| !entry
+        .unwrap()
+        .file_type()
+        .unwrap()
+        .is_dir()));
+
+    let retry = ManagedAcpProvisioner::with_installer(
+        storage.path().to_path_buf(),
+        Arc::new(RecordingInstaller::default()),
+    );
+    let _launch = retry.prepare(AcpAgentConfig::codex()).unwrap();
+    assert!(retry.is_provisioned(ManagedAcpRuntime::Codex));
 }
 
 #[test]
@@ -458,7 +368,7 @@ fn windows_launch_uses_the_managed_native_codex_binary() {
     let expected_codex = storage
         .path()
         .join("agent-runtimes/codex-acp")
-        .join(&super::runtime_patch::manifest().runtime_id)
+        .join(&ManagedAcpRuntime::Codex.package().runtime_id)
         .join("node_modules/@openai/codex-win32-x64")
         .join("vendor/x86_64-pc-windows-msvc/bin/codex.exe");
     assert_eq!(
@@ -601,141 +511,6 @@ fn npm_permission_failure_is_not_reported_as_missing_node() {
     ));
 }
 
-/// Writes what `npm ci` leaves for the pinned Claude adapter on this host.
-fn write_claude_fixture(destination: &std::path::Path) {
-    let package = ManagedAcpRuntime::Claude.package();
-    let package_root = destination.join("node_modules").join(&package.name);
-    fs::create_dir_all(package_root.join("dist")).expect("create Claude package fixture");
-    fs::write(
-        package_root.join("package.json"),
-        serde_json::json!({"name": package.name, "version": package.version}).to_string(),
-    )
-    .expect("write Claude package manifest");
-    fs::write(package_root.join("dist/index.js"), INDEX_FIXTURE)
-        .expect("write Claude package entrypoint");
-    if let Some(binary) = super::runtime::claude_native_binaries(destination, cfg!(windows)).first()
-    {
-        fs::create_dir_all(binary.parent().unwrap()).expect("create native Claude fixture");
-        fs::write(binary, "native Claude fixture").expect("write native Claude fixture");
-    }
-}
-
-#[test]
-fn claude_launch_installs_its_own_managed_runtime_and_runs_it_with_node() {
-    let storage = TempDir::new().expect("temporary storage root");
-    let statuses = AgentStatusCache::default();
-    let capture = capture_test_logs();
-    let installer = RecordingInstaller::default();
-    let provisioner = ManagedAcpProvisioner::with_installer_and_statuses(
-        storage.path().to_path_buf(),
-        Arc::new(installer.clone()),
-        statuses.clone(),
-    );
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-
-    let launch = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect("managed Claude launch");
-    let cached = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect("cached managed Claude launch");
-
-    let version_root = storage
-        .path()
-        .join("agent-runtimes/claude-agent-acp")
-        .join(&ManagedAcpRuntime::Claude.package().runtime_id);
-    assert_eq!(installer.destinations.lock().unwrap().len(), 1);
-    assert_eq!(launch.config.args, cached.config.args);
-    assert!(std::path::Path::new(&launch.config.args[0]).starts_with(&version_root));
-    assert!(
-        launch.config.args[0].ends_with("node_modules/@openaide/claude-agent-acp/dist/index.js")
-    );
-    assert!(!launch.config.command.contains("npx"));
-    assert!(launch.lease.is_some());
-    assert!(provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-    // Each runtime owns its directory, so Claude never provisions Codex.
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Codex));
-    assert_eq!(
-        statuses.snapshot("claude-code").status,
-        AgentStatus::Launching
-    );
-    let events = capture
-        .snapshot()
-        .iter()
-        .filter_map(|entry| entry.get("event").and_then(serde_json::Value::as_str))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    assert!(events.contains(&"claude_acp_provision_started".to_string()));
-    assert!(events.contains(&"claude_acp_provision_completed".to_string()));
-}
-
-#[test]
-fn claude_installation_reports_installing_while_npm_runs() {
-    let storage = TempDir::new().expect("temporary storage root");
-    let statuses = AgentStatusCache::default();
-    let (started_tx, started_rx) = std::sync::mpsc::channel();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let provisioner = ManagedAcpProvisioner::with_installer_and_statuses(
-        storage.path().to_path_buf(),
-        Arc::new(BlockingInstaller {
-            started: started_tx,
-            release: Mutex::new(release_rx),
-            recording: RecordingInstaller::default(),
-        }),
-        statuses.clone(),
-    );
-
-    let worker = std::thread::spawn(move || provisioner.prepare(AcpAgentConfig::claude_code()));
-    started_rx.recv().expect("installation should start");
-    assert_eq!(
-        statuses.snapshot("claude-code").status,
-        AgentStatus::Installing
-    );
-    assert_ne!(statuses.snapshot("codex").status, AgentStatus::Installing);
-
-    release_tx.send(()).expect("finish installation");
-    worker
-        .join()
-        .expect("provisioning thread")
-        .expect("managed Claude launch");
-}
-
-struct MissingNativeClaudeInstaller;
-
-impl ManagedAcpInstaller for MissingNativeClaudeInstaller {
-    fn install(
-        &self,
-        _runtime: ManagedAcpRuntime,
-        destination: &std::path::Path,
-    ) -> Result<(), String> {
-        write_claude_fixture(destination);
-        let _ = fs::remove_dir_all(destination.join("node_modules/@anthropic-ai"));
-        Ok(())
-    }
-}
-
-#[test]
-fn claude_installation_without_its_native_runtime_is_not_published() {
-    if super::runtime::claude_native_binaries(std::path::Path::new("."), cfg!(windows)).is_empty() {
-        // The SDK publishes no native binary for this host, so none is required.
-        return;
-    }
-    let storage = TempDir::new().unwrap();
-    let provisioner = ManagedAcpProvisioner::with_installer(
-        storage.path().to_path_buf(),
-        Arc::new(MissingNativeClaudeInstaller),
-    );
-
-    let error = provisioner
-        .prepare(AcpAgentConfig::claude_code())
-        .expect_err("a missing native runtime must fail installation");
-
-    assert!(error
-        .to_string()
-        .contains("Claude integration setup failed"));
-    assert!(!provisioner.is_provisioned(ManagedAcpRuntime::Claude));
-}
-
 struct MissingNativeCodexInstaller;
 
 impl ManagedAcpInstaller for MissingNativeCodexInstaller {
@@ -770,30 +545,4 @@ fn codex_installation_without_its_native_runtime_is_not_published() {
     assert!(capture.snapshot().iter().any(|entry| {
         entry.get("event").and_then(serde_json::Value::as_str) == Some("codex_acp_provision_failed")
     }));
-}
-
-#[test]
-fn claude_installer_uses_the_lockfile_of_the_pinned_adapter_without_codex_patch_assets() {
-    let destination = TempDir::new().unwrap();
-    super::write_installer_manifest(ManagedAcpRuntime::Claude, destination.path()).unwrap();
-
-    let package = ManagedAcpRuntime::Claude.package();
-    let lock: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(destination.path().join("package-lock.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        lock["packages"][""]["dependencies"][&package.name],
-        package.version.as_str(),
-        "the lockfile root must pin the same adapter version as package.json"
-    );
-    assert_eq!(
-        lock["packages"][format!("node_modules/{}", package.name)]["version"],
-        package.version.as_str(),
-        "the lockfile must lock the pinned adapter version"
-    );
-    assert!(!destination
-        .path()
-        .join("apply-session-recovery.mjs")
-        .exists());
 }

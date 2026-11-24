@@ -45,7 +45,7 @@ An unleased, ready Prepared Task eligible for reuse by a client selecting the sa
 _Avoid_: Orphan Task, idle visible Task
 
 **Image**:
-Visual content added to a message through paste, drag and drop, or the image picker; those input methods do not create different content kinds.
+Visual content added to a message through paste, drag and drop, the image picker, or Take photo; those input methods do not create different content kinds. Where the App Shell uploads files, an unsent Image is uploaded when attached and sent by handle.
 _Avoid_: PastedImage, treating Image as a workspace-file attachment
 
 **Diagram**:
@@ -293,7 +293,7 @@ The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile 
 _Avoid_: Host as a product term
 
 **Remote Device**:
-A phone or computer other than the one running the App Server whose App Shell connects to that App Server as a regular client. It is trusted because it was paired, has full access, and stays trusted until any client removes it.
+A phone, computer, or Web App server other than the machine running the App Server, whose App Shell connects to that App Server as a regular client. It is trusted because it was paired, has full access, and stays trusted until any client removes it. A Web App server is one Remote Device however many browsers use it.
 _Avoid_: Account, login, linked phone
 
 **Terminal**:
@@ -301,15 +301,15 @@ The user's own interactive shell on the App Server's computer, opened from a Pro
 _Avoid_: Console, Agent terminal, treating a Terminal as Task context
 
 **Pairing Code**:
-A short plain-text code, also drawn as a QR code, that adds a Remote Device. Either a trusted client shows a single-use code the new device reads, or the new device shows a code a trusted client reads and confirms.
-_Avoid_: Password, token, invite link
+A single-use plain-text code, also drawn as a QR code, that lets one more device use a Computer. The Computer shows it, or a device already using that Computer does, and the device that will use the Computer enters or scans it. A device never shows a code for itself to be added.
+_Avoid_: Password, token, invite link, join request
 
 **SSH Computer**:
 A Linux computer reached over SSH where an App Shell installs, starts, and keeps the App Server, and holds its token like a same-machine App Shell. It is not a Remote Device: no Pairing Code is involved.
 _Avoid_: Remote host, server, SSH remote
 
 **Computer**:
-A machine whose App Server an App Shell can use: the device it runs on, a computer reached as a Remote Device, or an SSH Computer. Exactly one Computer is in use at a time; switching to another leaves the work on the first running.
+A machine whose App Server an App Shell can use: the device it runs on (for the Web App, the machine serving it), a computer reached as a Remote Device, or an SSH Computer. Exactly one Computer is in use at a time in each App Shell, and in each browser of a Web App; switching to another leaves the work on the first running.
 _Avoid_: Server, host, place, merging several Computers into one navigation
 
 **Place**:

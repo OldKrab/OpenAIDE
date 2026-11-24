@@ -1672,10 +1672,8 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         deleteCustomAgent: vi.fn(),
         deleteMcpServer: vi.fn(),
         devices: {
-          approveJoinRequest: vi.fn(),
           cancelInvite: vi.fn(),
           createInvite: vi.fn(),
-          previewJoinRequest: vi.fn(),
           remove: vi.fn(),
           replacementImpact: vi.fn(),
         },

@@ -11,6 +11,7 @@ import {
   parseAppServerHandoffConnection,
 } from "@openaide/app-server-client";
 import { createAppServerManager } from "./app-server-manager.mjs";
+import { ComputerRefusal, createComputerGateway } from "./computer-gateway.mjs";
 import { createAppServerSocketProxy } from "./dev-server-app-server-socket.mjs";
 import {
   allowedHostNamesFromEnv,
@@ -21,12 +22,13 @@ import {
   isAuthorized,
   writeUnauthorized,
 } from "./dev-server-auth.mjs";
-import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
+import { appServerTarget, appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { appServerEnvironment } from "./app-server-environment.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 import { createRuntimeLogger } from "./runtime-logger.mjs";
 import { createMobileStatus } from './mobile-status.mjs';
+import { computerCookieName, createWebComputers } from "./web-computers.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
@@ -43,6 +45,8 @@ const staticRoot = process.env.OPENAIDE_WEB_STATIC_ROOT
 const defaultRoots = path.join(repoRoot, ".openaide-web-dev-default");
 const stateRoot = path.resolve(process.env.OPENAIDE_WEB_STATE_ROOT ?? path.join(defaultRoots, "state"));
 const runtimeRoot = path.resolve(process.env.OPENAIDE_WEB_RUNTIME_ROOT ?? path.join(defaultRoots, "runtime"));
+// The Web App's own key and paired computers (ADR-0082), apart from the App Server's state.
+const webAppFolder = path.join(stateRoot, "web-app");
 const appServerPath = path.resolve(
   process.env.OPENAIDE_APP_SERVER_PATH
     ?? process.env.OPENAIDE_RUNTIME_PATH
@@ -92,12 +96,20 @@ const appServerManager = createAppServerManager({
   readHandoffConnection,
   spawnAppServer,
 });
+const computerGateway = createComputerGateway({ logger, spawnGateway });
+const webComputers = createWebComputers({
+  gateway: computerGateway,
+  logger,
+  cookieName: computerCookieName(webAppFolder),
+});
 const mainViteProxy = createViteProxy({
   port: vitePort,
-  transformResponse: ({ body, headers, url }) => {
+  transformResponse: async ({ body, headers, req, url }) => {
     const route = webRoute(url.pathname);
     if (route && headers["content-type"]?.includes("text/html")) {
-      body = Buffer.from(injectBootstrap(body.toString("utf8"), route, webPresentation), "utf8");
+      const page = await webComputers.pageComputer(req);
+      body = Buffer.from(injectBootstrap(body.toString("utf8"), route, { ...webPresentation, computer: page.computer }), "utf8");
+      if (page.setCookie) headers["set-cookie"] = page.setCookie;
     }
     return { body, headers };
   },
@@ -111,12 +123,8 @@ const prototypeViteProxy = prototypePort === undefined
 
 const mobileStatus = createMobileStatus(appServerManager.listTasks);
 const appServerSocketProxy = createAppServerSocketProxy({
-  startAppServer,
-  currentEndpoint() {
-    const connection = appServerManager.currentConnection();
-    const url = appServerManager.currentUrl();
-    return connection && url ? { url, authToken: connection.authToken } : undefined;
-  },
+  resolveEndpoint: appServerEndpoint,
+  releaseEndpoint: webComputers.release,
   logger,
 });
 const server = http.createServer(async (req, res) => {
@@ -157,6 +165,10 @@ const server = http.createServer(async (req, res) => {
       writeFavicon(res);
       return;
     }
+    if (url.pathname.startsWith("/__openaide-computers/")) {
+      await webComputers.handle(req, res, url);
+      return;
+    }
     if (url.pathname.startsWith("/__openaide-app-server/")) {
       await proxyAppServer(req, res, url);
       return;
@@ -195,7 +207,9 @@ server.on("upgrade", (req, socket, head) => {
     }
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
     if (url.pathname.startsWith("/__openaide-app-server/")) {
-      void appServerSocketProxy(req, socket, head, url).catch(() => socket.destroy());
+      const target = appServerTarget(url.pathname);
+      if (!target) socket.destroy();
+      else void appServerSocketProxy(req, socket, head, url, target).catch(() => socket.destroy());
       return;
     }
     if (isPrototypePath(url.pathname)) {
@@ -245,10 +259,12 @@ function shutdown(signal) {
     inspector_attached: inspectorAttached,
     vite_running: Boolean(vite),
     app_server_running: Boolean(appServerManager.currentProcess()),
+    computer_gateway_running: Boolean(computerGateway.currentProcess()),
   });
   server.close();
   vite?.kill(signal);
   appServerManager.currentProcess()?.kill(signal);
+  computerGateway.stop(signal);
   let inspectorCloseOutcome = "not_attached";
   if (inspectorAttached) {
     try {
@@ -300,7 +316,9 @@ async function serveStaticFrontend(req, res, url) {
   };
   if (route && headers["content-type"].startsWith("text/html")) {
     const html = await import("node:fs/promises").then((fs) => fs.readFile(filePath, "utf8"));
-    const body = Buffer.from(injectBootstrap(html, route, webPresentation), "utf8");
+    const page = await webComputers.pageComputer(req);
+    const body = Buffer.from(injectBootstrap(html, route, { ...webPresentation, computer: page.computer }), "utf8");
+    if (page.setCookie) headers["set-cookie"] = page.setCookie;
     headers["content-length"] = String(body.byteLength);
     res.writeHead(200, headers);
     if (req.method === "HEAD") res.end();
@@ -321,7 +339,13 @@ async function proxyAppServer(req, res, url) {
   const connectionId = typeof req.headers["x-openaide-connection-id"] === "string"
     ? req.headers["x-openaide-connection-id"]
     : undefined;
-  const transportRoute = appServerTransportRoute(req.method, url.pathname);
+  const appServer = appServerTarget(url.pathname);
+  if (!appServer) {
+    writeText(res, 404, "Not found");
+    return;
+  }
+  const target = appServer.computer ? "computer" : "this_device";
+  const transportRoute = appServerTransportRoute(req.method, appServer.pathname);
   const isUpload = transportRoute?.kind === "upload";
   const isReliablePoll = req.method === "GET"
     && transportRoute === undefined
@@ -339,23 +363,29 @@ async function proxyAppServer(req, res, url) {
       request_id: requestId,
       connection_id: connectionId,
       method: req.method,
-      route: url.pathname,
+      // A paired computer's id stays out of the log; its path is logged as this computer's.
+      route: appServer.pathname,
+      target,
       transport_operation_kind: transportOperationKind,
     });
   }
   try {
-    await startAppServer();
+    const endpoint = await appServerEndpoint(appServer.computer);
     const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
     // An ambiguous proxy failure may happen after App Server acceptance. Only the
     // sequenced client transport may retry the identical frame; the proxy must
     // never manufacture a second application delivery.
-    await forwardAppServerRequest(req, res, url, body, transportRoute);
+    await forwardAppServerRequest(req, res, url, body, transportRoute, endpoint).catch((error) => {
+      if (appServer.computer && error?.code === "ECONNREFUSED") webComputers.release(appServer.computer);
+      throw error;
+    });
     if (!isReliablePoll || res.statusCode !== 204) {
       logger.info("web_proxy_request_completed", {
         request_id: requestId,
         connection_id: connectionId,
         method: req.method,
-        route: url.pathname,
+        route: appServer.pathname,
+        target,
         transport_operation_kind: transportOperationKind,
         http_status: res.statusCode,
         body_bytes: body.byteLength,
@@ -367,25 +397,41 @@ async function proxyAppServer(req, res, url) {
       request_id: requestId,
       connection_id: connectionId,
       method: req.method,
-      route: url.pathname,
+      route: appServer.pathname,
+      target,
       transport_operation_kind: transportOperationKind,
       duration_ms: Date.now() - startedAt,
       error_kind: error instanceof Error && error.name ? error.name : typeof error,
+      ...(error instanceof ComputerRefusal ? { reason: error.reason } : {}),
     });
+    // The sentence says why the paired computer cannot be used, and what to do.
+    if (error instanceof ComputerRefusal) {
+      writeText(res, 503, error.message);
+      return;
+    }
     throw error;
   }
 }
 
-function forwardAppServerRequest(req, res, url, body, transportRoute) {
-  const appServerConnection = appServerManager.currentConnection();
-  const appServerUrl = appServerManager.currentUrl();
-  if (!appServerConnection || !appServerUrl) {
-    return Promise.reject(new Error("App Server connection is not ready"));
-  }
+/**
+ * Where a request goes: this computer's App Server, started on first use, or the
+ * gateway endpoint of the paired computer the browser's page opened on (ADR-0082).
+ */
+async function appServerEndpoint(computer) {
+  if (computer) return webComputers.endpoint(computer);
+  await startAppServer();
+  const connection = appServerManager.currentConnection();
+  const url = appServerManager.currentUrl();
+  if (!connection || !url) throw new Error("App Server connection is not ready");
+  return { url, authToken: connection.authToken };
+}
+
+function forwardAppServerRequest(req, res, url, body, transportRoute, endpoint) {
+  const appServerUrl = endpoint.url;
   return new Promise((resolve, reject) => {
     const isUpload = transportRoute?.kind === "upload";
     const contentLength = isUpload ? Number(req.headers["content-length"] ?? 0) : body.byteLength;
-    const headers = appServerHeaders(req.headers, appServerUrl.host, appServerConnection.authToken, contentLength);
+    const headers = appServerHeaders(req.headers, appServerUrl.host, endpoint.authToken, contentLength);
     const appServerPath = transportRoute
       ? `${appServerUrl.pathname.replace(/\/$/, "")}/${transportRoute.appServerSuffix}`
       : appServerUrl.pathname;
@@ -422,6 +468,16 @@ function spawnAppServer() {
   return spawn(appServerPath, [], {
     cwd: repoRoot,
     env: appServerEnvironment(process.env, { stateRoot, runtimeRoot }),
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+}
+
+/** The gateway subcommand logs where the App Server does; it takes no protocol mode. */
+function spawnGateway() {
+  const { OPENAIDE_APP_SERVER_PROTOCOL: _mode, ...env } = appServerEnvironment(process.env, { stateRoot, runtimeRoot });
+  return spawn(appServerPath, ["gateway", "--state", webAppFolder], {
+    cwd: repoRoot,
+    env,
     stdio: ["pipe", "pipe", "inherit"],
   });
 }

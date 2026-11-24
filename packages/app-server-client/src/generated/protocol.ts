@@ -61,8 +61,6 @@ export const SETTINGS_RESET_TASK_HISTORY = "settings/resetTaskHistory" as const;
 
 export const DEVICES_CREATE_INVITE = "devices/createInvite" as const;
 export const DEVICES_CANCEL_INVITE = "devices/cancelInvite" as const;
-export const DEVICES_PREVIEW_JOIN_REQUEST = "devices/previewJoinRequest" as const;
-export const DEVICES_APPROVE_JOIN_REQUEST = "devices/approveJoinRequest" as const;
 export const DEVICES_REMOVE = "devices/remove" as const;
 export const TASK_ATTENTION_WAIT = "taskAttention/wait" as const;
 export const TERMINALS_OPEN = "terminals/open" as const;
@@ -80,6 +78,8 @@ export const ATTACHMENT_CONFIRM_EMBEDDED = "attachment/confirmEmbedded" as const
 
 export const ATTACHMENT_REFRESH_HANDLES = "attachment/refreshHandles" as const;
 export const ATTACHMENT_RELEASE = "attachment/release" as const;
+
+export const ATTACHMENT_TRANSFER = "attachment/transfer" as const;
 
 export const ATTACHMENT_REVEAL = "attachment/reveal" as const;
 
@@ -649,7 +649,14 @@ export type DeviceCollectionSnapshot = { remoteAccess: RemoteAccessState,
 /**
  * The user-facing name of the machine this App Server runs on.
  */
-serverName: string, devices?: Array<RemoteDeviceSummary>, };
+serverName: string,
+/**
+ * The public key Remote Devices reach this App Server by, in text form. A device
+ * compares it with the key in a Pairing Code to recognize this computer's own code
+ * (ADR-0081). Absent until the first Pairing Code and after the last Remote Device
+ * is removed, because the key is made then and forgotten then.
+ */
+serverKey?: string | null, devices?: Array<RemoteDeviceSummary>, };
 
 export type RemoteAccessState = "off" | "starting" | "on" | "failed";
 
@@ -686,18 +693,6 @@ export type DevicesCreateInviteResult = { code: string, expiresAtMs: number, };
 export type DevicesCancelInviteParams = Record<symbol, never>;
 
 export type DevicesCancelInviteResult = Record<symbol, never>;
-
-export type DevicesPreviewJoinRequestParams = { code: string, };
-
-export type DevicesPreviewJoinRequestResult = { deviceId: string, name: string, model?: string | null,
-/**
- * The App Server the device would join, for the confirmation shown to the user.
- */
-serverName: string, alreadyTrusted: boolean, };
-
-export type DevicesApproveJoinRequestParams = { code: string, };
-
-export type DevicesApproveJoinRequestResult = Record<symbol, never>;
 
 export type DevicesRemoveParams = { deviceId: string, };
 
@@ -920,6 +915,18 @@ export type AttachmentReleaseResult = {
  * Contains exactly one outcome per requested resource, preserving request order.
  */
 outcomes: Array<AttachmentReleaseOutcome>, };
+
+export type AttachmentTransferStatus = "transferred" | "missing" | "forbidden";
+
+export type AttachmentTransferOutcome = { handleId: AttachmentHandleId, status: AttachmentTransferStatus, };
+
+export type AttachmentTransferParams = { fromTaskId: TaskId, toTaskId: TaskId, handles: Array<AttachmentHandleId>, };
+
+export type AttachmentTransferResult = {
+/**
+ * Contains exactly one outcome per requested handle, preserving request order.
+ */
+outcomes: Array<AttachmentTransferOutcome>, };
 
 export type AttachmentRevealParams = { taskId: TaskId, handleId: AttachmentHandleId, };
 
@@ -1729,7 +1736,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_PREVIEW_JOIN_REQUEST | typeof DEVICES_APPROVE_JOIN_REQUEST | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1781,8 +1788,6 @@ export type RequestParamsByMethod = {
   [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryParams;
   [DEVICES_CREATE_INVITE]: DevicesCreateInviteParams;
   [DEVICES_CANCEL_INVITE]: DevicesCancelInviteParams;
-  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestParams;
-  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestParams;
   [DEVICES_REMOVE]: DevicesRemoveParams;
   [TASK_ATTENTION_WAIT]: TaskAttentionWaitParams;
   [TERMINALS_OPEN]: TerminalsOpenParams;
@@ -1798,6 +1803,7 @@ export type RequestParamsByMethod = {
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedParams;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesParams;
   [ATTACHMENT_RELEASE]: AttachmentReleaseParams;
+  [ATTACHMENT_TRANSFER]: AttachmentTransferParams;
   [ATTACHMENT_REVEAL]: AttachmentRevealParams;
   [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentParams;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
@@ -1911,8 +1917,6 @@ export type ResponseResultByMethod = {
   [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryResult;
   [DEVICES_CREATE_INVITE]: DevicesCreateInviteResult;
   [DEVICES_CANCEL_INVITE]: DevicesCancelInviteResult;
-  [DEVICES_PREVIEW_JOIN_REQUEST]: DevicesPreviewJoinRequestResult;
-  [DEVICES_APPROVE_JOIN_REQUEST]: DevicesApproveJoinRequestResult;
   [DEVICES_REMOVE]: DevicesRemoveResult;
   [TASK_ATTENTION_WAIT]: TaskAttentionWaitResult;
   [TERMINALS_OPEN]: TerminalsOpenResult;
@@ -1928,6 +1932,7 @@ export type ResponseResultByMethod = {
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedResult;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesResult;
   [ATTACHMENT_RELEASE]: AttachmentReleaseResult;
+  [ATTACHMENT_TRANSFER]: AttachmentTransferResult;
   [ATTACHMENT_REVEAL]: AttachmentRevealResult;
   [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentResult;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
@@ -2054,6 +2059,7 @@ export type AttachmentCreateEmbeddedCandidateResponse = ResponseEnvelope<Attachm
 export type AttachmentConfirmEmbeddedResponse = ResponseEnvelope<AttachmentConfirmEmbeddedResult>;
 export type AttachmentRefreshHandlesResponse = ResponseEnvelope<AttachmentRefreshHandlesResult>;
 export type AttachmentReleaseResponse = ResponseEnvelope<AttachmentReleaseResult>;
+export type AttachmentTransferResponse = ResponseEnvelope<AttachmentTransferResult>;
 export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
 export type AttachmentRevealSentResponse = ResponseEnvelope<AttachmentRevealSentResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
@@ -2115,4 +2121,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 3, minor: 1 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 4, minor: 0 };

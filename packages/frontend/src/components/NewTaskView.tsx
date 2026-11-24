@@ -3,8 +3,7 @@ import { useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
-  appServerAttachmentHandles,
-  appServerComposerImages,
+  composerMessageContent,
   moveAttachment,
   newTaskDraftAttachments,
   type AgentOption,
@@ -186,9 +185,7 @@ export function NewTaskView({
   // when the selected prepared Task explicitly reports that Images are unsupported.
   const imageAttachmentsAllowed = state.snapshot?.input_capabilities?.image !== false;
   const imageAttachments = composerAttachments.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = composerAttachments.filter((attachment) => attachment.kind !== "image");
-  const attachmentsReady = appServerComposerImages(imageAttachments) !== undefined
-    && appServerAttachmentHandles(resourceAttachments) !== undefined
+  const attachmentsReady = composerMessageContent(composerAttachments) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const baseAvailability = composerAvailability({
     allowEditingWhileSendBlocked: true,

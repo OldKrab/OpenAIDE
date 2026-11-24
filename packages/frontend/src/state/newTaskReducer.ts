@@ -6,11 +6,13 @@ import type {
 } from "@openaide/app-shell-contracts";
 import {
   invalidateAppServerAttachments,
+  invalidateAttachmentHandles,
   localAttachment,
   selectionWithAgent,
   selectionWithIsolation,
   selectionWithProject,
   selectionWithWorkspace,
+  type ComposerAttachment,
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
@@ -28,6 +30,7 @@ type NewTaskAction =
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
   | { type: "newTask:replaced"; staleTaskId: string; taskId: string }
+  | { type: "newTask:attachments:lost"; handleIds: string[]; message: string }
   | { type: "newTask:leaseExpired"; taskId: string; message: string; configOptions?: ConfigOptionsCatalog }
   | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
   | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
@@ -173,6 +176,24 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
         taskInputs: staleInput
           ? { ...taskInputs, [action.taskId]: staleInput }
           : taskInputs,
+      };
+    }
+    case "newTask:attachments:lost": {
+      // A moved draft keeps its rows; only rows whose handles App Server could not move
+      // to the successor Prepared Task show an error, before the user presses Send.
+      const lost = new Set(action.handleIds);
+      const mark = (context: ComposerAttachment[]) => invalidateAttachmentHandles(context, lost, action.message);
+      return {
+        ...state,
+        newTask: {
+          ...state.newTask,
+          context: mark(state.newTask.context),
+          pending: state.newTask.pending && { ...state.newTask.pending, context: mark(state.newTask.pending.context) },
+        },
+        taskInputs: Object.fromEntries(Object.entries(state.taskInputs).map(([taskId, input]) => {
+          const context = mark(input.context);
+          return [taskId, context === input.context ? input : { ...input, context }];
+        })),
       };
     }
     case "newTask:leaseExpired": {

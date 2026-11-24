@@ -45,6 +45,11 @@ export function isAllowedHost(header, allowedHosts) {
   return hostname === "127.0.0.1" || hostname === "localhost" || allowedHosts.includes(hostname);
 }
 
+/**
+ * The headers an App Server request carries: the shell's own credential in place
+ * of the browser's, and none of the browser's cookies. A paired computer is another
+ * machine, and this server's cookies, an authenticating proxy's among them, stay here.
+ */
 export function appServerHeaders(headers, hostHeader, authToken, contentLength) {
   const out = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -54,6 +59,7 @@ export function appServerHeaders(headers, hostHeader, authToken, contentLength) 
       lower === "connection" ||
       lower === "host" ||
       lower === "authorization" ||
+      lower === "cookie" ||
       lower === "content-length"
     ) continue;
     out[key] = value;

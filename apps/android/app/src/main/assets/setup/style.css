@@ -34,6 +34,15 @@ p { margin: 0; color: var(--muted); }
 .intro { margin-top: 10px; max-width: 34ch; }
 .path { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 2px; color: var(--text); font-weight: 500; }
 .path .sep { width: 16px; height: 16px; color: var(--muted); }
+/* Who uses whom (ADR-0081); the end not known yet is an empty dashed slot. */
+.direction { display: flex; align-items: flex-start; justify-content: center; gap: 14px; margin-top: 24px; }
+.direction .end { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 76px; }
+.direction .end > svg.i, .direction .slot { width: 52px; height: 52px; padding: 14px; border-radius: 16px; background: var(--surface); }
+.direction .slot { background: transparent; border: 1.5px dashed var(--muted); }
+.direction .uses { display: flex; flex-direction: column; align-items: center; padding-top: 12px; color: var(--muted); }
+.direction .uses svg.i { width: 18px; height: 18px; }
+.direction small { color: var(--muted); font-size: 13px; }
+.direction + .intro { margin-top: 24px; }
 .status { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 15px; }
 .status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
 .status.off::before { background: var(--muted); }
@@ -72,14 +81,6 @@ textarea { width: 100%; min-height: 104px; padding: 16px; border: 1px solid var(
 textarea:focus { outline: none; border-color: var(--text); }
 textarea::placeholder { color: var(--muted); }
 
-/* This phone's code */
-.qr { align-self: center; width: min(100%, 264px); margin-top: 36px; padding: 12px; border-radius: 18px; background: #fff; }
-.qr svg { display: block; width: 100%; height: auto; fill: #000; }
-.code { margin-top: 20px; font: 13px/1.8 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align: center; word-spacing: 6px; overflow-wrap: anywhere; user-select: all; }
-.waiting { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 28px; font-size: 15px; }
-.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: .25; } }
-
 .step { display: flex; gap: 6px; margin-top: 12px; }
 .step span { height: 3px; background: var(--surface); flex: 1; border-radius: 3px; }
 .step .done { background: var(--text); }
@@ -101,7 +102,7 @@ input[type=checkbox]:checked::after { transform: translateX(20px); }
 .hint { align-self: flex-start; min-height: 44px; margin: 6px -2px 0; padding: 8px 2px; border: 0; background: transparent; color: var(--muted); font-size: 15px; text-decoration: underline; text-decoration-color: var(--line); text-decoration-thickness: 1px; text-underline-offset: 4px; transition: color 150ms ease-out; }
 .hint:active { color: var(--text); }
 .group + .hint { margin-top: 14px; margin-left: 16px; }
-.waiting + .hint, main > .primary ~ .hint, main > .secondary ~ .hint { align-self: center; }
+main > .primary ~ .hint, main > .secondary ~ .hint { align-self: center; }
 .sheet .secondary { margin-top: 24px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(100%); } }

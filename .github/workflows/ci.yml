@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
@@ -28,6 +31,10 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       - run: npm run check
 
@@ -36,11 +43,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+      - run: npm run build:adapters
       - run: cargo fmt --all --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
@@ -64,6 +82,9 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
@@ -73,15 +94,26 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
-      - name: Install the pinned managed runtime
-        working-directory: openaide-rs/app-server/assets/codex-acp-runtime
-        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund
-      - name: Smoke-test adapter and native Codex process
-        run: >-
-          node scripts/smoke-managed-codex-acp.mjs
-          openaide-rs/app-server/assets/codex-acp-runtime
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the App Server boundary
-        run: cargo build --locked -p openaide-app-server
+        run: |
+          npm run build:adapters
+          cargo build --locked -p openaide-app-server
+      # Socket options can differ per handle on Windows: a cloned socket keeps the
+      # receive timeout it was cloned with. These tests catch a deadline set on the
+      # wrong handle, which Linux cannot show.
+      - name: Test App Server session sockets
+        run: cargo test --locked -p openaide-app-server --lib -- session_socket
+      # Repeated Project catalog writes must persist on Windows too. This runs here on
+      # the warm debug build rather than in the release artifact build, where it cost a
+      # cold debug compile before every Windows App Server; a release waits on this CI.
+      - name: Test repeated Windows Project persistence
+        run: cargo test --locked -p openaide-app-server --test project_persistence managed_projects_survive_repeated_catalog_writes
+      # The App Server installs the embedded adapter's dependencies with npm, unpacks
+      # the adapter, and starts it with the native codex.exe as CODEX_PATH (ADR-0079).
       - name: Smoke-test App Server managed Codex launch
         run: >-
           node scripts/smoke-packaged-codex-acp.mjs
@@ -93,6 +125,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
@@ -101,6 +136,10 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       # The GitHub-hosted image already supplies Chrome and its system dependencies.
       # Keep mirror-dependent apt provisioning off the PR critical path.
@@ -120,6 +159,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The App Server embeds the adapter forks (ADR-0079).
+          submodules: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version-file: .node-version
@@ -128,15 +170,16 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          # Only main saves: PR and tag caches cannot be reused elsewhere, and their
+          # churn evicts main's caches past the repository's 10 GB limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       - run: npm run build
-      # Exercise the pinned native recovery contract before a release tag exists,
-      # on the same Linux image used by packaged VSIX smoke tests.
-      - name: Smoke-test Linux managed Codex recovery
+      # Exercise the embedded Codex installation and its Subagent wire contract
+      # before a release tag exists, on the image the packaged VSIX smoke uses.
+      - name: Smoke-test Linux managed Codex
         run: |
-          # Ubuntu's AppArmor default blocks the native filesystem helper's
-          # user namespace. This disposable runner must exercise deny rules.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           node scripts/smoke-packaged-codex-acp.mjs \
             target/debug/openaide-app-server \
             "$GITHUB_WORKSPACE"

@@ -1,8 +1,39 @@
+const APP_SERVER_BASE = "/__openaide-app-server";
+const COMPUTER_ID = /^[0-9a-f]{64}$/;
+const COMPUTER_BASE = `${APP_SERVER_BASE}/computer/`;
+
+/** Whether `id` has the form of a paired computer's id: its App Server's public key in hex. */
+export function isComputerId(id) {
+  return typeof id === "string" && COMPUTER_ID.test(id);
+}
+
+/**
+ * The App Server paths of a page: this computer's under `/__openaide-app-server`, and
+ * a paired computer's under `/__openaide-app-server/computer/<id>` (ADR-0082). A page
+ * keeps the computer it opened on, whatever another tab of the browser chooses.
+ */
+export function appServerBase(computer) {
+  return computer ? `${COMPUTER_BASE}${computer}` : APP_SERVER_BASE;
+}
+
+/**
+ * The computer an App Server path is for, and the path as this computer's App Server
+ * would see it; undefined for a malformed computer path.
+ */
+export function appServerTarget(pathname) {
+  if (!pathname.startsWith(COMPUTER_BASE)) return { computer: undefined, pathname };
+  const rest = pathname.slice(COMPUTER_BASE.length);
+  const slash = rest.indexOf("/");
+  const computer = slash < 0 ? rest : rest.slice(0, slash);
+  if (!isComputerId(computer)) return undefined;
+  return { computer, pathname: APP_SERVER_BASE + (slash < 0 ? "/" : rest.slice(slash)) };
+}
+
 /** An absent transport means HTTP, so older frontends keep working. */
-function browserConnection(transport) {
+function browserConnection(transport, computer) {
   return {
     kind: "webProxy",
-    endpointUrl: "/__openaide-app-server/probe",
+    endpointUrl: `${appServerBase(computer)}/probe`,
     ...(transport === "webSocket" ? { transport } : {}),
   };
 }
@@ -25,7 +56,9 @@ export function injectBootstrap(html, route, presentation = {}) {
     route.nativeSessionId ? `data-native-session-id="${escapeAttribute(route.nativeSessionId)}"` : undefined,
     route.archived ? 'data-archived="true"' : undefined,
     presentation.instanceLabel ? `data-instance-label="${escapeAttribute(presentation.instanceLabel)}"` : undefined,
-    `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection(presentation.appServerTransport)))}"`,
+    // The paired computer this page opened on; absent while this computer is in use.
+    presentation.computer ? `data-computer-id="${escapeAttribute(presentation.computer)}"` : undefined,
+    `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection(presentation.appServerTransport, presentation.computer)))}"`,
   ].filter(Boolean).join(" ");
   const titled = presentation.title ? injectTitle(html, presentation.title) : html;
   if (/<body([^>]*)>/i.test(html)) {

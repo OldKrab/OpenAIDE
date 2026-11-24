@@ -43,6 +43,7 @@ pub struct LocalHttpAppHandler {
     probe: LocalHttpProbeHandler,
     protocol: LocalHttpProtocolHandler,
     uploads: ChunkUploadRegistry,
+    session_socket_timeouts: listener::SessionSocketTimeouts,
 }
 
 impl LocalHttpAppHandler {
@@ -63,7 +64,21 @@ impl LocalHttpAppHandler {
             ),
             protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
             uploads: ChunkUploadRegistry::default(),
+            session_socket_timeouts: listener::SessionSocketTimeouts::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_session_socket_timeouts(
+        mut self,
+        timeouts: listener::SessionSocketTimeouts,
+    ) -> Self {
+        self.session_socket_timeouts = timeouts;
+        self
+    }
+
+    pub(crate) fn session_socket_timeouts(&self) -> listener::SessionSocketTimeouts {
+        self.session_socket_timeouts
     }
 
     pub fn handle(
@@ -259,15 +274,22 @@ impl LocalHttpAppHandler {
         task_id: String,
         path: String,
         label: String,
+        kind: crate::protocol_edge::local_http::file_upload::UploadKind,
     ) -> LocalHttpResponse {
         let safe_label =
             crate::protocol_edge::local_http::file_upload::safe_upload_file_name(&label);
-        match self.probe.gateway.create_uploaded_file_reference(
-            client_instance_id,
-            TaskId::from(task_id),
-            path,
-            safe_label,
-        ) {
+        let task_id = TaskId::from(task_id);
+        let created = match kind {
+            crate::protocol_edge::local_http::file_upload::UploadKind::File => self
+                .probe
+                .gateway
+                .create_uploaded_file_reference(client_instance_id, task_id, path, safe_label),
+            crate::protocol_edge::local_http::file_upload::UploadKind::Image => self
+                .probe
+                .gateway
+                .create_uploaded_image(client_instance_id, task_id, path, safe_label),
+        };
+        match created {
             Ok(attachment) => json_response(200, json!({ "attachment": attachment })),
             Err(error) => json_response(400, json!({ "error": error })),
         }

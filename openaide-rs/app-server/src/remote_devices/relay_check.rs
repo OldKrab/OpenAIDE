@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use iroh::endpoint::{presets, Connection};
 use iroh::tls::CaTlsConfig;
 use iroh::{Endpoint, EndpointAddr, RelayMode, Watcher};
+use openaide_remote_core::Network;
 
 use crate::logging;
 
@@ -100,8 +101,12 @@ pub(crate) struct RelayCheck {
 }
 
 impl RelayCheck {
-    pub(crate) fn new(relay_mode: RelayMode, ca_tls: Option<CaTlsConfig>) -> Self {
-        Self { relay_mode, ca_tls }
+    /// The check for an edge on [`network`], or `None` where the network has no relay.
+    pub(crate) fn on(network: &Network) -> Option<Self> {
+        Some(Self {
+            relay_mode: network.relay_mode()?,
+            ca_tls: network.relay_tls(),
+        })
     }
 
     /// Dials the edge at [`edge`], its current address, through its home relay alone,
@@ -144,6 +149,48 @@ impl RelayCheck {
 /// Answers a check's connection on the edge: the handshake was the answer.
 pub(crate) fn answer(connection: Connection) {
     connection.close(CLOSE_CHECKED.into(), b"checked");
+}
+
+/// How often the throttled-connection count is read. iroh offers no way to wait on it, and
+/// reading it is one atomic load.
+const RATE_LIMIT_POLL: Duration = Duration::from_secs(30);
+
+/// Logs each time a relay throttles one of [`endpoint`]'s connections, until it closes.
+/// Over its unpublished limit a public relay stops reading the connection, so traffic stalls
+/// instead of failing; this tells such a stall apart from a slow network.
+// TODO: shares its logic with `openaide_remote_client::watch_relay_rate_limits`, which the
+// App Server cannot call because it takes the client crate only as a test dependency. Move
+// both into a crate the two sides share once more relay diagnostics need the same split.
+pub(crate) fn watch_rate_limits(endpoint: &Endpoint) {
+    let endpoint = endpoint.clone();
+    tokio::spawn(async move {
+        let mut seen = 0u64;
+        let mut timer = tokio::time::interval(RATE_LIMIT_POLL);
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let closed = endpoint.closed();
+        tokio::pin!(closed);
+        loop {
+            tokio::select! {
+                _ = &mut closed => break,
+                _ = timer.tick() => {
+                    let total = endpoint.metrics().socket.relay_conns_ratelimited.get();
+                    if let Some(new) = throttled_since(&mut seen, total) {
+                        logging::warn(
+                            "remote_devices_relay_rate_limited",
+                            serde_json::json!({ "new": new, "total": total }),
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// How many connections were throttled since `seen` was last updated, if any.
+fn throttled_since(seen: &mut u64, total: u64) -> Option<u64> {
+    let new = total.saturating_sub(*seen);
+    *seen = (*seen).max(total);
+    (new > 0).then_some(new)
 }
 
 /// Logs each time [`endpoint`] gains or loses its home relay, until it closes. Without

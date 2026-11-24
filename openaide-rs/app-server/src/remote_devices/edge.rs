@@ -9,69 +9,25 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::{presets, ConnectingError, Connection, ConnectionError, Incoming};
+use iroh::endpoint::{ConnectingError, Connection, ConnectionError, Incoming, IncomingAddr};
 use iroh::{Endpoint, PublicKey, SecretKey};
-use openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION;
-use openaide_app_server_protocol::devices::{
-    RemoteAccessState, RemoteDeviceConnection, RemoteDevicePath,
+use openaide_app_server_protocol::devices::RemoteAccessState;
+use openaide_remote_core::{
+    application_alpn, close, InviteRequest, Network, PairingResult, PAIRING_ALPN,
+    PAIRING_MESSAGE_LIMIT,
 };
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use super::bridge::{self, BridgeTarget};
+use super::network_watch::{self, describe, is_direct, path_name, watch_path, RouteTally};
 use super::relay_check::{self, CheckOutcome, RelayCheck, RelayHealth};
 use super::{EdgeCommand, RemoteDevices};
 use crate::client_lifecycle::AppServerTime;
 use crate::logging;
 
-/// Pairing is its own protocol so an untrusted key can never reach a request handler.
-const PAIRING_ALPN: &[u8] = b"openaide/pair/1";
-const CLOSE_UNTRUSTED: u32 = 1;
-const CLOSE_REMOVED: u32 = 2;
 /// Time a removed device's connection stays open so the removal reply can be delivered.
 const REMOVAL_CLOSE_GRACE: Duration = Duration::from_millis(750);
-const CLOSE_UNKNOWN_PROTOCOL: u32 = 3;
 const PAIRING_STEP_TIMEOUT: Duration = Duration::from_secs(15);
-const PAIRING_MESSAGE_LIMIT: usize = 4096;
-/// A device that showed a join request stays on that screen for about this long.
-const ANNOUNCE_ATTEMPTS: u32 = 6;
-const ANNOUNCE_RETRY_DELAY: Duration = Duration::from_secs(3);
-const PATH_POLL_INTERVAL: Duration = Duration::from_secs(5);
-
-/// The major version is part of the name, so an incompatible device fails the
-/// handshake instead of a request.
-fn application_alpn() -> Vec<u8> {
-    format!("openaide/app-server/{}", APP_SERVER_PROTOCOL_VERSION.major).into_bytes()
-}
-
-/// How the endpoint finds and is found by its peers.
-#[derive(Clone)]
-pub(crate) enum EdgeNetwork {
-    /// Public relays and address lookup operated by the iroh project.
-    Public,
-    /// Direct addresses shared in memory, so a test needs no network service.
-    #[cfg(test)]
-    Local(iroh::address_lookup::MemoryLookup),
-    /// A relay run by the test and trusted without verifying its certificate.
-    #[cfg(test)]
-    Relay(iroh::RelayMap),
-}
-
-impl EdgeNetwork {
-    /// How the edge's relay is checked, or `None` where it has no relay.
-    pub(crate) fn relay_check(&self) -> Option<RelayCheck> {
-        match self {
-            Self::Public => Some(RelayCheck::new(iroh::endpoint::default_relay_mode(), None)),
-            #[cfg(test)]
-            Self::Local(_) => None,
-            #[cfg(test)]
-            Self::Relay(map) => Some(RelayCheck::new(
-                iroh::RelayMode::Custom(map.clone()),
-                Some(iroh::tls::CaTlsConfig::insecure_skip_verify()),
-            )),
-        }
-    }
-}
 
 /// Starts the edge on its own runtime thread. It binds nothing until remote access is in use.
 pub fn start(devices: RemoteDevices, local_http: std::net::SocketAddr, auth_token: String) {
@@ -81,11 +37,11 @@ pub fn start(devices: RemoteDevices, local_http: std::net::SocketAddr, auth_toke
             address: local_http,
             auth_token,
         },
-        EdgeNetwork::Public,
+        Network::Public,
     );
 }
 
-pub(crate) fn start_on(devices: RemoteDevices, target: BridgeTarget, network: EdgeNetwork) {
+pub(crate) fn start_on(devices: RemoteDevices, target: BridgeTarget, network: Network) {
     let (commands, receiver) = mpsc::unbounded_channel();
     let spawned = std::thread::Builder::new()
         .name("openaide-remote-devices".to_string())
@@ -122,14 +78,14 @@ type Connections = Arc<Mutex<HashMap<PublicKey, Vec<Connection>>>>;
 async fn run(
     devices: RemoteDevices,
     target: BridgeTarget,
-    network: EdgeNetwork,
+    network: Network,
     mut commands: mpsc::UnboundedReceiver<EdgeCommand>,
 ) {
     let mut endpoint: Option<Endpoint> = None;
     let connections = Connections::default();
     // Removals still owed their close; the endpoint must not stop under them.
     let mut closing: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let relay_check = network.relay_check();
+    let relay_check = RelayCheck::on(&network);
     let mut check_timer = tokio::time::interval_at(
         tokio::time::Instant::now() + relay_check::CHECK_INTERVAL,
         relay_check::CHECK_INTERVAL,
@@ -151,15 +107,6 @@ async fn run(
                         health = RelayHealth::default();
                     }
                 }
-                Some(EdgeCommand::AnnounceTrust(device)) => {
-                    if let Some(endpoint) = &endpoint {
-                        tokio::spawn(announce_trust(
-                            endpoint.clone(),
-                            device,
-                            devices.server_name(),
-                        ));
-                    }
-                }
                 Some(EdgeCommand::Disconnect(device)) => {
                     let removed = connections
                         .lock()
@@ -173,7 +120,7 @@ async fn run(
                     closing.push(tokio::spawn(async move {
                         tokio::time::sleep(REMOVAL_CLOSE_GRACE).await;
                         for connection in removed {
-                            connection.close(CLOSE_REMOVED.into(), b"removed");
+                            connection.close(close::REMOVED.into(), b"removed");
                         }
                     }));
                 }
@@ -262,7 +209,7 @@ fn log_check(
 /// reconnect. A wedged relay is left behind with the old endpoint.
 async fn rebind_edge(
     devices: &RemoteDevices,
-    network: &EdgeNetwork,
+    network: &Network,
     endpoint: &mut Option<Endpoint>,
     closing: &mut Vec<tokio::task::JoinHandle<()>>,
 ) {
@@ -296,7 +243,7 @@ async fn accept(endpoint: &Option<Endpoint>) -> Option<Incoming> {
 /// while remote access is in use, and absent otherwise. Returns whether it changed.
 async fn reconcile(
     devices: &RemoteDevices,
-    network: &EdgeNetwork,
+    network: &Network,
     endpoint: &mut Option<Endpoint>,
     closing: &mut Vec<tokio::task::JoinHandle<()>>,
 ) -> bool {
@@ -333,6 +280,8 @@ async fn reconcile(
                 }),
             );
             relay_check::watch_home_relay(&bound);
+            relay_check::watch_rate_limits(&bound);
+            network_watch::watch_net_report(&bound);
             *endpoint = Some(bound);
             devices.set_access(RemoteAccessState::On);
         }
@@ -353,42 +302,22 @@ async fn reconcile(
 
 pub(crate) async fn bind(
     secret_key: SecretKey,
-    network: &EdgeNetwork,
+    network: &Network,
 ) -> Result<Endpoint, &'static str> {
     let alpns = vec![
         application_alpn(),
         PAIRING_ALPN.to_vec(),
         relay_check::RELAY_CHECK_ALPN.to_vec(),
     ];
-    match network {
-        EdgeNetwork::Public => Endpoint::builder(presets::N0)
-            .secret_key(secret_key)
-            .alpns(alpns)
-            .bind()
-            .await
-            .map_err(|_| "bind"),
-        #[cfg(test)]
-        EdgeNetwork::Local(lookup) => {
-            let endpoint = Endpoint::builder(presets::Minimal)
-                .secret_key(secret_key)
-                .alpns(alpns)
-                .address_lookup(lookup.clone())
-                .bind()
-                .await
-                .map_err(|_| "bind")?;
-            lookup.add_endpoint_info(endpoint.addr());
-            Ok(endpoint)
-        }
-        #[cfg(test)]
-        EdgeNetwork::Relay(map) => Endpoint::builder(presets::Minimal)
-            .secret_key(secret_key)
-            .alpns(alpns)
-            .relay_mode(iroh::RelayMode::Custom(map.clone()))
-            .ca_tls_config(iroh::tls::CaTlsConfig::insecure_skip_verify())
-            .bind()
-            .await
-            .map_err(|_| "bind"),
-    }
+    let endpoint = network
+        .builder()
+        .secret_key(secret_key)
+        .alpns(alpns)
+        .bind()
+        .await
+        .map_err(|_| "bind")?;
+    network.on_bound(&endpoint);
+    Ok(endpoint)
 }
 
 async fn handle_incoming(
@@ -398,12 +327,18 @@ async fn handle_incoming(
     connections: Connections,
 ) {
     let started = Instant::now();
+    // Read before the handshake consumes `incoming`: a failure can then be tied to its route and,
+    // over a relay, to the device that sent it.
+    let origin = IncomingOrigin::of(&incoming.remote_addr(), &devices);
     let connection = match incoming.await {
         Ok(connection) => connection,
         Err(error) => {
             logging::info(
                 "remote_device_handshake_failed",
                 serde_json::json!({
+                    "route": origin.route,
+                    "device": origin.device,
+                    "trusted": origin.trusted,
                     "error_kind": connecting_error_kind(&error),
                     "transport_code": connecting_transport_code(&error),
                     "duration_ms": started.elapsed().as_millis() as u64,
@@ -419,7 +354,39 @@ async fn handle_incoming(
     } else if connection.alpn() == relay_check::RELAY_CHECK_ALPN {
         relay_check::answer(connection);
     } else {
-        connection.close(CLOSE_UNKNOWN_PROTOCOL.into(), b"unknown protocol");
+        connection.close(close::UNKNOWN_PROTOCOL.into(), b"unknown protocol");
+    }
+}
+
+/// What an incoming connection reveals about its sender before the handshake. Only a relayed
+/// connection names its endpoint; a direct one is known by address alone, which stays out of logs.
+#[derive(Debug, PartialEq, Eq)]
+struct IncomingOrigin {
+    /// Named `route` because the log redacts every field called `path`.
+    route: &'static str,
+    device: Option<String>,
+    trusted: Option<bool>,
+}
+
+impl IncomingOrigin {
+    fn of(address: &IncomingAddr, devices: &RemoteDevices) -> Self {
+        match address {
+            IncomingAddr::Ip(_) => Self {
+                route: "direct",
+                device: None,
+                trusted: None,
+            },
+            IncomingAddr::Relay { endpoint_id, .. } => Self {
+                route: "relayed",
+                device: Some(endpoint_id.fmt_short().to_string()),
+                trusted: Some(devices.is_trusted(endpoint_id)),
+            },
+            _ => Self {
+                route: "custom",
+                device: None,
+                trusted: None,
+            },
+        }
     }
 }
 
@@ -477,7 +444,7 @@ async fn serve_device(
             "remote_device_refused",
             serde_json::json!({ "device": device_label, "reason": "untrusted" }),
         );
-        connection.close(CLOSE_UNTRUSTED.into(), b"untrusted");
+        connection.close(close::UNTRUSTED.into(), b"untrusted");
         return;
     }
     connections
@@ -493,8 +460,17 @@ async fn serve_device(
         // Named `route` because the log redacts every field called `path`.
         serde_json::json!({ "device": device_label, "route": path_name(&initial_path) }),
     );
+    let tally = Arc::new(Mutex::new(RouteTally::new(started)));
+    tally
+        .lock()
+        .expect("route tally lock poisoned")
+        .observe(is_direct(&initial_path), started);
     devices.device_connected(&device, initial_path);
-    let path_watch = tokio::spawn(watch_path(connection.clone(), devices.clone()));
+    let path_watch = tokio::spawn(watch_path(
+        connection.clone(),
+        devices.clone(),
+        tally.clone(),
+    ));
 
     let mut streams: u64 = 0;
     while let Ok((send, recv)) = connection.accept_bi().await {
@@ -542,50 +518,20 @@ async fn serve_device(
         open.retain(|other| other.stable_id() != connection.stable_id());
     }
     devices.device_disconnected(&device, AppServerTime::now().0);
-    logging::info(
-        "remote_device_disconnected",
-        serde_json::json!({
-            "device": device_label,
-            "duration_ms": elapsed_ms(started),
-            "streams": streams,
-        }),
-    );
-}
-
-/// Reports a move between a direct path and a relay. The loop is silent unless the path changes.
-async fn watch_path(connection: Connection, devices: RemoteDevices) {
-    let device = connection.remote_id();
-    let mut interval = tokio::time::interval(PATH_POLL_INTERVAL);
-    interval.tick().await;
-    let mut route = path_name(&describe(&connection));
-    loop {
-        interval.tick().await;
-        let current = describe(&connection);
-        // A route change can explain a stall on the device's side.
-        if path_name(&current) != route {
-            route = path_name(&current);
-            logging::info(
-                "remote_device_route_changed",
-                serde_json::json!({ "device": device.fmt_short().to_string(), "route": route }),
-            );
-        }
-        devices.device_path_changed(&device, current);
+    let mut fields = serde_json::json!({
+        "device": device_label,
+        "duration_ms": elapsed_ms(started),
+        "streams": streams,
+    });
+    // How long the connection was direct shows whether hole punching ever succeeded.
+    let route = tally
+        .lock()
+        .expect("route tally lock poisoned")
+        .fields(Instant::now());
+    if let (Some(fields), serde_json::Value::Object(route)) = (fields.as_object_mut(), route) {
+        fields.extend(route);
     }
-}
-
-fn describe(connection: &Connection) -> RemoteDeviceConnection {
-    let paths = connection.paths();
-    let selected = paths.iter().find(|path| path.is_selected());
-    match selected.map(|path| path.remote_addr().clone()) {
-        Some(iroh::TransportAddr::Ip(address)) => RemoteDeviceConnection {
-            path: RemoteDevicePath::Direct,
-            address: Some(address.ip().to_string()),
-        },
-        _ => RemoteDeviceConnection {
-            path: RemoteDevicePath::Relayed,
-            address: None,
-        },
-    }
+    logging::info("remote_device_disconnected", fields);
 }
 
 /// Logs a response write that waits on the device, with the QUIC figures that
@@ -623,34 +569,7 @@ fn log_write_stall(
     }
 }
 
-fn path_name(connection: &RemoteDeviceConnection) -> &'static str {
-    match connection.path {
-        RemoteDevicePath::Direct => "direct",
-        RemoteDevicePath::Relayed => "relayed",
-    }
-}
-
-/// What a new device sends to spend an invite.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InviteRequest {
-    /// The invite secret, base32 as it appears in the Pairing Code.
-    pub secret: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-}
-
-/// The outcome of either pairing direction, sent by the App Server.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PairingResult {
-    pub trusted: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_name: Option<String>,
-}
-
-/// Invite direction: the new device connected to us and presents the secret.
+/// The new device connected to us and presents the invite secret.
 async fn accept_invite(connection: Connection, devices: RemoteDevices) {
     let device = connection.remote_id();
     let device_label = device.fmt_short().to_string();
@@ -662,9 +581,7 @@ async fn accept_invite(connection: Connection, devices: RemoteDevices) {
             .await
             .map_err(|_| "read")?;
         let request: InviteRequest = serde_json::from_slice(&message).map_err(|_| "malformed")?;
-        let secret = data_encoding::BASE32_NOPAD
-            .decode(request.secret.to_ascii_uppercase().as_bytes())
-            .map_err(|_| "malformed")?;
+        let secret = request.secret_bytes().ok_or("malformed")?;
         let redeemed = devices.redeem_invite(
             &device,
             &secret,
@@ -692,84 +609,10 @@ async fn accept_invite(connection: Connection, devices: RemoteDevices) {
     });
     if let Err(class) = outcome {
         fields["error_kind"] = serde_json::json!(class);
-        connection.close(CLOSE_UNTRUSTED.into(), b"refused");
+        connection.close(close::UNTRUSTED.into(), b"refused");
         logging::warn("remote_device_invite_redeemed", fields);
     } else {
         logging::info("remote_device_invite_redeemed", fields);
-    }
-}
-
-/// Join-request direction: we connect to the approved device and name ourselves.
-/// It learns our key from the connection, not from anything we send.
-async fn announce_trust(endpoint: Endpoint, device: PublicKey, server_name: String) {
-    let device_label = device.fmt_short().to_string();
-    let started = Instant::now();
-    logging::info(
-        "remote_device_trust_announce_started",
-        serde_json::json!({ "device": device_label }),
-    );
-    for attempt in 1..=ANNOUNCE_ATTEMPTS {
-        let result = tokio::time::timeout(PAIRING_STEP_TIMEOUT, async {
-            let connection = endpoint
-                .connect(device, PAIRING_ALPN)
-                .await
-                .map_err(|_| "connect")?;
-            let (mut send, mut recv) = connection.open_bi().await.map_err(|_| "stream")?;
-            let bytes = serde_json::to_vec(&PairingResult {
-                trusted: true,
-                server_name: Some(server_name.clone()),
-            })
-            .map_err(|_| "encode")?;
-            send.write_all(&bytes).await.map_err(|_| "write")?;
-            send.finish().map_err(|_| "write")?;
-            // The device answers by finishing its side once it stored our key.
-            recv.read_to_end(PAIRING_MESSAGE_LIMIT)
-                .await
-                .map_err(|_| "acknowledge")?;
-            connection.close(0u32.into(), b"done");
-            Ok::<(), &'static str>(())
-        })
-        .await
-        .unwrap_or(Err("timeout"));
-        match result {
-            Ok(()) => {
-                logging::info(
-                    "remote_device_trust_announce_completed",
-                    serde_json::json!({
-                        "device": device_label,
-                        "outcome": "ok",
-                        "attempt": attempt,
-                        "duration_ms": elapsed_ms(started),
-                    }),
-                );
-                return;
-            }
-            Err(class) if attempt == ANNOUNCE_ATTEMPTS => {
-                // The device stays trusted: it can still connect if it learns our key
-                // another way, and the user can remove it from the device list.
-                logging::warn(
-                    "remote_device_trust_announce_completed",
-                    serde_json::json!({
-                        "device": device_label,
-                        "outcome": "failed",
-                        "attempt": attempt,
-                        "error_kind": class,
-                        "duration_ms": elapsed_ms(started),
-                    }),
-                );
-            }
-            Err(class) => {
-                logging::info(
-                    "remote_device_trust_announce_retry",
-                    serde_json::json!({
-                        "device": device_label,
-                        "attempt": attempt,
-                        "error_kind": class,
-                    }),
-                );
-                tokio::time::sleep(ANNOUNCE_RETRY_DELAY).await;
-            }
-        }
     }
 }
 

@@ -31,9 +31,10 @@ use crate::attachment::{
     AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult, AttachmentReleaseOutcome,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
     AttachmentResourceId, AttachmentRevealParams, AttachmentRevealResult,
-    AttachmentRevealSentParams, AttachmentRevealSentResult, EmbeddedAttachmentCandidate,
-    FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind, FileBrowserRoot,
-    PreSendAttachment,
+    AttachmentRevealSentParams, AttachmentRevealSentResult, AttachmentTransferOutcome,
+    AttachmentTransferParams, AttachmentTransferResult, AttachmentTransferStatus,
+    EmbeddedAttachmentCandidate, FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind,
+    FileBrowserRoot, PreSendAttachment,
 };
 use crate::client::{
     AttachedClientSummary, ClientCapabilities, ClientCapabilitiesChangedParams,
@@ -46,11 +47,9 @@ use crate::client::{
     UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
 };
 use crate::devices::{
-    DeviceCollectionSnapshot, DevicesApproveJoinRequestParams, DevicesApproveJoinRequestResult,
-    DevicesCancelInviteParams, DevicesCancelInviteResult, DevicesCreateInviteParams,
-    DevicesCreateInviteResult, DevicesPreviewJoinRequestParams, DevicesPreviewJoinRequestResult,
-    DevicesRemoveParams, DevicesRemoveResult, RemoteAccessState, RemoteDeviceConnection,
-    RemoteDevicePath, RemoteDeviceSummary,
+    DeviceCollectionSnapshot, DevicesCancelInviteParams, DevicesCancelInviteResult,
+    DevicesCreateInviteParams, DevicesCreateInviteResult, DevicesRemoveParams, DevicesRemoveResult,
+    RemoteAccessState, RemoteDeviceConnection, RemoteDevicePath, RemoteDeviceSummary,
 };
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, ClientDiagnosticEvent, ClientDiagnosticEventsParams,
@@ -387,10 +386,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<DevicesCreateInviteResult>(output, config);
     push_decl::<DevicesCancelInviteParams>(output, config);
     push_decl::<DevicesCancelInviteResult>(output, config);
-    push_decl::<DevicesPreviewJoinRequestParams>(output, config);
-    push_decl::<DevicesPreviewJoinRequestResult>(output, config);
-    push_decl::<DevicesApproveJoinRequestParams>(output, config);
-    push_decl::<DevicesApproveJoinRequestResult>(output, config);
     push_decl::<DevicesRemoveParams>(output, config);
     push_decl::<DevicesRemoveResult>(output, config);
     push_decl::<TaskAttentionWaitParams>(output, config);
@@ -480,6 +475,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachmentReleaseOutcome>(output, config);
     push_decl::<AttachmentReleaseParams>(output, config);
     push_decl::<AttachmentReleaseResult>(output, config);
+    push_decl::<AttachmentTransferStatus>(output, config);
+    push_decl::<AttachmentTransferOutcome>(output, config);
+    push_decl::<AttachmentTransferParams>(output, config);
+    push_decl::<AttachmentTransferResult>(output, config);
     push_decl::<AttachmentRevealParams>(output, config);
     push_decl::<AttachmentRevealResult>(output, config);
     push_decl::<AttachmentRevealSentParams>(output, config);

@@ -119,3 +119,45 @@ fn codex_question_metadata_survives_the_compatibility_seam() {
         "random_preference"
     );
 }
+
+/// Claude Code's AskUserQuestion forwards an option's `preview` under the option's `_meta`, and
+/// ACP reserves `_meta` on the schema object and on every enum option. Rejecting either fails the
+/// whole question before the user sees it.
+#[test]
+fn option_and_schema_meta_survive_the_compatibility_seam() {
+    let option_meta = json!({ "_claude/askUserQuestionOption": { "preview": "┌──┐\n│TV│\n└──┘" } });
+    let parsed = ElicitationCreateRequest::parse_message(
+        "elicitation/create",
+        &json!({
+            "sessionId": "session-1",
+            "toolCallId": "toolu-1",
+            "mode": "form",
+            "message": "Which side?",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "question_0": { "type": "string", "title": "Outline", "oneOf": [
+                        { "const": "East", "title": "East", "_meta": option_meta.clone() }
+                    ] },
+                    "question_1": { "type": "array", "items": { "anyOf": [
+                        { "const": "West", "title": "West", "_meta": option_meta.clone() }
+                    ] } }
+                },
+                "_meta": { "vendor": { "version": 1 } }
+            }
+        }),
+    )
+    .unwrap();
+
+    let serialized = serde_json::to_value(parsed).unwrap();
+    let schema = &serialized["requestedSchema"];
+    assert_eq!(
+        schema["properties"]["question_0"]["oneOf"][0]["_meta"],
+        option_meta
+    );
+    assert_eq!(
+        schema["properties"]["question_1"]["items"]["anyOf"][0]["_meta"],
+        option_meta
+    );
+    assert_eq!(schema["_meta"]["vendor"]["version"], 1);
+}

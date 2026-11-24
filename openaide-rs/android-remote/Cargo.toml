@@ -1,0 +1,22 @@
+[package]
+name = "openaide-android-remote"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The Mobile App as a Remote Device (ADR-0062): the shared node of
+# openaide-remote-client, exposed to Kotlin through UniFFI.
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+iroh.workspace = true
+openaide-remote-client = { workspace = true, default-features = false, features = ["pairing"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uniffi = "0.32"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
