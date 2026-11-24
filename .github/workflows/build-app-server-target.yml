@@ -32,6 +32,9 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
+          # The job id alone is `build`, as is CI's Production build on the same Linux
+          # runner; without the target the two would restore each other's caches.
+          key: ${{ inputs.target }}
           # Only main saves: PR and tag caches cannot be reused elsewhere, and their
           # churn evicts main's caches past the repository's 10 GB limit.
           save-if: ${{ github.ref == 'refs/heads/main' }}
