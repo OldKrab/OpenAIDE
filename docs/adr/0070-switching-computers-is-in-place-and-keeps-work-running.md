@@ -1,6 +1,6 @@
 # Switching Computers Is In Place and Keeps Work Running
 
-Status: accepted
+Status: accepted; the switcher's last item opens Use another computer per ADR-0081
 
 The Desktop App and the Mobile App let the user switch the computer in use from the Task navigation, without visiting Settings and without restarting. Switching changes which App Server the App Shell renders; it never stops work on the computer left behind. This replaces two choices of [ADR-0063](0063-desktop-can-use-another-computers-app-server.md): that a change restarts the Desktop, and that a Desktop using another computer starts no App Server. It applies to every kind of computer: this one, a paired computer, and an SSH Computer ([ADR-0069](0069-ssh-computers-are-started-like-termux.md)).
 

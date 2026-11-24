@@ -1,6 +1,6 @@
 # Desktop Can Use Another Computer's App Server
 
-Status: accepted; restart and App Server choices superseded by ADR-0070
+Status: accepted; restart and App Server choices superseded by ADR-0070; the two Pairing Code implementations replaced by a shared crate in ADR-0081
 
 The Desktop App on one computer can work with the App Server of another computer, the same way the Mobile App does ([ADR-0062](0062-remote-devices-are-app-server-clients.md)). It pairs by Pairing Code, is trusted by its own key pair, and reaches the other App Server over iroh. No account, address, or password is involved.
 
