@@ -1,0 +1,40 @@
+name: Prune Superseded Caches
+
+# Main's CI caches and the release builds' caches nearly fill the repository's 10 GB.
+# A lockfile change saves a new set beside the old one, and GitHub evicts by last
+# access, so without this the release caches, touched only by artifact runs, go first
+# and the next artifact build compiles from scratch. These are the workflows that save
+# caches on main; their completion, failed or not, is when replaced caches appear.
+on:
+  workflow_run:
+    workflows: [CI, Android, Build Release Artifacts]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: prune-caches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Delete caches a newer one replaced
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: .node-version
+      # TODO: GitHub evicts hourly, so a sweep between a run's first save and this job
+      # can still take release caches. Pruning inside each job before its cache saves
+      # would close that gap, but needs each job's restore key, which rust-cache does
+      # not expose.
+      - name: Delete superseded caches on main
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/prune-superseded-caches.mjs
