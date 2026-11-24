@@ -50,6 +50,21 @@ export function getClientInstanceId(
   return id;
 }
 
+/**
+ * Drops this tab's client instance id, so the next page load connects as a new
+ * client. A shell calls it before it reloads onto another computer: an App Server
+ * still holding the old id in its reconnect grace would otherwise hand back that
+ * client's state (ADR-0070). The tab keeps its own id.
+ */
+export function forgetClientInstanceId(storage = availableSessionStorage()) {
+  memoryClientIdentity = undefined;
+  try {
+    storage?.removeItem(CLIENT_INSTANCE_ID_KEY);
+  } catch {
+    // Blocked storage never held the id; the memory identity is already gone.
+  }
+}
+
 export function clientInstanceIdForBootstrap(bootstrap: WebviewBootstrap): ClientInstanceId {
   if (bootstrap.surface !== "invalid" && bootstrap.clientInstanceId) {
     return bootstrap.clientInstanceId as ClientInstanceId;

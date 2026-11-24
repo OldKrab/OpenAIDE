@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClientInstanceId } from "@openaide/app-server-client";
-import { getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "./backendInitialization";
+import { forgetClientInstanceId, getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "./backendInitialization";
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
@@ -139,6 +139,26 @@ describe("backend initialization", () => {
       name: duplicatedTab.name,
       navigationType: "reload",
     })).toBe(duplicatedId);
+  });
+
+  it("connects as a new client after the shell forgets the id, in the same tab", () => {
+    const storage = memoryStorage();
+    const tab = { name: "", navigationType: "reload" as const };
+    let next = 0;
+    vi.stubGlobal("crypto", { randomUUID: () => `client-${(next += 1)}` });
+    const before = getClientInstanceId(storage, tab);
+    const tabName = tab.name;
+
+    forgetClientInstanceId(storage);
+    const after = getClientInstanceId(storage, tab);
+
+    expect(after).not.toBe(before);
+    expect(storage.getItem("openaide.clientInstanceId")).toBe(after);
+    // The tab itself is the same one: a reload keeps the new id.
+    expect(tab.name).toBe(tabName);
+    expect(getClientInstanceId(storage, { name: tab.name, navigationType: "reload" })).toBe(after);
+
+    vi.unstubAllGlobals();
   });
 
   it("falls back to memory when storage is unavailable", () => {

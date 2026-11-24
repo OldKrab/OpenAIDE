@@ -28,6 +28,7 @@ import {
 import { writeBrowserClipboardText } from "../../../packages/frontend/src/shells/browserClipboard";
 import { createWebSecretStore } from "./webSecretVault";
 import { createWebSecretMessageHandler } from "./webSecrets";
+import { createWebComputers } from "./webComputers";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
 const logger = createRuntimeLogger("openaide-webview");
@@ -113,10 +114,17 @@ export function createWebAppShell(): FrontendShell {
   const taskNotifications = connectionSettings ? undefined : createWebTaskNotificationManager(
     webTaskNotificationEnvironment((taskId) => navigate(`/task/${encodeURIComponent(taskId)}`)),
   );
+  // The Android App keeps its computers natively; in a browser the Web App's server keeps them (ADR-0082).
+  const computers = connectionSettings?.computers ?? createWebComputers({
+    pinned: document.body.dataset.computerId || undefined,
+    fetch: (input, init) => window.fetch(input, init),
+    reload: () => window.location.reload(),
+    log: (level, event, fields) => logger[level](event, fields),
+  });
   return {
     appearance,
     connectionSettings,
-    computers: connectionSettings?.computers,
+    computers,
     bootstrap,
     clipboard: { writeText: writeBrowserClipboardText },
     // The Android App opens its camera for a capture input; browsers vary, and Chrome already offers one.
