@@ -165,6 +165,8 @@ fn a_failed_history_leaves_the_rest_of_its_batch_committed() {
     );
 }
 
+// A read-only directory mode is how this test fails the write.
+#[cfg(unix)]
 #[test]
 fn a_failed_catalog_write_keeps_the_catalog_revision_rising() {
     use std::os::unix::fs::PermissionsExt;

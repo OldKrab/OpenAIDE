@@ -64,7 +64,6 @@ use std::fs;
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
