@@ -16,8 +16,10 @@ use openaide_app_server_protocol::devices::{
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
 mod bridge;
+#[cfg(test)]
+pub(crate) use bridge::BridgeTarget;
 pub mod edge;
-mod host_name;
+pub(crate) mod host_name;
 mod network_watch;
 mod relay_check;
 mod store;

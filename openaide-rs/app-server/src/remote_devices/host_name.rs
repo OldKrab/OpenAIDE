@@ -3,7 +3,7 @@
 const FALLBACK: &str = "This computer";
 
 #[cfg(unix)]
-pub(super) fn host_name() -> String {
+pub(crate) fn host_name() -> String {
     nix::unistd::gethostname()
         .ok()
         .and_then(|name| name.into_string().ok())
@@ -13,7 +13,7 @@ pub(super) fn host_name() -> String {
 }
 
 #[cfg(not(unix))]
-pub(super) fn host_name() -> String {
+pub(crate) fn host_name() -> String {
     std::env::var("COMPUTERNAME")
         .ok()
         .map(|name| openaide_remote_core::clamp_label(&name))

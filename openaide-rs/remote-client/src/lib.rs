@@ -15,6 +15,8 @@ mod client;
 #[cfg(feature = "pairing")]
 mod gateway;
 #[cfg(feature = "pairing")]
+pub mod messages;
+#[cfg(feature = "pairing")]
 mod net_report;
 #[cfg(feature = "pairing")]
 mod relay_limits;
