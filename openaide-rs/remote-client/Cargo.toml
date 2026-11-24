@@ -26,4 +26,7 @@ thiserror.workspace = true
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+# The node's tests run App Servers on the in-memory network.
+openaide-remote-core = { workspace = true, features = ["test-network"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
