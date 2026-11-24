@@ -58,6 +58,15 @@ fn a_damaged_invite_is_named_as_damaged() {
 }
 
 #[test]
+fn a_code_is_recognized_by_the_key_of_the_app_server_that_made_it() {
+    let invite = invite(5);
+
+    assert!(invite.is_from(&key(1).to_string()));
+    assert!(!invite.is_from(&key(2).to_string()));
+    assert!(!invite.is_from("not a key"));
+}
+
+#[test]
 fn labels_are_clamped_on_a_character_boundary_without_control_characters() {
     let long = "é".repeat(60);
 

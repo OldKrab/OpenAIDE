@@ -50,6 +50,17 @@ test('permission and sign-in are separate guided steps', () => {
   } finally { view.close(); }
 });
 
+test('the first screen offers to use another computer, which says this phone uses it and where its code is', () => {
+  const view = setup();
+  try {
+    view.document.querySelector('[data-screen="remote"]').click();
+    assert.equal(view.document.querySelector('h1').textContent, 'Use another computer');
+    assert.equal(view.document.querySelector('.direction').getAttribute('aria-label'), 'This phone uses a computer');
+    assert.equal(view.document.querySelector('.path').getAttribute('aria-label'), 'Settings, then Remote, then Add a device');
+    assert.equal(view.document.querySelector('#pair-form button[type="submit"]').textContent, 'Connect');
+  } finally { view.close(); }
+});
+
 test('pairing asks for a code, never an address or password, and keeps a pasted code through progress', () => {
   const view = setup({ initial: 'remote' });
   try {
@@ -87,7 +98,7 @@ test('settings list every place, mark the one in use and switch to the one tappe
     assert.equal(view.document.querySelectorAll('.row.current').length, 1);
     view.document.querySelector('[data-action="use_computer"]').click();
     assert.deepEqual(view.actions.at(-1), { action: 'use_computer', id: 'b'.repeat(64) });
-    assert.match(view.document.querySelector('[data-action="remote_screen"]').textContent, /Add another computer/);
+    assert.match(view.document.querySelector('[data-action="remote_screen"]').textContent, /Use another computer/);
   } finally { view.close(); }
 });
 
@@ -127,7 +138,7 @@ test('a build without an App Server says so where it would be needed, not after 
     assert.match(local.document.querySelector('h1').textContent, /This build can’t set up this phone/);
     assert.equal(local.document.querySelectorAll('[data-action="install"]').length, 0);
     local.document.querySelector('[data-action="remote_screen"]').click();
-    assert.equal(local.document.querySelector('h1').textContent, 'Pair with your computer');
+    assert.equal(local.document.querySelector('h1').textContent, 'Use another computer');
   } finally { local.close(); }
   // A runtime already in Termux keeps working: only a missing one needs this build's copy.
   const installed = setup({ initial: 'local', phoneAvailable: false });
@@ -138,7 +149,7 @@ test('unsupported phones offer a remote workspace instead of repeated installati
   const view = setup({ initial: 'local', checks: { ...ready, arm64: false } });
   try {
     view.document.querySelector('[data-action="remote_screen"]').click();
-    assert.equal(view.document.querySelector('h1').textContent, 'Pair with your computer');
+    assert.equal(view.document.querySelector('h1').textContent, 'Use another computer');
     assert.equal(view.document.querySelectorAll('[data-action="install"]').length, 0);
   } finally { view.close(); }
 });

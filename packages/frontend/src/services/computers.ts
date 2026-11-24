@@ -25,6 +25,13 @@ export type ComputersSnapshot = {
 };
 
 /**
+ * The computer whose App Server this shell uses, named by the key its Pairing Codes
+ * carry (the devices snapshot's `serverKey`) and its name. A shell refuses a code that
+ * computer made, so the device it was meant for can still use it (ADR-0081).
+ */
+export type ComputerInUse = { key: string; name: string };
+
+/**
  * What a switch request came to. `switched` means the shell is replacing the
  * page with the computer chosen; the other two leave the page as it is.
  */
@@ -49,8 +56,11 @@ export type ComputersCapability = {
   cancel?(): Promise<void>;
   /** Forgetting the computer in use moves to this device first. */
   forget(id: string): Promise<void>;
-  /** Spends the invite code another computer shows; absent where pairing has its own screen. */
-  pair?(code: string): Promise<void>;
+  /**
+   * Spends the invite code another computer shows; absent where pairing has its own screen.
+   * Rejects with a sentence for the user, including when the code is `inUse`'s own.
+   */
+  pair?(code: string, inUse?: ComputerInUse): Promise<void>;
   /** Opens the shell's own pairing screen; absent where pairing takes a code in place. */
   openPairing?(): Promise<void>;
   /** Present in shells that can start the App Server on SSH Computers. */
