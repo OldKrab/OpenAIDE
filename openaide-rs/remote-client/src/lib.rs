@@ -17,8 +17,6 @@ mod gateway;
 #[cfg(feature = "pairing")]
 mod net_report;
 #[cfg(feature = "pairing")]
-mod pairing_code;
-#[cfg(feature = "pairing")]
 mod relay_limits;
 mod ssh;
 
@@ -29,8 +27,8 @@ pub type Logger = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
 
 #[cfg(feature = "pairing")]
 pub use client::{
-    application_alpn, bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure,
-    PairedServer, RemoteClient,
+    bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure, PairedServer,
+    RemoteClient,
 };
 #[cfg(feature = "pairing")]
 pub use gateway::Gateway;
@@ -38,8 +36,9 @@ pub use gateway::Gateway;
 pub use iroh::{Endpoint, PublicKey, SecretKey};
 #[cfg(feature = "pairing")]
 pub use net_report::watch_net_report;
+/// The code format and protocols shared with the App Server (ADR-0081).
 #[cfg(feature = "pairing")]
-pub use pairing_code::{clamp_label, InviteCode, PairingCodeError};
+pub use openaide_remote_core::{application_alpn, clamp_label, InviteCode, PairingCodeError};
 #[cfg(feature = "pairing")]
 pub use relay_limits::watch_relay_rate_limits;
 #[cfg(feature = "release-archive")]

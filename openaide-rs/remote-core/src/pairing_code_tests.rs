@@ -47,7 +47,15 @@ fn decoding_names_the_wrong_kind_of_code() {
 
     assert_eq!(JoinCode::decode(&invite), Err(PairingCodeError::WrongKind));
     assert_eq!(
+        InviteCode::decode("OAJ1ABCD"),
+        Err(PairingCodeError::WrongKind)
+    );
+    assert_eq!(
         JoinCode::decode("https://example.test"),
+        Err(PairingCodeError::NotAPairingCode)
+    );
+    assert_eq!(
+        InviteCode::decode("hello"),
         Err(PairingCodeError::NotAPairingCode)
     );
 }
@@ -76,6 +84,31 @@ fn decoding_rejects_damaged_and_unnamed_codes() {
     }
     .encode();
     assert_eq!(JoinCode::decode(&unnamed), Err(PairingCodeError::Malformed));
+
+    let invite = InviteCode {
+        server: key(1),
+        secret: [9; INVITE_SECRET_LEN],
+    }
+    .encode();
+    assert_eq!(
+        InviteCode::decode(&invite[..invite.len() - 4]),
+        Err(PairingCodeError::Malformed)
+    );
+}
+
+#[test]
+fn the_secret_travels_as_base32_like_the_code() {
+    let invite = InviteCode {
+        server: key(1),
+        secret: [9; INVITE_SECRET_LEN],
+    };
+    let request = crate::InviteRequest {
+        secret: invite.secret_text().to_lowercase(),
+        name: "Phone".to_string(),
+        model: None,
+    };
+
+    assert_eq!(request.secret_bytes(), Some(invite.secret.to_vec()));
 }
 
 #[test]

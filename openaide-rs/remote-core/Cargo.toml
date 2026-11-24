@@ -1,0 +1,21 @@
+[package]
+name = "openaide-remote-core"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Networks a test runs itself: addresses shared in memory, or its own relay with an
+# unverified certificate. Only dev-dependencies enable it.
+test-network = ["iroh/test-utils"]
+
+[dependencies]
+data-encoding.workspace = true
+iroh.workspace = true
+openaide-app-server-protocol.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

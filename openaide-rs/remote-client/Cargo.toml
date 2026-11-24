@@ -8,7 +8,7 @@ publish.workspace = true
 [features]
 default = ["pairing"]
 # Remote Devices over iroh (ADR-0062).
-pairing = ["dep:data-encoding", "dep:iroh", "dep:tokio"]
+pairing = ["dep:data-encoding", "dep:iroh", "dep:openaide-remote-core", "dep:tokio"]
 # Unpacking the published Linux App Server archive for SSH Computers.
 release-archive = ["dep:flate2", "dep:sha2", "dep:tar"]
 
@@ -17,6 +17,7 @@ data-encoding = { workspace = true, optional = true }
 flate2 = { version = "1", optional = true }
 iroh = { workspace = true, optional = true }
 openaide-app-server-protocol.workspace = true
+openaide-remote-core = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha2 = { version = "0.11", optional = true }

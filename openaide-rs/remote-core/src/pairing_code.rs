@@ -1,8 +1,12 @@
 //! Pairing Codes: the plain text a QR code carries between two devices.
 //!
 //! An invite names the App Server and holds a single-use secret. A join request
-//! names the new device and its self-reported labels. Both are base32 so a QR
-//! code can use its compact alphanumeric mode and a user can paste them.
+//! names the new device and the labels it reports for itself. Both codes are
+//! base32, so a QR code can use its compact alphanumeric mode and a user can
+//! paste the text.
+//
+// TODO(ADR-0081): remove `JoinCode` together with the join-request protocol
+// methods in the next major version of the App Server Protocol.
 
 use data_encoding::BASE32_NOPAD;
 use iroh::PublicKey;
@@ -10,43 +14,49 @@ use iroh::PublicKey;
 const INVITE_PREFIX: &str = "OAI1";
 const JOIN_PREFIX: &str = "OAJ1";
 const KEY_LEN: usize = 32;
-pub(crate) const INVITE_SECRET_LEN: usize = 16;
+/// The length of an invite's single-use secret, in bytes.
+pub const INVITE_SECRET_LEN: usize = 16;
 /// Labels are shown to the user, so they stay short enough for one row.
-pub(crate) const MAX_LABEL_BYTES: usize = 64;
+pub const MAX_LABEL_BYTES: usize = 64;
 
+/// An invite: the App Server to reach and the single-use secret to present.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InviteCode {
+pub struct InviteCode {
     pub server: PublicKey,
     pub secret: [u8; INVITE_SECRET_LEN],
 }
 
+/// A join request: the new device's key and the labels it reports for itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct JoinCode {
+pub struct JoinCode {
     pub device: PublicKey,
     pub name: String,
     pub model: Option<String>,
 }
 
+/// Why a text is not a code of the expected kind. Each end words the message
+/// for its own users, because only that end knows which action the user took.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum PairingCodeError {
+pub enum PairingCodeError {
     #[error("this is not an OpenAIDE pairing code")]
     NotAPairingCode,
-    #[error("this code adds a device to a computer; open it on the new device")]
+    /// A code of the other direction, such as an invite where a join request
+    /// was expected.
+    #[error("this is the other kind of pairing code")]
     WrongKind,
-    #[error("the pairing code is damaged; read it again")]
+    #[error("the pairing code is damaged")]
     Malformed,
 }
 
 impl InviteCode {
-    pub(crate) fn encode(&self) -> String {
+    pub fn encode(&self) -> String {
         let mut bytes = Vec::with_capacity(KEY_LEN + INVITE_SECRET_LEN);
         bytes.extend_from_slice(self.server.as_bytes());
         bytes.extend_from_slice(&self.secret);
         format!("{INVITE_PREFIX}{}", BASE32_NOPAD.encode(&bytes))
     }
 
-    #[cfg(test)]
-    pub(crate) fn decode(code: &str) -> Result<Self, PairingCodeError> {
+    pub fn decode(code: &str) -> Result<Self, PairingCodeError> {
         let bytes = decode_payload(code, INVITE_PREFIX, JOIN_PREFIX)?;
         if bytes.len() != KEY_LEN + INVITE_SECRET_LEN {
             return Err(PairingCodeError::Malformed);
@@ -58,11 +68,15 @@ impl InviteCode {
                 .map_err(|_| PairingCodeError::Malformed)?,
         })
     }
+
+    /// The secret in the form the pairing exchange carries it: base32, like the code.
+    pub fn secret_text(&self) -> String {
+        BASE32_NOPAD.encode(&self.secret)
+    }
 }
 
 impl JoinCode {
-    #[cfg(test)]
-    pub(crate) fn encode(&self) -> String {
+    pub fn encode(&self) -> String {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(self.device.as_bytes());
         push_label(&mut bytes, &self.name);
@@ -70,7 +84,7 @@ impl JoinCode {
         format!("{JOIN_PREFIX}{}", BASE32_NOPAD.encode(&bytes))
     }
 
-    pub(crate) fn decode(code: &str) -> Result<Self, PairingCodeError> {
+    pub fn decode(code: &str) -> Result<Self, PairingCodeError> {
         let bytes = decode_payload(code, JOIN_PREFIX, INVITE_PREFIX)?;
         if bytes.len() < KEY_LEN {
             return Err(PairingCodeError::Malformed);
@@ -90,8 +104,9 @@ impl JoinCode {
     }
 }
 
-/// Trims a self-reported label to what one row can show, on a character boundary.
-pub(crate) fn clamp_label(label: &str) -> String {
+/// Trims a self-reported label to what one row can show. The cut falls on a
+/// character boundary, and control characters are dropped.
+pub fn clamp_label(label: &str) -> String {
     let label = label.trim();
     let mut end = label.len().min(MAX_LABEL_BYTES);
     while !label.is_char_boundary(end) {
@@ -108,7 +123,8 @@ fn decode_payload(
     prefix: &str,
     other_prefix: &str,
 ) -> Result<Vec<u8>, PairingCodeError> {
-    // A pasted code may carry the spaces, dashes, or case a person or app added.
+    // A pasted code may carry spaces, dashes, or a change of case that a person or
+    // an app added.
     let code: String = code
         .chars()
         .filter(|character| !character.is_whitespace() && *character != '-')
@@ -131,9 +147,9 @@ fn public_key(bytes: &[u8]) -> Result<PublicKey, PairingCodeError> {
     PublicKey::from_bytes(bytes).map_err(|_| PairingCodeError::Malformed)
 }
 
-#[cfg(test)]
 fn push_label(bytes: &mut Vec<u8>, label: &str) {
     let label = clamp_label(label);
+    // `clamp_label` keeps a label within MAX_LABEL_BYTES, so its length fits in one byte.
     bytes.push(label.len() as u8);
     bytes.extend_from_slice(label.as_bytes());
 }
