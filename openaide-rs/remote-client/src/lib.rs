@@ -30,7 +30,7 @@ pub type Logger = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
 #[cfg(feature = "pairing")]
 pub use client::{
     bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure, PairedServer,
-    RemoteClient,
+    RemoteClient, CONNECT_TIMEOUT,
 };
 #[cfg(feature = "pairing")]
 pub use gateway::Gateway;
