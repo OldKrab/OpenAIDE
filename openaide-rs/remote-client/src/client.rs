@@ -21,7 +21,7 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const ROUND_TRIP_REQUEST: &[u8] = b"OPTIONS /probe HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
 /// The App Server completes the handshake before it checks the key, so a removed
 /// device learns it from the close that follows.
-const REFUSAL_WAIT: Duration = Duration::from_millis(400);
+pub(crate) const REFUSAL_WAIT: Duration = Duration::from_millis(400);
 
 pub use crate::Logger;
 
@@ -34,6 +34,9 @@ pub enum Failure {
     NotTrusted,
     #[error("the computer runs an incompatible version")]
     Incompatible,
+    /// This device's own key could not be read or kept; the computer was not tried.
+    #[error("this device's secure storage is unavailable")]
+    Storage,
 }
 
 impl Failure {
@@ -42,6 +45,7 @@ impl Failure {
             Self::Unreachable => "unreachable",
             Self::NotTrusted => "not_trusted",
             Self::Incompatible => "incompatible",
+            Self::Storage => "storage",
         }
     }
 }
@@ -76,7 +80,16 @@ pub fn device_key_from_text(text: &str) -> Option<SecretKey> {
 /// Logs each time the endpoint gains or loses its home relay, for as long as it
 /// lives: without a relay a remote App Server can be reached only directly.
 pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
-    let endpoint = Network::Public
+    bind_on(&Network::Public, key, log).await
+}
+
+/// Binds as [`bind`] does, on `network`; tests pass a network of their own.
+pub(crate) async fn bind_on(
+    network: &Network,
+    key: SecretKey,
+    log: Logger,
+) -> Result<Endpoint, Failure> {
+    let endpoint = network
         .builder()
         .secret_key(key)
         // Phones on mobile data lose the direct path as soon as a bulk send starts while
@@ -90,6 +103,7 @@ pub async fn bind(key: SecretKey, log: Logger) -> Result<Endpoint, Failure> {
         .bind()
         .await
         .map_err(|_| Failure::Unreachable)?;
+    network.on_bound(&endpoint);
     crate::watch_relay_rate_limits(&endpoint, log.clone(), "remote_endpoint_relay_rate_limited");
     crate::watch_net_report(&endpoint, log.clone(), "remote_endpoint_network_changed");
     let mut statuses = endpoint.home_relay_status();
@@ -378,7 +392,7 @@ impl RemoteClient {
     }
 }
 
-fn failure_of(reason: &ConnectionError) -> Failure {
+pub(crate) fn failure_of(reason: &ConnectionError) -> Failure {
     let ConnectionError::ApplicationClosed(close) = reason else {
         return Failure::Unreachable;
     };
@@ -390,7 +404,7 @@ fn failure_of(reason: &ConnectionError) -> Failure {
 }
 
 /// Names how far a failed attempt got, from the error's variant alone.
-fn connect_stage(error: &ConnectError) -> &'static str {
+pub(crate) fn connect_stage(error: &ConnectError) -> &'static str {
     match error {
         ConnectError::Connect { source, .. } => match source {
             ConnectWithOptsError::NoAddress { .. } => "no_address",
@@ -415,7 +429,7 @@ fn relay_connected(endpoint: &Endpoint) -> bool {
 /// transport reports only as text.
 // TODO: match the transport's crypto error code once iroh exposes it on the
 // connect error; the wording is not a contract.
-fn names_no_protocol(error: &str) -> bool {
+pub(crate) fn names_no_protocol(error: &str) -> bool {
     error.contains("error 120") || error.contains("any known protocol")
 }
 
@@ -431,6 +445,6 @@ fn path_name(connection: &Connection) -> &'static str {
     }
 }
 
-fn elapsed_ms(started: Instant) -> u64 {
+pub(crate) fn elapsed_ms(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }

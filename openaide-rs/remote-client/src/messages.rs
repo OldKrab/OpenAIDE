@@ -47,5 +47,8 @@ pub fn unusable(failure: Failure, name: &str) -> String {
         Failure::Incompatible => format!(
             "OpenAIDE on this computer and on {name} are different versions. Update both, then try again."
         ),
+        Failure::Storage => {
+            "Secure storage is unavailable. Restart OpenAIDE and try again.".to_string()
+        }
     }
 }
