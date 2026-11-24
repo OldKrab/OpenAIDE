@@ -23,6 +23,7 @@ use http::{
     write_event_stream_heartbeat, write_file_download, write_http_response,
 };
 use session_socket::handle_session_socket;
+pub(crate) use session_socket::SessionSocketTimeouts;
 use terminal_socket::handle_terminal_socket;
 use uploads::handle_file_upload;
 

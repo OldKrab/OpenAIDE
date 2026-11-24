@@ -30,9 +30,6 @@ use super::websocket::{
 use super::{LocalHttpProbeListenerError, LocalHttpRequest};
 
 const TRANSPORT_VERSION: u64 = 1;
-const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
-/// Each side pings well inside this window, so silence means a dead peer.
-const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// A client whose timers are throttled still answers a ping from its message
 /// handler, which keeps a hidden but healthy page inside the idle window.
 const SERVER_PING_INTERVAL: Duration = Duration::from_secs(10);
@@ -41,6 +38,25 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const PUMP_FALLBACK_WAKE: Duration = Duration::from_millis(250);
 /// Matches the largest client frame the chunked HTTP upload accepts.
 const MAX_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
+
+/// Read deadlines of a session socket. The handler owns them so a test can
+/// shorten one without making the others race a loaded runner.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SessionSocketTimeouts {
+    /// How long a client has after the upgrade to send its hello.
+    pub(crate) hello: Duration,
+    /// Each side pings well inside this window, so silence means a dead peer.
+    pub(crate) read_idle: Duration,
+}
+
+impl Default for SessionSocketTimeouts {
+    fn default() -> Self {
+        Self {
+            hello: Duration::from_secs(10),
+            read_idle: Duration::from_secs(30),
+        }
+    }
+}
 
 const CLOSE_NORMAL: u16 = 1000;
 const CLOSE_SUPERSEDED: u16 = 4000;
@@ -176,14 +192,19 @@ pub(super) fn handle_session_socket(
         );
     };
     let started_at = Instant::now();
+    let timeouts = handler.session_socket_timeouts();
     stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
+    stream.set_read_timeout(Some(timeouts.hello))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     // A conforming client sends nothing before the 101, so bytes the request
     // parser may have read past the headers are not carried over.
     write_handshake(stream, key)?;
     let socket = Socket::new(stream.try_clone()?);
-    let mut reader = MessageReader::new(BufReader::new(stream.try_clone()?), MAX_MESSAGE_BYTES);
+    // Read through `stream` itself, never a clone. On Windows a cloned socket
+    // keeps the receive timeout it had when cloned, so the idle deadline set
+    // below would not reach it and the hello deadline would stay in force.
+    let stream: &TcpStream = stream;
+    let mut reader = MessageReader::new(BufReader::new(stream), MAX_MESSAGE_BYTES);
 
     let link = match open_link(&mut reader, handler, request.authorization.as_deref()) {
         Ok(link) => link,
@@ -217,18 +238,19 @@ pub(super) fn handle_session_socket(
         "serverId": link.server_id(),
         "receivedThrough": link.client_received_through(),
     }));
-    stream.set_read_timeout(Some(READ_IDLE_TIMEOUT))?;
+    stream.set_read_timeout(Some(timeouts.read_idle))?;
 
     let signal = link.delivery_signal();
     // Unbounded on purpose: a full queue would stall the reader, and with it
     // the pong replies the client uses to tell a busy server from a dead one.
     let (frames, queued_frames) = mpsc::channel::<(u64, Value)>();
-    std::thread::scope(|scope| {
+    let client_silence = std::thread::scope(|scope| {
         scope.spawn(|| pump(&link, &socket, written_through));
         scope.spawn(|| dispatch(&link, handler, &socket, queued_frames));
-        read(&mut reader, &link, &socket, frames);
+        let client_silence = read(&mut reader, &link, &socket, frames);
         // The pump may be parked on the signal; let it observe the end now.
         signal.notify();
+        client_silence
     });
     logging::info(
         "session_socket_closed",
@@ -239,6 +261,10 @@ pub(super) fn handle_session_socket(
             "frames_received": socket.frames_received.load(Ordering::Relaxed),
             "frames_sent": socket.frames_sent.load(Ordering::Relaxed),
             "duration_ms": started_at.elapsed().as_millis(),
+            // An idle timeout whose silence is shorter than its limit means
+            // the deadline in force was not the one configured.
+            "client_silence_ms": client_silence.as_millis(),
+            "read_idle_limit_ms": timeouts.read_idle.as_millis(),
         }),
     );
     Ok(())
@@ -247,14 +273,14 @@ pub(super) fn handle_session_socket(
 /// Reads the hello and binds the link. Returns the link, whether it resumed a
 /// session, and the client's cursor into the server sequence.
 fn open_link(
-    reader: &mut MessageReader<BufReader<TcpStream>>,
+    reader: &mut MessageReader<BufReader<&TcpStream>>,
     handler: &LocalHttpAppHandler,
     upgrade_authorization: Option<&str>,
 ) -> Result<(SessionLink, bool, u64), (&'static str, Option<u16>)> {
     let hello = match reader.read() {
         Ok(Incoming::Text(text)) => serde_json::from_str::<ClientMessage>(&text).ok(),
         Ok(_) => None,
-        Err(error) => return Err((read_failure_reason(&error), None)),
+        Err(error) => return Err((read_failure_reason(&error, "hello_timeout"), None)),
     };
     let Some(ClientMessage::Hello {
         transport_version,
@@ -287,28 +313,32 @@ fn open_link(
     Ok((link, session_id.is_some(), received_through))
 }
 
+/// Reads client messages until the socket ends. Returns how long the client
+/// had been silent by then.
 fn read(
-    reader: &mut MessageReader<BufReader<TcpStream>>,
+    reader: &mut MessageReader<BufReader<&TcpStream>>,
     link: &SessionLink,
     socket: &Socket,
     frames: mpsc::Sender<(u64, Value)>,
-) {
+) -> Duration {
+    let mut last_received = Instant::now();
     loop {
         let incoming = match reader.read() {
             Ok(incoming) => incoming,
             Err(error) => {
-                let reason = read_failure_reason(&error);
+                let reason = read_failure_reason(&error, "idle_timeout");
                 let code =
                     (error.kind() == ErrorKind::InvalidData).then_some(CLOSE_PROTOCOL_VIOLATION);
                 socket.end(reason, code);
-                return;
+                break;
             }
         };
+        last_received = Instant::now();
         let text = match incoming {
             Incoming::Text(text) => text,
             Incoming::Binary(_) => {
                 socket.end("unsupported_frame", Some(CLOSE_PROTOCOL_VIOLATION));
-                return;
+                break;
             }
             Incoming::Ping(payload) => {
                 socket.pong(&payload);
@@ -317,29 +347,30 @@ fn read(
             Incoming::Pong => continue,
             Incoming::Close => {
                 socket.end("client_closed", Some(CLOSE_NORMAL));
-                return;
+                break;
             }
         };
         match serde_json::from_str::<ClientMessage>(&text) {
             Ok(ClientMessage::Frame { sequence, message }) => {
                 if frames.send((sequence, message)).is_err() {
-                    return;
+                    break;
                 }
             }
             Ok(ClientMessage::Ack { through }) => {
                 if let Err(close) = link.acknowledge(through) {
                     socket.close(close);
-                    return;
+                    break;
                 }
             }
             Ok(ClientMessage::Ping) => socket.send(&json!({ "type": "pong" })),
             Ok(ClientMessage::Pong) => {}
             Ok(ClientMessage::Hello { .. }) | Err(_) => {
                 socket.end("invalid_message", Some(CLOSE_PROTOCOL_VIOLATION));
-                return;
+                break;
             }
         }
     }
+    last_received.elapsed()
 }
 
 /// Keeps client frames ordered. Runs apart from the reader so a slow RPC
@@ -406,9 +437,11 @@ fn pump(link: &SessionLink, socket: &Socket, mut written_through: u64) {
     }
 }
 
-fn read_failure_reason(error: &std::io::Error) -> &'static str {
+/// `timed_out` names the deadline that was in force, so a log tells the hello
+/// deadline from the idle one.
+fn read_failure_reason(error: &std::io::Error, timed_out: &'static str) -> &'static str {
     match error.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => "idle_timeout",
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => timed_out,
         ErrorKind::InvalidData => "protocol_violation",
         ErrorKind::UnexpectedEof | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
             "peer_disconnected"

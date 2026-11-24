@@ -43,6 +43,7 @@ pub struct LocalHttpAppHandler {
     probe: LocalHttpProbeHandler,
     protocol: LocalHttpProtocolHandler,
     uploads: ChunkUploadRegistry,
+    session_socket_timeouts: listener::SessionSocketTimeouts,
 }
 
 impl LocalHttpAppHandler {
@@ -63,7 +64,21 @@ impl LocalHttpAppHandler {
             ),
             protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
             uploads: ChunkUploadRegistry::default(),
+            session_socket_timeouts: listener::SessionSocketTimeouts::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_session_socket_timeouts(
+        mut self,
+        timeouts: listener::SessionSocketTimeouts,
+    ) -> Self {
+        self.session_socket_timeouts = timeouts;
+        self
+    }
+
+    pub(crate) fn session_socket_timeouts(&self) -> listener::SessionSocketTimeouts {
+        self.session_socket_timeouts
     }
 
     pub fn handle(

@@ -90,6 +90,11 @@ jobs:
         run: |
           npm run build:adapters
           cargo build --locked -p openaide-app-server
+      # Socket options can differ per handle on Windows: a cloned socket keeps the
+      # receive timeout it was cloned with. These tests catch a deadline set on the
+      # wrong handle, which Linux cannot show.
+      - name: Test App Server session sockets
+        run: cargo test --locked -p openaide-app-server --lib -- session_socket
       # The App Server installs the embedded adapter's dependencies with npm, unpacks
       # the adapter, and starts it with the native codex.exe as CODEX_PATH (ADR-0079).
       - name: Smoke-test App Server managed Codex launch
