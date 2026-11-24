@@ -1,12 +1,14 @@
 //! Explains why a Remote Device stays on a relay instead of a direct path.
 //!
 //! Two views, both metadata-only: what the App Server's network allows (logged when it
-//! changes), and how long each device connection actually spent direct.
+//! changes), and how each device connection's time and bytes split between a direct
+//! path and a relay.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, PathId};
 use iroh::unstable_net_report::NetReport;
 use iroh::{Endpoint, Watcher};
 use openaide_app_server_protocol::devices::{RemoteDeviceConnection, RemoteDevicePath};
@@ -79,14 +81,19 @@ impl NetSummary {
     }
 }
 
-/// How one connection's time split between a direct path and a relay. The path is
-/// sampled, so the split is accurate to the sampling interval.
+/// How one connection's time split between a direct path and a relay, and the bytes
+/// its relay paths carried. The connection is sampled, so both are accurate to the
+/// sampling interval.
 #[derive(Debug)]
 pub(crate) struct RouteTally {
     started: Instant,
     direct_since: Option<Instant>,
     direct: Duration,
     first_direct: Option<Duration>,
+    /// The last counters seen on each relay path, as (sent, received). A closed path
+    /// takes its counters with it, so they are kept here. Bytes a path carried after
+    /// its last sample are missing, which makes the totals a lower bound.
+    relay_paths: BTreeMap<PathId, (u64, u64)>,
 }
 
 impl RouteTally {
@@ -96,7 +103,14 @@ impl RouteTally {
             direct_since: None,
             direct: Duration::ZERO,
             first_direct: None,
+            relay_paths: BTreeMap::new(),
         }
+    }
+
+    /// Records the counters of one relay path. Counters only grow and a path id is
+    /// never reused, so a later sample of the same path replaces the earlier one.
+    pub(crate) fn observe_relay_path(&mut self, path: PathId, sent: u64, received: u64) {
+        self.relay_paths.insert(path, (sent, received));
     }
 
     /// Records the route seen at `now`.
@@ -114,17 +128,41 @@ impl RouteTally {
         }
     }
 
-    /// The fields for the connection's end at `now`: time spent direct, and how long the
-    /// first direct path took to form, or null when none ever did.
+    /// The fields for the connection's end at `now`: time spent direct, how long the
+    /// first direct path took to form (null when none ever did), and the bytes that
+    /// went through a relay.
     pub(crate) fn fields(&self, now: Instant) -> serde_json::Value {
         let open = self
             .direct_since
             .map_or(Duration::ZERO, |since| now - since);
+        let (sent, received) = self
+            .relay_paths
+            .values()
+            .fold((0u64, 0u64), |(sent, received), path| {
+                (sent.saturating_add(path.0), received.saturating_add(path.1))
+            });
         serde_json::json!({
             "direct_ms": (self.direct + open).as_millis() as u64,
             "first_direct_ms": self.first_direct.map(|took| took.as_millis() as u64),
+            "relayed_tx_bytes": sent,
+            "relayed_rx_bytes": received,
         })
     }
+}
+
+/// Samples the connection into `tally`: the route in use now and the counters of its
+/// open relay paths. Returns the route.
+pub(crate) fn sample(connection: &Connection, tally: &Mutex<RouteTally>) -> RemoteDeviceConnection {
+    let current = describe(connection);
+    let mut tally = tally.lock().expect("route tally lock poisoned");
+    tally.observe(is_direct(&current), Instant::now());
+    for path in connection.paths().iter() {
+        if path.remote_addr().is_relay() {
+            let stats = path.stats();
+            tally.observe_relay_path(path.id(), stats.udp_tx.bytes, stats.udp_rx.bytes);
+        }
+    }
+    current
 }
 
 /// How often a device connection's path is sampled.
@@ -142,11 +180,7 @@ pub(crate) async fn watch_path(
     let mut route = path_name(&describe(&connection));
     loop {
         interval.tick().await;
-        let current = describe(&connection);
-        tally
-            .lock()
-            .expect("route tally lock poisoned")
-            .observe(is_direct(&current), Instant::now());
+        let current = sample(&connection, &tally);
         // A route change can explain a stall on the device's side.
         if path_name(&current) != route {
             route = path_name(&current);

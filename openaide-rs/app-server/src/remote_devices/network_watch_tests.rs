@@ -32,7 +32,12 @@ fn a_connection_that_went_direct_reports_when_and_for_how_long() {
 
     assert_eq!(
         tally.fields(at(45)),
-        serde_json::json!({ "direct_ms": 25_000, "first_direct_ms": 10_000 })
+        serde_json::json!({
+            "direct_ms": 25_000,
+            "first_direct_ms": 10_000,
+            "relayed_tx_bytes": 0,
+            "relayed_rx_bytes": 0,
+        })
     );
 }
 
@@ -45,6 +50,27 @@ fn a_connection_that_never_went_direct_says_so() {
 
     assert_eq!(
         tally.fields(start + Duration::from_secs(9)),
-        serde_json::json!({ "direct_ms": 0, "first_direct_ms": null })
+        serde_json::json!({
+            "direct_ms": 0,
+            "first_direct_ms": null,
+            "relayed_tx_bytes": 0,
+            "relayed_rx_bytes": 0,
+        })
     );
+}
+
+#[test]
+fn relayed_bytes_add_up_across_relay_paths_and_keep_each_paths_last_sample() {
+    let start = Instant::now();
+    let mut tally = RouteTally::new(start);
+
+    tally.observe_relay_path(PathId::from(0u32), 1_000, 200);
+    // The same path sampled again: its counters grew, and the new sample replaces the old.
+    tally.observe_relay_path(PathId::from(0u32), 5_000, 900);
+    // A second relay path, opened after the first one closed.
+    tally.observe_relay_path(PathId::from(3u32), 40, 60);
+
+    let fields = tally.fields(start);
+    assert_eq!(fields["relayed_tx_bytes"], 5_040);
+    assert_eq!(fields["relayed_rx_bytes"], 960);
 }
