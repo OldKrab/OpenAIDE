@@ -343,8 +343,9 @@ describe("Composer view behavior", () => {
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
   });
 
-  it("keeps file upload progress in the same attachment list, blocks Send, and cancels it", async () => {
+  it("keeps file upload progress in the same attachment list, holds Send, and cancels it", async () => {
     const selected = new File(["0123456789"], "model.bin");
+    const onSubmit = vi.fn();
     let uploadSignal: AbortSignal | undefined;
     const fileBrowser: TaskFileBrowserCallbacks = {
       ...fileBrowserCallbacks(),
@@ -358,6 +359,7 @@ describe("Composer view behavior", () => {
     const renderer = renderComposer({
       attachments: [attachment("image-1", "diagram.png", "image-handle", "data:image/png;base64,aW1hZ2U=")],
       fileBrowser,
+      onSubmit,
       prompt: "Use this",
     });
 
@@ -378,9 +380,130 @@ describe("Composer view behavior", () => {
     expect(attachmentList.findAll((node) => node.props.className?.includes("composer-attachment-tile"))).toHaveLength(2);
     const composerHtml = JSON.stringify(renderer.toJSON());
     expect(composerHtml.indexOf("composer-file-upload")).toBeLessThan(composerHtml.indexOf("composer-editor"));
-    expect(buttonByLabel(renderer.root, "Send message").props.disabled).toBe(true);
+    // Send stays available during the upload and holds the message until it finishes.
+    click(buttonByLabel(renderer.root, "Send message"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(buttonByLabel(renderer.root, "Cancel sending after upload")).toBeTruthy();
     click(buttonByLabel(renderer.root, "Cancel model.bin"));
     expect(uploadSignal?.aborted).toBe(true);
+    // Cancelling the upload changes the draft, so the held Send ends without sending.
+    await settleRenderer();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(buttonByLabel(renderer.root, "Send message").props.disabled).toBe(false);
+  });
+
+  it("sends an Image-only message once Enter pressed during the paste finishes uploading", async () => {
+    const image = new File(["image"], "pasted.png", { type: "image/png" });
+    const onSubmit = vi.fn();
+    let finishUpload: () => void = () => undefined;
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(() => new Promise<void>((resolve) => {
+        finishUpload = resolve;
+      })),
+    };
+    const props = { fileBrowser, onSubmit, submitShortcut: "enter" as const };
+    const renderer = renderComposer(props);
+
+    paste(textarea(renderer.root), {
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => image }] },
+      preventDefault: vi.fn(),
+    });
+    await settleRenderer();
+    const preventDefault = vi.fn();
+    keyDown(textarea(renderer.root), { preventDefault });
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(text(renderer.root)).toContain("Sends after upload");
+
+    // App Server adds the uploaded Image to the draft before the upload settles.
+    act(() => renderer.update(composerElement({
+      ...props,
+      attachments: [attachment("image-1", "pasted.png", "image-handle", "blob:pasted")],
+    })));
+    await act(async () => finishUpload());
+    await settleRenderer();
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith("");
+  });
+
+  it("does not send a held message when its upload fails", async () => {
+    const image = new File(["image"], "pasted.png", { type: "image/png" });
+    const onSubmit = vi.fn();
+    let failUpload: (error: Error) => void = () => undefined;
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(() => new Promise<void>((_resolve, reject) => {
+        failUpload = reject;
+      })),
+    };
+    const renderer = renderComposer({ fileBrowser, onSubmit, prompt: "Look", submitShortcut: "enter" });
+
+    paste(textarea(renderer.root), {
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => image }] },
+      preventDefault: vi.fn(),
+    });
+    await settleRenderer();
+    keyDown(textarea(renderer.root), {});
+    await act(async () => failUpload(new Error("Upload failed.")));
+    await settleRenderer();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(text(renderer.root)).not.toContain("Sends after upload");
+  });
+
+  it("cancels a held message when the draft is edited during the upload", async () => {
+    const image = new File(["image"], "pasted.png", { type: "image/png" });
+    const onSubmit = vi.fn();
+    let finishUpload: () => void = () => undefined;
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(() => new Promise<void>((resolve) => {
+        finishUpload = resolve;
+      })),
+    };
+    const renderer = renderComposer({ fileBrowser, onSubmit, prompt: "Look", submitShortcut: "enter" });
+
+    paste(textarea(renderer.root), {
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => image }] },
+      preventDefault: vi.fn(),
+    });
+    await settleRenderer();
+    keyDown(textarea(renderer.root), {});
+    inputText(textarea(renderer.root), "Look closer");
+    await act(async () => finishUpload());
+    await settleRenderer();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("waits for an inline Image paste before sending, instead of sending the text without it", async () => {
+    const image = new File(["image"], "pasted.png", { type: "image/png" });
+    const onSubmit = vi.fn();
+    let finishAttach: () => void = () => undefined;
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachImage: vi.fn(() => new Promise<void>((resolve) => {
+        finishAttach = resolve;
+      })),
+    };
+    const renderer = renderComposer({ fileBrowser, onSubmit, prompt: "Explain", submitShortcut: "enter" });
+
+    paste(textarea(renderer.root), {
+      clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => image }] },
+      preventDefault: vi.fn(),
+    });
+    keyDown(textarea(renderer.root), {});
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await act(async () => finishAttach());
+    await settleRenderer();
+    expect(onSubmit).toHaveBeenCalledWith("Explain");
   });
 
   it("shows a failed file upload inline without using the tile tooltip for the error", async () => {

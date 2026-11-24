@@ -523,6 +523,15 @@
   animation: oa-spin 0.9s linear infinite;
 }
 
+/* A Send held until uploads finish; the whole control cancels it. */
+.composer-submit-pending .composer-send-after-uploads-cancel {
+  animation: none;
+}
+
+.composer-send-after-uploads:hover {
+  background: color-mix(in oklch, var(--oa-text) 7%, transparent);
+}
+
 .composer-pill:hover:not(:disabled):not(.locked),
 .composer-icon-button:hover:not(:disabled),
 .composer-icon-button[aria-pressed="true"] {

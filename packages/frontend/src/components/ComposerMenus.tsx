@@ -12,7 +12,6 @@ import { IconButton, MenuButton, Selector } from "./ComposerPrimitives";
 import { ComposerRunOptions, type ComposerRunMenu } from "./ComposerRunOptions";
 import { PopupMenu } from "./Popup";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
-import { attachEveryImage } from "./imageAttachmentBatch";
 import type { ComposerFileUpload } from "./ComposerAttachments";
 import { composerErrorMessage } from "./composerDraftPolicy";
 import type { FileUploadKind } from "../services/fileUploadHttp";
@@ -41,6 +40,8 @@ type ComposerControlsProps = {
   fileBrowser?: TaskFileBrowserCallbacks;
   imageAttachmentsAllowed: boolean;
   attachmentCount: number;
+  /** Reads Images into the draft inline (VS Code) while Send waits for them. */
+  attachInlineImages: (images: File[], attach: (image: File) => Promise<void>) => Promise<void>;
   onFileUploadsChange: (uploads: ComposerFileUpload[]) => void;
   /** Starts uploads for dropped or pasted files; set while the shell uploads over HTTP or picks natively. */
   fileDropHandlerRef: MutableRefObject<((uploads: ComposerUploadSelection[]) => void) | undefined>;
@@ -69,6 +70,7 @@ export function ComposerControls({
   fileBrowser,
   imageAttachmentsAllowed,
   attachmentCount,
+  attachInlineImages,
   onFileUploadsChange,
   fileDropHandlerRef,
   onUnsupportedImageAttachment,
@@ -110,7 +112,7 @@ export function ComposerControls({
       attachFiles(files.map((file) => ({ file, kind: "image" })));
       return;
     }
-    void attachEveryImage(files, (file) => fileBrowser.attachImage(file)).then(
+    void attachInlineImages(files, (file) => fileBrowser.attachImage(file)).then(
       () => setOpenMenu(undefined),
       (error: unknown) => onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to upload image.")),
     );

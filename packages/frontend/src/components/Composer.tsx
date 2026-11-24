@@ -32,6 +32,7 @@ import { attachEveryImage } from "./imageAttachmentBatch";
 import { appendQuoteToDraft } from "./quoteSelection";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerHistory } from "./useComposerHistory";
+import { useSendAfterUploads } from "./useSendAfterUploads";
 import { keepTextEntryFocusOnTap, releaseTextEntryWhenKeyboardHides, usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
 import { useBackNavigation } from "./useBackNavigation";
@@ -138,6 +139,8 @@ export function Composer({
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
   const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
+  // VS Code reads pasted or dropped Images into the draft asynchronously; Send waits for them too.
+  const [inlineImagesPending, setInlineImagesPending] = useState(0);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const configMutationSequenceRef = useRef(0);
@@ -187,10 +190,16 @@ export function Composer({
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
-  const uploadPending = fileUploads.some((upload) => upload.state !== "error");
-  const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending
-    && !presentedConfigChange
+  const uploadsInFlight = fileUploads.filter((upload) => upload.state !== "error").length + inlineImagesPending;
+  const uploadPending = uploadsInFlight > 0;
+  const settingsSettled = !presentedConfigChange
     && (!configOptions?.preferences || configOptions.preferences.state === "settled");
+  const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending
+    && settingsSettled;
+  // Send pressed while only uploads block it is held until they finish; an
+  // in-flight Image counts as draft content so an Image-only paste can be sent.
+  const canSendAfterUploads = uploadPending && settingsSettled
+    && composerCanSubmit(availability, editorText, attachments.length + uploadsInFlight);
   const canAddToQueue = availability.canEdit
     && hasDraftContent
     && !uploadPending
@@ -312,6 +321,7 @@ export function Composer({
   };
 
   const syncDraft = (value: string, options: { renderEditor?: boolean } = {}) => {
+    if (value !== draftRef.current) sendAfterUploads.cancel("edited");
     draftRef.current = value;
     if (options.renderEditor) renderEditorText(value);
     else setEditorText(value);
@@ -333,8 +343,9 @@ export function Composer({
     }
   };
 
-  const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
-  const showSendAction = !onCancel || (hasDraftContent && canSubmit);
+  const sendable = canSubmit || canSendAfterUploads;
+  const showStopAction = Boolean(onCancel && !sendable);
+  const showSendAction = !onCancel || sendable;
   const blockedStatus = !canSubmit && availability.submissionBlockedMessage
     ? composerBlockedStatus(availability.submissionBlockedMessage)
     : undefined;
@@ -344,6 +355,30 @@ export function Composer({
     if (!canSubmit) return;
     submittedDraftRef.current = draft;
     onSubmit(draft);
+  };
+  const sendAfterUploads = useSendAfterUploads({
+    canSubmit,
+    failedUploadIds: fileUploads.filter((upload) => upload.state === "error").map((upload) => upload.id),
+    submit: submitDraft,
+    uploadsInFlight,
+  });
+  /** The user's Send: immediate when ready, otherwise held until uploads finish. */
+  const requestSend = () => {
+    if (canSendAfterUploads) sendAfterUploads.hold();
+    else submitDraft();
+  };
+  /** Reads Images into the draft inline (VS Code), keeping Send blocked until they land. */
+  const attachInlineImages = (images: File[], attach: (image: File) => Promise<void>) => {
+    setInlineImagesPending((count) => count + images.length);
+    return attachEveryImage(images, attach).then(
+      () => setInlineImagesPending((count) => count - images.length),
+      (error: unknown) => {
+        // End the held Send before the count drops, so it cannot fire without the Image.
+        sendAfterUploads.cancel("upload_failed");
+        setInlineImagesPending((count) => count - images.length);
+        throw error;
+      },
+    );
   };
 
   const selectSlashCommand = (command: AgentSlashCommand) => {
@@ -422,7 +457,7 @@ export function Composer({
           uploads.unshift(...images.map((file) => ({ file, kind: "image" as const })));
         } else {
           const draft = { prompt: draftRef.current, context: attachments };
-          void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
+          void attachInlineImages(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
             onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
           });
         }
@@ -445,6 +480,7 @@ export function Composer({
           setOpenMenu(undefined);
           setSlashPicker(undefined);
           setFileMentionToken(undefined);
+          sendAfterUploads.cancel("cancelled");
         }
       }}
     >
@@ -454,9 +490,18 @@ export function Composer({
         disabled={disabled}
         imageAttachmentsAllowed={imageAttachmentsAllowed}
         onMoveAttachment={onMoveAttachment}
-        onRemoveAttachment={onRemoveAttachment}
+        onRemoveAttachment={(attachmentId) => {
+          sendAfterUploads.cancel("edited");
+          onRemoveAttachment(attachmentId);
+        }}
         onRevealAttachment={onRevealAttachment}
-        uploads={fileUploads}
+        uploads={sendAfterUploads.waiting ? fileUploads.map((upload) => ({
+          ...upload,
+          cancel: () => {
+            sendAfterUploads.cancel("edited");
+            upload.cancel();
+          },
+        })) : fileUploads}
       />
       <ComposerEditor
         activeDescendant={activeCompletionId}
@@ -493,7 +538,7 @@ export function Composer({
               return;
             }
             const draft = { prompt: draftRef.current, context: attachments };
-            void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
+            void attachInlineImages(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
               onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
             });
             return;
@@ -589,9 +634,13 @@ export function Composer({
             onAddToQueue();
             return;
           }
-          if (!mobileComposerBehavior && shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
+          if (
+            !mobileComposerBehavior
+            && shouldSubmitComposerKey(event, submitShortcut)
+            && (canSubmit || canSendAfterUploads)
+          ) {
             event.preventDefault();
-            submitDraft();
+            requestSend();
             return;
           }
           if (shouldInsertComposerNewline(event, submitShortcut)) {
@@ -636,6 +685,7 @@ export function Composer({
           attachmentCount={attachments.filter((attachment) => attachment.kind !== "image").length}
           imageAttachmentsAllowed={imageAttachmentsAllowed}
           onFileUploadsChange={setFileUploads}
+          attachInlineImages={attachInlineImages}
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
           onSelectConfigOption={selectConfigOption}
@@ -708,13 +758,25 @@ export function Composer({
           {onSchedule && hasDraftContent && !availability.submitting ? (
             <ComposerSchedule disabled={!canAddToQueue} onSchedule={onSchedule} />
           ) : null}
-          {!availability.submitting && showSendAction ? (
+          {sendAfterUploads.waiting ? (
+            <button
+              aria-label="Cancel sending after upload"
+              className="composer-submit-pending composer-send-after-uploads"
+              onClick={() => sendAfterUploads.cancel("cancelled")}
+              title="Sends when the upload finishes. Click to cancel."
+              type="button"
+            >
+              <LoaderCircle size={14} aria-hidden="true" />
+              <span>Sends after upload</span>
+              <X aria-hidden="true" className="composer-send-after-uploads-cancel" size={13} />
+            </button>
+          ) : !availability.submitting && showSendAction ? (
             <IconButton
               ariaLabel={availability.submitActionLabel}
               className="composer-send-button"
-              disabled={!canSubmit}
+              disabled={!sendable}
               icon={<ArrowUp size={15} />}
-              onClick={submitDraft}
+              onClick={requestSend}
             />
           ) : null}
         </div>
