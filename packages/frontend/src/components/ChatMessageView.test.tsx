@@ -477,9 +477,9 @@ describe("ChatRow", () => {
   it("renders typed Agent images, resources, and unsupported content explicitly", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const { ChatImageProvider } = await import("./StoredChatImage");
-    const { createChatImageCache } = await import("../state/chatImageCache");
+    const { chatImageCacheKey, createChatImageCache } = await import("../state/chatImageCache");
     const cache = createChatImageCache();
-    await cache.load("task_1", "image-1", async () => "aW1hZ2U=");
+    await cache.load("task_1", chatImageCacheKey("image-1", "preview"), async () => ({ data: "aW1hZ2U=" }));
     const imageHtml = renderToStaticMarkup(
       <ChatImageProvider cache={cache} taskId="task_1">
         <ChatRow

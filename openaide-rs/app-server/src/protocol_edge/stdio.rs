@@ -23,6 +23,8 @@ mod factory;
 #[cfg(test)]
 mod file_viewer_tests;
 #[cfg(test)]
+mod task_image_tests;
+#[cfg(test)]
 mod tests;
 pub(crate) mod wire;
 

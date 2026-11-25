@@ -362,7 +362,7 @@ function AgentContentMessage({
   );
 }
 
-/** An Agent image stored for the Task; it loads when shown and opens once loaded. */
+/** An Agent image stored for the Task; its preview loads when shown, and opening it loads the original. */
 function AgentContentImage({
   content,
   onOpenImage,
@@ -387,7 +387,7 @@ function AgentContentImage({
     <button
       aria-label={`Open ${label}`}
       className="chat-agent-content-image"
-      onClick={() => onOpenImage({ label, url: state.url })}
+      onClick={() => onOpenImage({ label, url: state.url, storedImage: reference })}
       type="button"
     >
       <img alt={label} height={size?.height} src={state.url} width={size?.width} />

@@ -35,6 +35,7 @@ import type { McpServerSaveInput } from "../intents/mcpSettingsIntents";
 import type { RemoteDeviceIntents } from "../intents/remoteDeviceIntents";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { NewTaskController, NewTaskLease } from "./newTaskController";
+import type { ChatImageLoader } from "./StoredChatImage";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
 export type AppControllerCallbacks = {
@@ -142,8 +143,8 @@ export type TaskCallbacks = {
   subscribeToolDetail: (artifactId: string) => () => void;
   /** Lazily loads a validated workspace image without exposing a caller-selected path. */
   loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
-  /** Reads one stored Chat image of a Task as base64; rejects when it cannot be loaded. */
-  loadChatImage: (taskId: string, imageId: string) => Promise<string>;
+  /** Reads one copy of a stored Chat image of a Task (ADR-0084); rejects when it cannot be loaded. */
+  loadChatImage: ChatImageLoader;
   revealAttachment: (attachmentId: string) => Promise<void>;
   moveAttachment: (attachmentId: string, targetIndex: number) => void;
   removeAttachment: (attachmentId: string) => void;

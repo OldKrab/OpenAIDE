@@ -1114,9 +1114,20 @@ export type TaskToolImagePreviewParams = { taskId: TaskId, artifactId: string, }
 
 export type TaskToolImagePreviewResult = { preview?: ToolImagePreview | null, };
 
-export type TaskImageParams = { taskId: TaskId, imageId: string, };
+export type TaskImageParams = { taskId: TaskId, imageId: string,
+/**
+ * Which copy to return. Absent means the original, as before previews existed.
+ */
+variant?: TaskImageVariant, };
 
-export type TaskImageResult = { data: string, };
+export type TaskImageResult = { data: string,
+/**
+ * Set only when `data` is a preview App Server encoded again, whose media
+ * type can differ from the reference's.
+ */
+mediaType?: string, };
+
+export type TaskImageVariant = "original" | "preview";
 
 export type ProjectFilesParams = {
 /**
@@ -2121,4 +2132,4 @@ export type TypedServerRequest<M extends ServerRequestMethod> = ServerRequestEnv
   method: M;
 };
 
-export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 4, minor: 0 };
+export const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = { major: 4, minor: 1 };

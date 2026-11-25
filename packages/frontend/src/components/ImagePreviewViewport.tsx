@@ -14,6 +14,12 @@ import {
 export type ImagePreviewViewportSource = {
   label: string;
   url: string;
+  /**
+   * The full image's size in pixels, when known. A smaller preview shown while the full
+   * image loads then takes the full image's place, so the view does not move when it arrives.
+   */
+  width?: number;
+  height?: number;
 };
 
 const MIN_SCALE = 0.25;
@@ -46,6 +52,7 @@ export function ImagePreviewViewport({
   contentNoun = "image",
   imageClassName = "attachment-preview-image",
   nativeFit = false,
+  status,
   toolbarActions,
 }: {
   image: ImagePreviewViewportSource;
@@ -57,6 +64,11 @@ export function ImagePreviewViewport({
    * small screenshot opens sharp at its captured size. Vector content should keep filling.
    */
   nativeFit?: boolean;
+  /**
+   * A passing state, such as a load in progress, shown before the zoom controls: the
+   * toolbar is aligned to the end, so the controls stay put when it appears or clears.
+   */
+  status?: ReactNode;
   toolbarActions?: ReactNode;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -70,10 +82,12 @@ export function ImagePreviewViewport({
   const [nativeSize, setNativeSize] = useState<{ width: number; height: number }>();
 
   const measureNativeSize = (element: HTMLImageElement | null) => {
-    if (!nativeFit || !element?.naturalWidth || !element.naturalHeight) return;
+    const pixelWidth = image.width ?? element?.naturalWidth;
+    const pixelHeight = image.height ?? element?.naturalHeight;
+    if (!nativeFit || !pixelWidth || !pixelHeight) return;
     const density = globalThis.devicePixelRatio || 1;
-    const width = element.naturalWidth / density;
-    const height = element.naturalHeight / density;
+    const width = pixelWidth / density;
+    const height = pixelHeight / density;
     setNativeSize((current) => current?.width === width && current.height === height ? current : { width, height });
     // The fitted box just changed; pan limits must be measured again.
     fittedImageSizeRef.current = undefined;
@@ -82,7 +96,7 @@ export function ImagePreviewViewport({
   // A cached image can finish loading before React attaches the load handler.
   useEffect(() => {
     if (imageRef.current?.complete) measureNativeSize(imageRef.current);
-  }, [image.url, nativeFit]);
+  }, [image.url, image.width, image.height, nativeFit]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -248,6 +262,7 @@ export function ImagePreviewViewport({
       <div className="attachment-preview-chrome">
         <span className="attachment-preview-label" title={image.label}>{image.label}</span>
         <div className="attachment-preview-actions">
+          {status}
           <button
             aria-label={`Zoom ${contentNoun} out`}
             className="attachment-preview-action"

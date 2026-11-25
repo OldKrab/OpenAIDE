@@ -17,7 +17,7 @@ mod image_preview;
 
 #[cfg(test)]
 pub(crate) fn pause_image_previews_for_test() -> std::sync::MutexGuard<'static, ()> {
-    image_preview::IMAGE_PREVIEW_GATE.lock().unwrap()
+    crate::image_preview::GATE.lock().unwrap()
 }
 
 #[derive(Clone, Default)]
@@ -377,17 +377,7 @@ fn language_from_basename(basename: &str) -> Option<String> {
 }
 
 fn image_media_type(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("image/png")
-    } else if bytes.starts_with(b"\xff\xd8\xff") {
-        Some("image/jpeg")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else {
-        None
-    }
+    crate::image_preview::sniff(bytes).map(|(_, media_type)| media_type)
 }
 
 #[cfg(test)]

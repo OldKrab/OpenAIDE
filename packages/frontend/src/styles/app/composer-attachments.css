@@ -537,6 +537,37 @@
   opacity: 0.68;
 }
 
+/* Loading or failure of a stored Chat image's original, beside the zoom controls. */
+.attachment-preview-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-end: 6px;
+  color: var(--oa-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.attachment-preview-note-retry {
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 2px 6px;
+}
+
+.attachment-preview-note-retry:hover {
+  background: var(--oa-raised);
+}
+
+.attachment-preview-note-retry:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
 .attachment-preview-action:focus-visible,
 .attachment-preview-zoom:focus-visible,
 .attachment-preview-close:focus-visible {

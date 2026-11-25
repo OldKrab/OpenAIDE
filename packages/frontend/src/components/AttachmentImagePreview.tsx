@@ -6,9 +6,12 @@ import {
   type ImagePreviewViewportSource,
 } from "./ImagePreviewViewport";
 import { PopupDialog } from "./Popup";
-import type { StoredChatImageReference } from "./StoredChatImage";
+import { storedChatImageSize, useStoredChatImage, type StoredChatImageReference } from "./StoredChatImage";
 
-export type AttachmentImagePreviewSource = ImagePreviewViewportSource;
+export type AttachmentImagePreviewSource = ImagePreviewViewportSource & {
+  /** A stored Chat image whose `url` is its preview; the lightbox loads the original (ADR-0084). */
+  storedImage?: StoredChatImageReference;
+};
 
 export type AttachmentImageLayout = "single" | "pair" | "many";
 
@@ -47,15 +50,68 @@ export function AttachmentImagePreviewLightbox({
         className="attachment-preview-lightbox"
         tabIndex={-1}
       >
-        <ImagePreviewViewport
-          contentNoun={contentNoun}
-          image={image}
-          nativeFit={nativeFit}
-          onClose={onClose}
-          toolbarActions={toolbarActions}
-        />
+        {image.storedImage ? (
+          <StoredImageViewport
+            contentNoun={contentNoun}
+            image={image}
+            nativeFit={nativeFit}
+            onClose={onClose}
+            storedImage={image.storedImage}
+            toolbarActions={toolbarActions}
+          />
+        ) : (
+          <ImagePreviewViewport
+            contentNoun={contentNoun}
+            image={image}
+            nativeFit={nativeFit}
+            onClose={onClose}
+            toolbarActions={toolbarActions}
+          />
+        )}
       </div>
     </PopupDialog>
+  );
+}
+
+/**
+ * Shows a stored Chat image at full size: its preview at once, in the original's footprint,
+ * then the original when it arrives. A failed original keeps the preview and offers Retry.
+ */
+function StoredImageViewport({
+  image,
+  storedImage,
+  toolbarActions,
+  ...viewport
+}: {
+  image: AttachmentImagePreviewSource;
+  storedImage: StoredChatImageReference;
+  contentNoun?: string;
+  nativeFit: boolean;
+  onClose: () => void;
+  toolbarActions?: ReactNode;
+}) {
+  const original = useStoredChatImage(storedImage, "original");
+  const source = {
+    label: image.label,
+    url: original.status === "ready" ? original.url : image.url,
+    ...storedChatImageSize(storedImage),
+  };
+  return (
+    <ImagePreviewViewport
+      {...viewport}
+      image={source}
+      status={original.status === "loading" ? (
+        <span className="attachment-preview-note" role="status">Loading full size…</span>
+      ) : original.status === "failed" ? (
+        <span className="attachment-preview-note" role="status">
+          Full size unavailable
+          {original.retry ? (
+            <button className="attachment-preview-note-retry" onClick={original.retry} type="button">Retry</button>
+          ) : null}
+        </span>
+      ) : null}
+      toolbarActions={toolbarActions}
+    />
   );
 }
 
