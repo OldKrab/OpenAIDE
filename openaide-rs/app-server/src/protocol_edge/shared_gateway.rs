@@ -11,7 +11,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
     FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN,
-    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH,
+    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH, TASK_IMAGE,
 };
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
@@ -40,6 +40,7 @@ use super::{
 /// every request and publication on this gateway is serialized behind one mutex.
 const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
 
+mod task_image;
 mod uploads;
 
 #[derive(Clone)]
@@ -229,6 +230,15 @@ impl SharedRpcGateway {
             if matches!(method.as_str(), FILE_VIEWER_OPEN | FILE_VIEWER_OPEN_FROM_HANDLE | FILE_VIEWER_REFRESH))
         {
             return self.handle_file_viewer_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == TASK_IMAGE)
+        {
+            return self.handle_task_image_without_protocol_lock(
                 connection_id,
                 message,
                 now,

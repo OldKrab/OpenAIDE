@@ -12,26 +12,51 @@ describe("requestChatImage", () => {
     const request = vi.fn(async () => ({ data: "aGVsbG8=" }));
     const log = vi.fn<ChatImageLoadLog>();
 
-    const data = await requestChatImage(
+    const loaded = await requestChatImage(
       { request: request as unknown as BackendConnection["request"] },
       "task_1",
       "image_1",
+      "original",
       log,
       clock(100, 142),
     );
 
-    expect(data).toBe("aGVsbG8=");
-    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_1", imageId: "image_1" });
+    expect(loaded).toEqual({ data: "aGVsbG8=" });
+    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_1", imageId: "image_1", variant: "original" });
     expect(log.mock.calls).toEqual([
-      ["chat_image_load_started", { task_id: "task_1", image_id: "image_1", cache_hit: false }],
+      ["chat_image_load_started", { task_id: "task_1", image_id: "image_1", variant: "original", cache_hit: false }],
       ["chat_image_load_completed", {
         task_id: "task_1",
         image_id: "image_1",
+        variant: "original",
         cache_hit: false,
         duration_ms: 42,
         size_bytes: 5,
+        reduced: false,
       }],
     ]);
+  });
+
+  it("returns a re-encoded preview with its own media type", async () => {
+    const request = vi.fn(async () => ({ data: "aGk=", mediaType: "image/jpeg" }));
+    const log = vi.fn<ChatImageLoadLog>();
+
+    const loaded = await requestChatImage(
+      { request: request as unknown as BackendConnection["request"] },
+      "task_1",
+      "image_1",
+      "preview",
+      log,
+      clock(0, 1),
+    );
+
+    expect(loaded).toEqual({ data: "aGk=", mediaType: "image/jpeg" });
+    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_1", imageId: "image_1", variant: "preview" });
+    expect(log).toHaveBeenLastCalledWith("chat_image_load_completed", expect.objectContaining({
+      variant: "preview",
+      reduced: true,
+      size_bytes: 2,
+    }));
   });
 
   it("classifies a protocol failure without its message and rethrows it", async () => {
@@ -45,6 +70,7 @@ describe("requestChatImage", () => {
       { request: request as unknown as BackendConnection["request"] },
       "task_1",
       "image_1",
+      "preview",
       log,
       clock(10, 15),
     )).rejects.toBe(error);
@@ -52,6 +78,7 @@ describe("requestChatImage", () => {
     expect(log).toHaveBeenLastCalledWith("chat_image_load_failed", {
       task_id: "task_1",
       image_id: "image_1",
+      variant: "preview",
       cache_hit: false,
       duration_ms: 5,
       error_name: "AppServerProtocolError",

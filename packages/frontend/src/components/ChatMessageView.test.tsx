@@ -477,9 +477,9 @@ describe("ChatRow", () => {
   it("renders typed Agent images, resources, and unsupported content explicitly", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const { ChatImageProvider } = await import("./StoredChatImage");
-    const { createChatImageCache } = await import("../state/chatImageCache");
+    const { chatImageCacheKey, createChatImageCache } = await import("../state/chatImageCache");
     const cache = createChatImageCache();
-    await cache.load("task_1", "image-1", async () => "aW1hZ2U=");
+    await cache.load("task_1", chatImageCacheKey("image-1", "preview"), async () => ({ data: "aW1hZ2U=" }));
     const imageHtml = renderToStaticMarkup(
       <ChatImageProvider cache={cache} taskId="task_1">
         <ChatRow
@@ -1098,6 +1098,48 @@ describe("ChatRow", () => {
     expect(tree.root.findAllByProps({ role: "status" })).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).not.toContain("No output returned.");
     const previewButton = tree.root.findByProps({ "aria-label": "Open image preview for diagram.png" });
+    await act(async () => previewButton.props.onClick());
+    expect(tree.root.findByProps({ "aria-label": "Close image preview" })).toBeDefined();
+  });
+
+  it("shows the image a Read returned instead of loading the file it names", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const onLoadToolImagePreview = vi.fn(async () => undefined);
+    const step = {
+      kind: "tool" as const,
+      name: "read",
+      status: "completed" as const,
+      input_summary: "Read shot-135.png",
+      detail_artifact_id: "artifact_shot",
+    };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <ActivityStepRow
+          onLoadToolImagePreview={onLoadToolImagePreview}
+          step={step}
+          taskId="task_1"
+          toolDetails={{
+            ["task_1\u0000artifact_shot"]: {
+              loading: false,
+              details: {
+                locations: [{ path: "C:\\Users\\dev\\frames\\shot-135.png" }],
+                content: [{ kind: "image", media_type: "image/jpeg", data_url: "data:image/jpeg;base64,/9j/4AAQ" }],
+              },
+            },
+          }}
+        />,
+      );
+    });
+
+    await act(async () => {
+      tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick();
+    });
+
+    expect(onLoadToolImagePreview).not.toHaveBeenCalled();
+    expect(JSON.stringify(tree.toJSON())).not.toContain("No output returned.");
+    const previewButton = tree.root.findByProps({ "aria-label": "Open image preview for shot-135.png" });
+    expect(previewButton.findByType("img").props.src).toBe("data:image/jpeg;base64,/9j/4AAQ");
     await act(async () => previewButton.props.onClick());
     expect(tree.root.findByProps({ "aria-label": "Close image preview" })).toBeDefined();
   });

@@ -88,6 +88,7 @@ pub struct RpcGateway {
     ready_catalog_agents: std::collections::HashSet<openaide_app_server_protocol::ids::AgentId>,
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
     pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
+    pub(crate) chat_image_previews: crate::chat_image_previews::ChatImagePreviews,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
     /// Advances when a request publishes navigation entries under the protocol lock, so a
@@ -220,6 +221,7 @@ impl RpcGateway {
             ready_catalog_agents: Default::default(),
             shell_file_reveals,
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),
+            chat_image_previews: Default::default(),
             snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
             project_entries_generation: Arc::default(),

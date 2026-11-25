@@ -1,5 +1,10 @@
+import type { TaskImageVariant } from "@openaide/app-server-client";
+import type { LoadedChatImage } from "../intents/chatImageIntents";
+
 /**
- * In-memory copy of the stored Chat images this Frontend has shown (ADR-0075).
+ * In-memory copy of the stored Chat images this Frontend has shown (ADR-0075), keyed by
+ * image and variant (ADR-0084): a Chat row holds the preview, the full-size view the
+ * original.
  *
  * An image id is the SHA-256 of its bytes, so an id never names different bytes: a cached
  * entry is never stale and is never revalidated, and one entry serves every Task and view
@@ -7,14 +12,14 @@
  * stays the owner of the images and of access to them.
  */
 export type ChatImageCache = {
-  /** The cached base64 bytes, marking the image as the most recently shown. */
-  get(imageId: string): string | undefined;
+  /** The cached image, marking it as the most recently shown. */
+  get(key: string): LoadedChatImage | undefined;
   /**
    * Returns the image from memory, or from `fetch`. Every view of the same Task image that
    * asks while a request is in flight shares that request. A failure is not cached, so
    * the next call (a Retry) requests again.
    */
-  load(taskId: string, imageId: string, fetch: () => Promise<string>): Promise<string>;
+  load(taskId: string, key: string, fetch: () => Promise<LoadedChatImage>): Promise<LoadedChatImage>;
   /** Forgets every cached image; in-flight requests still settle for their callers. */
   clear(): void;
   /** Base64 characters held, the quantity the bound applies to. */
@@ -27,62 +32,67 @@ export type ChatImageCache = {
  */
 export const CHAT_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
+/** The cache key of one copy of one stored image. */
+export function chatImageCacheKey(imageId: string, variant: TaskImageVariant) {
+  return `${imageId}:${variant}`;
+}
+
 export function createChatImageCache({ maxBytes = CHAT_IMAGE_CACHE_MAX_BYTES }: { maxBytes?: number } = {}): ChatImageCache {
   // Map iteration follows insertion order; re-inserting on every read makes the first key
   // the least recently shown, which is the one evicted first.
-  const entries = new Map<string, string>();
+  const entries = new Map<string, LoadedChatImage>();
   // In-flight requests are keyed by Task as well as image: access is checked per Task, so a
   // failure in one Task must not fail the same image shown in another.
-  const inFlight = new Map<string, Promise<string>>();
+  const inFlight = new Map<string, Promise<LoadedChatImage>>();
   let held = 0;
 
-  const remember = (imageId: string, data: string) => {
-    const previous = entries.get(imageId);
+  const remember = (key: string, image: LoadedChatImage) => {
+    const previous = entries.get(key);
     if (previous !== undefined) {
-      entries.delete(imageId);
-      held -= previous.length;
+      entries.delete(key);
+      held -= previous.data.length;
     }
     // An image larger than the whole bound is shown but not retained.
-    if (data.length > maxBytes) return;
-    entries.set(imageId, data);
-    held += data.length;
-    for (const [oldestId, oldest] of entries) {
+    if (image.data.length > maxBytes) return;
+    entries.set(key, image);
+    held += image.data.length;
+    for (const [oldestKey, oldest] of entries) {
       if (held <= maxBytes) break;
-      entries.delete(oldestId);
-      held -= oldest.length;
+      entries.delete(oldestKey);
+      held -= oldest.data.length;
     }
   };
 
-  const get = (imageId: string) => {
-    const data = entries.get(imageId);
-    if (data === undefined) return undefined;
-    entries.delete(imageId);
-    entries.set(imageId, data);
-    return data;
+  const get = (key: string) => {
+    const image = entries.get(key);
+    if (image === undefined) return undefined;
+    entries.delete(key);
+    entries.set(key, image);
+    return image;
   };
 
   return {
     get,
-    load(taskId, imageId, fetch) {
-      const cached = get(imageId);
+    load(taskId, key, fetch) {
+      const cached = get(key);
       if (cached !== undefined) return Promise.resolve(cached);
-      const key = `${taskId}\u0000${imageId}`;
-      const pending = inFlight.get(key);
+      const requestKey = `${taskId}\u0000${key}`;
+      const pending = inFlight.get(requestKey);
       if (pending) return pending;
       const request = Promise.resolve()
         .then(fetch)
         .then(
-          (data) => {
-            inFlight.delete(key);
-            remember(imageId, data);
-            return data;
+          (image) => {
+            inFlight.delete(requestKey);
+            remember(key, image);
+            return image;
           },
           (error: unknown) => {
-            inFlight.delete(key);
+            inFlight.delete(requestKey);
             throw error;
           },
         );
-      inFlight.set(key, request);
+      inFlight.set(requestKey, request);
       return request;
     },
     clear() {

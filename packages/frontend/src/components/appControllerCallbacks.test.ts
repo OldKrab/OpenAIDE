@@ -4372,15 +4372,15 @@ describe("app controller callbacks", () => {
     const data = await callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       state: createInitialState(),
-    }).task.loadChatImage("task_2", "image_1");
+    }).task.loadChatImage("task_2", "image_1", "preview");
 
-    expect(data).toBe("aW1hZ2U=");
-    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_2", imageId: "image_1" });
+    expect(data).toEqual({ data: "aW1hZ2U=" });
+    expect(request).toHaveBeenCalledWith(TASK_IMAGE, { taskId: "task_2", imageId: "image_1", variant: "preview" });
     const telemetry = postHostMessage.mock.calls
       .map(([message]) => (message as { payload: Record<string, unknown> }).payload)
       .filter((payload) => String(payload.event).startsWith("chat_image_load_"));
     expect(telemetry).toEqual([
-      { event: "chat_image_load_started", task_id: "task_2", image_id: "image_1", cache_hit: false },
+      { event: "chat_image_load_started", task_id: "task_2", image_id: "image_1", variant: "preview", cache_hit: false },
       expect.objectContaining({ event: "chat_image_load_completed", task_id: "task_2", image_id: "image_1", size_bytes: 5 }),
     ]);
     expect(JSON.stringify(telemetry)).not.toContain("aW1hZ2U=");

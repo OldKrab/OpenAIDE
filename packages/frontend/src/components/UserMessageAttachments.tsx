@@ -92,7 +92,7 @@ function ImageAttachmentButton({
   );
 }
 
-/** A sent Image App Server stored for the Task; it loads when shown and opens once loaded. */
+/** A sent Image App Server stored for the Task; its preview loads when shown and opens once loaded. */
 function StoredImageAttachment({
   label,
   onOpenImage,
@@ -107,7 +107,8 @@ function StoredImageAttachment({
   if (state.status !== "ready") {
     return <StoredChatImagePlaceholder className="chat-image-attachment" label={label} size={size} state={state} />;
   }
-  return <ImageAttachmentButton image={{ label, url: state.url }} onOpenImage={onOpenImage} size={size} />;
+  // The row shows the preview; opening it loads the original (ADR-0084).
+  return <ImageAttachmentButton image={{ label, url: state.url, storedImage: reference }} onOpenImage={onOpenImage} size={size} />;
 }
 
 function AttachmentAction({ action }: { action: "download" | "preview" | "reveal" }) {

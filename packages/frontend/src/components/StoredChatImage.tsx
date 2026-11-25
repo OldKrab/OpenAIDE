@@ -1,6 +1,8 @@
 import { ImageOff } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { chatImageCache, type ChatImageCache } from "../state/chatImageCache";
+import type { TaskImageVariant } from "@openaide/app-server-client";
+import type { LoadedChatImage } from "../intents/chatImageIntents";
+import { chatImageCache, chatImageCacheKey, type ChatImageCache } from "../state/chatImageCache";
 
 /** A stored Chat image as a Chat message names it (ADR-0075): no bytes, only identity. */
 export type StoredChatImageReference = {
@@ -19,9 +21,11 @@ export function storedChatImageSize(reference: StoredChatImageReference) {
   return { width, height };
 }
 
+export type ChatImageLoader = (taskId: string, imageId: string, variant: TaskImageVariant) => Promise<LoadedChatImage>;
+
 type ChatImageSource = {
   cache: ChatImageCache;
-  load(imageId: string): Promise<string>;
+  load(imageId: string, variant: TaskImageVariant): Promise<LoadedChatImage>;
   taskId?: string;
 };
 
@@ -45,7 +49,7 @@ export function ChatImageProvider({
 }: {
   cache?: ChatImageCache;
   children: ReactNode;
-  loadImage?: (taskId: string, imageId: string) => Promise<string>;
+  loadImage?: ChatImageLoader;
   taskId: string;
 }) {
   // The loader is read at call time so a new callback identity does not restart loads.
@@ -53,9 +57,9 @@ export function ChatImageProvider({
   loadImageRef.current = loadImage;
   const source = useMemo<ChatImageSource>(() => ({
     cache,
-    load: (imageId) => loadImageRef.current
-      ? loadImageRef.current(taskId, imageId)
-      : unavailableSource.load(imageId),
+    load: (imageId, variant) => loadImageRef.current
+      ? loadImageRef.current(taskId, imageId, variant)
+      : unavailableSource.load(imageId, variant),
     taskId,
   }), [cache, taskId]);
   return <ChatImageContext.Provider value={source}>{children}</ChatImageContext.Provider>;
@@ -66,31 +70,41 @@ export type StoredChatImageState =
   | { status: "ready"; url: string }
   | { status: "failed"; retry?: () => void };
 
-type Loaded = { key: string; data?: string; failed?: boolean };
+type Loaded = { key: string; image?: LoadedChatImage; failed?: boolean };
 
-/** Loads a stored image through the shared cache; the result is a data URL for an `<img>`. */
-export function useStoredChatImage(reference: StoredChatImageReference): StoredChatImageState {
+/**
+ * Loads a stored image through the shared cache; the result is a data URL for an `<img>`.
+ * A Chat row shows the `preview`; the full-size view asks for the `original` (ADR-0084).
+ */
+export function useStoredChatImage(
+  reference: StoredChatImageReference,
+  variant: TaskImageVariant = "preview",
+): StoredChatImageState {
   const { cache, load, taskId = "" } = useContext(ChatImageContext);
   const { imageId, mediaType } = reference;
   const renderable = mediaType.startsWith("image/");
-  const key = `${taskId}\u0000${imageId}`;
-  const [loaded, setLoaded] = useState<Loaded>(() => ({ key, data: cache.get(imageId) }));
+  const cacheKey = chatImageCacheKey(imageId, variant);
+  const key = `${taskId}\u0000${cacheKey}`;
+  const [loaded, setLoaded] = useState<Loaded>(() => ({ key, image: cache.get(cacheKey) }));
   // A reused view adopts the new image at once, from memory when it is cached.
-  const current = loaded.key === key ? loaded : { key, data: cache.get(imageId) };
-  const needsLoad = renderable && current.data === undefined && !current.failed;
+  const current = loaded.key === key ? loaded : { key, image: cache.get(cacheKey) };
+  const needsLoad = renderable && current.image === undefined && !current.failed;
 
   useEffect(() => {
     if (!needsLoad) return;
     let active = true;
-    cache.load(taskId, imageId, () => load(imageId)).then(
-      (data) => { if (active) setLoaded({ key, data }); },
+    cache.load(taskId, cacheKey, () => load(imageId, variant)).then(
+      (image) => { if (active) setLoaded({ key, image }); },
       () => { if (active) setLoaded({ key, failed: true }); },
     );
     return () => { active = false; };
-  }, [cache, imageId, key, load, needsLoad, taskId]);
+  }, [cache, cacheKey, imageId, key, load, needsLoad, taskId, variant]);
 
-  const data = current.data;
-  const url = useMemo(() => data === undefined ? undefined : `data:${mediaType};base64,${data}`, [data, mediaType]);
+  const image = current.image;
+  const url = useMemo(
+    () => image === undefined ? undefined : `data:${image.mediaType ?? mediaType};base64,${image.data}`,
+    [image, mediaType],
+  );
   if (!renderable) return { status: "failed" };
   if (url) return { status: "ready", url };
   if (current.failed) return { status: "failed", retry: () => setLoaded({ key }) };

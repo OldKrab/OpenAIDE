@@ -215,11 +215,11 @@ export function createTaskCallbacks({
         return undefined;
       }
     },
-    loadChatImage: (taskId, imageId) => {
+    loadChatImage: (taskId, imageId, variant) => {
       if (!backendConnection?.request) return Promise.reject(new Error(appServerRequiredMessage()));
       // The session object itself keys the diagnostics batch shared with route events.
       const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
-      return requestChatImage(connection, taskId, imageId, (event, fields) =>
+      return requestChatImage(connection, taskId, imageId, variant, (event, fields) =>
         recordFrontendLifecycleEvent(connection, event, fields));
     },
     subscribeToolDetail: (artifactId) => {

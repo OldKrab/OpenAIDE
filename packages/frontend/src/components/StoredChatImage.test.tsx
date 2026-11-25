@@ -1,10 +1,15 @@
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentMessagePart, Attachment, ChatMessage } from "@openaide/app-shell-contracts";
+import type { LoadedChatImage } from "../intents/chatImageIntents";
+import type { ChatImageLoader } from "./StoredChatImage";
 
 const IMAGE_ID = "f".repeat(64);
 const IMAGE_DATA = "aW1hZ2U=";
 const IMAGE_URL = `data:image/png;base64,${IMAGE_DATA}`;
+const LOADED: LoadedChatImage = { data: IMAGE_DATA };
+const PREVIEW: LoadedChatImage = { data: "cHJldmlldw==", mediaType: "image/jpeg" };
+const PREVIEW_URL = "data:image/jpeg;base64,cHJldmlldw==";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -46,7 +51,12 @@ const storedImage: Attachment = {
   payload: { imageId: IMAGE_ID, mimeType: "image/png", sizeBytes: 5 },
 };
 
-async function renderRows(messages: ChatMessage[], loadImage: (taskId: string, imageId: string) => Promise<string>) {
+/** The text of the full-size view's status note, without its Retry button. */
+function statusText(dialog: ReactTestInstance) {
+  return dialog.findByProps({ role: "status" }).children.filter((child) => typeof child === "string").join("");
+}
+
+async function renderRows(messages: ChatMessage[], loadImage: ChatImageLoader) {
   const { ChatRow } = await import("./ChatMessageView");
   const { ChatImageProvider } = await import("./StoredChatImage");
   const { createChatImageCache } = await import("../state/chatImageCache");
@@ -74,29 +84,68 @@ describe("stored Chat images", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows a loading frame beside the message text, then the image that opens in the lightbox", async () => {
-    const response = deferred<string>();
-    const loadImage = vi.fn(() => response.promise);
+  it("shows a loading frame beside the message text, then the preview that opens in the lightbox", async () => {
+    const preview = deferred<LoadedChatImage>();
+    const original = deferred<LoadedChatImage>();
+    const loadImage = vi.fn<ChatImageLoader>((_taskId, _imageId, variant) =>
+      variant === "preview" ? preview.promise : original.promise);
     const tree = await renderRows([userMessage("u1", "What is this?", [storedImage])], loadImage);
 
-    expect(loadImage).toHaveBeenCalledWith("task_1", IMAGE_ID);
+    expect(loadImage).toHaveBeenCalledWith("task_1", IMAGE_ID, "preview");
     expect(tree.root.findByProps({ "aria-label": "Loading Image" }).props["aria-busy"]).toBe("true");
     expect(JSON.stringify(tree.toJSON())).toContain("What is this?");
     expect(tree.root.findAllByProps({ "aria-label": "Open Image" })).toHaveLength(0);
 
-    await act(async () => response.resolve(IMAGE_DATA));
+    await act(async () => preview.resolve(PREVIEW));
 
     expect(tree.root.findAllByProps({ "aria-label": "Loading Image" })).toHaveLength(0);
     const open = tree.root.findByProps({ "aria-label": "Open Image" });
-    expect(open.findByType("img").props.src).toBe(IMAGE_URL);
+    // The re-encoded preview carries its own media type.
+    expect(open.findByType("img").props.src).toBe(PREVIEW_URL);
     await act(async () => open.props.onClick());
+
+    // The full-size view shows the preview at once and asks for the original.
     const dialog = tree.root.findByProps({ role: "dialog" });
+    expect(dialog.findByProps({ alt: "Image" }).props.src).toBe(PREVIEW_URL);
+    expect(loadImage).toHaveBeenLastCalledWith("task_1", IMAGE_ID, "original");
+    expect(statusText(dialog)).toBe("Loading full size…");
+    // The note comes before the zoom controls, so they do not move when it clears.
+    const toolbar = dialog.findByProps({ className: "attachment-preview-actions" }).children;
+    expect(toolbar.findIndex((child) => typeof child !== "string" && child.props.role === "status"))
+      .toBeLessThan(toolbar.findIndex((child) => typeof child !== "string" && child.props["aria-label"] === "Zoom image out"));
+
+    await act(async () => original.resolve(LOADED));
+
     expect(dialog.findByProps({ alt: "Image" }).props.src).toBe(IMAGE_URL);
+    expect(dialog.findAllByProps({ role: "status" })).toHaveLength(0);
+    await act(async () => tree.unmount());
+  });
+
+  it("keeps the preview in the full-size view when the original fails, and retries it", async () => {
+    let originalAttempts = 0;
+    const loadImage = vi.fn<ChatImageLoader>(async (_taskId, _imageId, variant) => {
+      if (variant === "preview") return PREVIEW;
+      originalAttempts += 1;
+      if (originalAttempts === 1) throw new Error("connection closed");
+      return LOADED;
+    });
+    const tree = await renderRows([agentImageMessage("a1")], loadImage);
+
+    await act(async () => tree.root.findByProps({ "aria-label": "Open Agent image" }).props.onClick());
+
+    const dialog = tree.root.findByProps({ role: "dialog" });
+    expect(dialog.findByProps({ alt: "Agent image" }).props.src).toBe(PREVIEW_URL);
+    expect(statusText(dialog)).toBe("Full size unavailable");
+
+    await act(async () => dialog.findByProps({ className: "attachment-preview-note-retry" }).props.onClick());
+
+    expect(originalAttempts).toBe(2);
+    expect(dialog.findByProps({ alt: "Agent image" }).props.src).toBe(IMAGE_URL);
     await act(async () => tree.unmount());
   });
 
   it("reserves the loaded image's shape while it loads, so the Chat does not shift", async () => {
-    const response = deferred<string>();
+    const response = deferred<LoadedChatImage>();
     const sized: Attachment = { ...storedImage, payload: { ...storedImage.payload as object, width: 640, height: 480 } };
     const tree = await renderRows([userMessage("u1", "", [sized])], vi.fn(() => response.promise));
 
@@ -107,7 +156,7 @@ describe("stored Chat images", () => {
       "--chat-image-width": "640px",
     });
 
-    await act(async () => response.resolve(IMAGE_DATA));
+    await act(async () => response.resolve(LOADED));
 
     const image = tree.root.findByProps({ "aria-label": "Open Image" }).findByType("img");
     expect([image.props.width, image.props.height]).toEqual([640, 480]);
@@ -115,7 +164,7 @@ describe("stored Chat images", () => {
   });
 
   it("keeps one placeholder height for a reference without an image size", async () => {
-    const tree = await renderRows([userMessage("u1", "", [storedImage])], vi.fn(() => new Promise<string>(() => {})));
+    const tree = await renderRows([userMessage("u1", "", [storedImage])], vi.fn(() => new Promise<LoadedChatImage>(() => {})));
 
     const frame = tree.root.findByProps({ "aria-label": "Loading Image" });
     expect(frame.props["data-image-sized"]).toBeUndefined();
@@ -126,7 +175,7 @@ describe("stored Chat images", () => {
   it("shows an unavailable state with Retry that requests the image again", async () => {
     const loadImage = vi.fn()
       .mockImplementationOnce(async () => { throw new Error("notFound"); })
-      .mockImplementationOnce(async () => IMAGE_DATA);
+      .mockImplementationOnce(async () => LOADED);
     const tree = await renderRows([agentImageMessage("a1")], loadImage);
 
     expect(tree.root.findByProps({ "aria-label": "Agent image unavailable" })).toBeDefined();
@@ -142,7 +191,7 @@ describe("stored Chat images", () => {
   });
 
   it("shares one request among every view of the same image", async () => {
-    const response = deferred<string>();
+    const response = deferred<LoadedChatImage>();
     const loadImage = vi.fn(() => response.promise);
     const tree = await renderRows([
       userMessage("u1", "first", [storedImage]),
@@ -150,7 +199,7 @@ describe("stored Chat images", () => {
       agentImageMessage("a1"),
     ], loadImage);
 
-    await act(async () => response.resolve(IMAGE_DATA));
+    await act(async () => response.resolve(LOADED));
 
     expect(loadImage).toHaveBeenCalledOnce();
     expect(tree.root.findAllByProps({ "aria-label": "Open Image" })).toHaveLength(2);
@@ -159,7 +208,7 @@ describe("stored Chat images", () => {
   });
 
   it("renders a local preview the client still holds without loading anything", async () => {
-    const loadImage = vi.fn(async () => IMAGE_DATA);
+    const loadImage = vi.fn(async () => LOADED);
     const tree = await renderRows([userMessage("u1", "pending", [
       { kind: "image", label: "local.png", payload: { previewUrl: IMAGE_URL } },
     ])], loadImage);

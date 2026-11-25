@@ -1,25 +1,17 @@
-use std::io::{Cursor, Read};
-use std::sync::Mutex;
+use std::io::Read;
 use std::time::Instant;
 
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
+use image::ImageFormat;
 use openaide_app_server_protocol::file_viewer::FileViewerError;
 
-// Source and decoded budgets protect the server; output budgets protect the protocol and browser.
-const INPUT_MAX_BYTES: u64 = 64 * 1024 * 1024;
-const DECODE_MAX_BYTES: u64 = 128 * 1024 * 1024;
-const SOURCE_MAX_PIXELS: u64 = 32_000_000;
-const PREVIEW_MAX_EDGE: u32 = 2048;
-const PREVIEW_MAX_BYTES: usize = 2 * 1024 * 1024;
+use crate::image_preview::{self, ImagePreview, PreviewBounds, INPUT_MAX_BYTES};
 
-// Admission is independent of the protocol lock, bounding conversion memory across clients.
-pub(super) static IMAGE_PREVIEW_GATE: Mutex<()> = Mutex::new(());
-
-pub(super) struct ImagePreview {
-    pub media_type: &'static str,
-    pub bytes: Vec<u8>,
-    pub reduced: bool,
-}
+// Output budgets protect the protocol and the browser.
+const BOUNDS: PreviewBounds = PreviewBounds {
+    max_edge: 2048,
+    max_bytes: 2 * 1024 * 1024,
+    jpeg_quality: 85,
+};
 
 /// Produces presentation bytes only. The viewer capability continues to identify the original file.
 pub(super) fn load(
@@ -36,7 +28,7 @@ pub(super) fn load(
             "operation_id": operation_id, "attempt": 1, "source_bytes": source_size,
         }),
     );
-    let result = match IMAGE_PREVIEW_GATE.lock() {
+    let result = match image_preview::GATE.lock() {
         Ok(_permit) => {
             crate::logging::info(
                 "file_viewer_image_preview_admitted",
@@ -79,65 +71,6 @@ fn load_inner(
         return Err(FileViewerError::Unsupported);
     }
     let format = ImageFormat::from_mime_type(media_type).ok_or(FileViewerError::Unsupported)?;
-    let mut reader = ImageReader::with_format(Cursor::new(&bytes), format);
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(16_384);
-    limits.max_image_height = Some(16_384);
-    limits.max_alloc = Some(DECODE_MAX_BYTES);
-    reader.limits(limits.clone());
-    let mut decoder = reader.into_decoder().map_err(image_error)?;
-    let (width, height) = decoder.dimensions();
-    if u64::from(width) * u64::from(height) > SOURCE_MAX_PIXELS {
-        return Err(FileViewerError::Unsupported);
-    }
-    // ImageReader::into_decoder does not reserve the output buffer as decode() does.
-    limits.reserve(decoder.total_bytes()).map_err(image_error)?;
-    decoder.set_limits(limits).map_err(image_error)?;
-    let orientation = decoder.orientation().map_err(image_error)?;
-    let mut decoded = DynamicImage::from_decoder(decoder).map_err(image_error)?;
-    if bytes.len() <= PREVIEW_MAX_BYTES && width <= PREVIEW_MAX_EDGE && height <= PREVIEW_MAX_EDGE {
-        // Keep animation, metadata, and exact colors for already-bounded images.
-        return Ok(ImagePreview {
-            bytes,
-            media_type,
-            reduced: false,
-        });
-    }
-    decoded.apply_orientation(orientation);
-    let mut preview = decoded.thumbnail(
-        decoded.width().min(PREVIEW_MAX_EDGE),
-        decoded.height().min(PREVIEW_MAX_EDGE),
-    );
-    drop(decoded);
-    drop(bytes);
-    loop {
-        let mut encoded = Vec::new();
-        let media_type = if preview.color().has_alpha() {
-            preview
-                .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
-                .map_err(image_error)?;
-            "image/png"
-        } else {
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 85)
-                .encode_image(&preview.to_rgb8())
-                .map_err(image_error)?;
-            "image/jpeg"
-        };
-        if encoded.len() <= PREVIEW_MAX_BYTES {
-            return Ok(ImagePreview {
-                bytes: encoded,
-                media_type,
-                reduced: true,
-            });
-        }
-        // Halving dimensions guarantees termination and retains transparency rather than flattening it.
-        preview = preview.thumbnail((preview.width() / 2).max(1), (preview.height() / 2).max(1));
-    }
-}
-
-fn image_error(error: image::ImageError) -> FileViewerError {
-    match error {
-        image::ImageError::IoError(_) => FileViewerError::Unreadable,
-        _ => FileViewerError::Unsupported,
-    }
+    image_preview::reduce(bytes, format, media_type, BOUNDS)
+        .map_err(|image_preview::Unsupported| FileViewerError::Unsupported)
 }

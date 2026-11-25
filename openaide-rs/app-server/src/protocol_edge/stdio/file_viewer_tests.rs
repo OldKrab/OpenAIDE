@@ -6,7 +6,7 @@ use crate::storage_runtime::StateRoot;
 use openaide_app_server_protocol::methods::{CLIENT_INITIALIZE, FILE_VIEWER_OPEN};
 use serde_json::{json, Value};
 
-fn init_request(id: &str, client_id: &str) -> String {
+pub(super) fn init_request(id: &str, client_id: &str) -> String {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -24,11 +24,11 @@ fn init_request(id: &str, client_id: &str) -> String {
     .to_string()
 }
 
-fn response(line: &str) -> Value {
+pub(super) fn response(line: &str) -> Value {
     serde_json::from_str(line).expect("json response")
 }
 
-fn task_record(task_id: &str, workspace_root: String) -> TaskRecord {
+pub(super) fn task_record(task_id: &str, workspace_root: String) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
         title: crate::storage::records::TaskTitleState::from_title(

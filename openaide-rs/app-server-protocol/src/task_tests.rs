@@ -143,3 +143,32 @@ fn tool_image_preview_request_uses_only_task_and_artifact_identity() {
         })
     );
 }
+
+#[test]
+fn task_image_request_without_a_variant_still_means_the_original() {
+    // An older client sends no variant and must keep getting the stored bytes.
+    let older: TaskImageParams =
+        serde_json::from_value(json!({ "taskId": "task-1", "imageId": "abc" })).unwrap();
+    assert_eq!(older.variant, None);
+
+    let preview = TaskImageParams {
+        task_id: TaskId::new("task-1"),
+        image_id: "abc".to_string(),
+        variant: Some(TaskImageVariant::Preview),
+    };
+    assert_eq!(
+        serde_json::to_value(preview).unwrap(),
+        json!({ "taskId": "task-1", "imageId": "abc", "variant": "preview" })
+    );
+
+    // A result that is not a re-encoded preview carries no media type, so an older
+    // client sees exactly the shape it knows.
+    let original = TaskImageResult {
+        data: "aGk=".to_string(),
+        media_type: None,
+    };
+    assert_eq!(
+        serde_json::to_value(original).unwrap(),
+        json!({ "data": "aGk=" })
+    );
+}
