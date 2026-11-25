@@ -165,3 +165,156 @@ fn pairing_is_unavailable_without_a_network_edge() {
 
     assert_eq!(error.error.code, ProtocolErrorCode::CapabilityUnavailable);
 }
+
+/// A relay that holds its answer to `/me` until the test releases it.
+struct GatedRelay {
+    relay: crate::remote_devices::relay_api::fake::FakeRelay,
+    entered: std::sync::Mutex<std::sync::mpsc::Sender<()>>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl crate::remote_devices::relay_api::RelayApi for GatedRelay {
+    fn me(
+        &self,
+        key: &openaide_remote_core::OwnRelay,
+    ) -> Result<
+        crate::remote_devices::relay_api::Person,
+        crate::remote_devices::relay_api::RelayApiError,
+    > {
+        let _ = self.entered.lock().unwrap().send(());
+        let _ = self.release.lock().unwrap().recv();
+        self.relay.me(key)
+    }
+
+    fn people(
+        &self,
+        key: &openaide_remote_core::OwnRelay,
+    ) -> Result<
+        Vec<crate::remote_devices::relay_api::Person>,
+        crate::remote_devices::relay_api::RelayApiError,
+    > {
+        self.relay.people(key)
+    }
+
+    fn add(
+        &self,
+        key: &openaide_remote_core::OwnRelay,
+        name: &str,
+        can_manage: bool,
+    ) -> Result<
+        crate::remote_devices::relay_api::NewPerson,
+        crate::remote_devices::relay_api::RelayApiError,
+    > {
+        self.relay.add(key, name, can_manage)
+    }
+
+    fn revoke(
+        &self,
+        key: &openaide_remote_core::OwnRelay,
+        name: &str,
+    ) -> Result<(), crate::remote_devices::relay_api::RelayApiError> {
+        self.relay.revoke(key, name)
+    }
+}
+
+#[test]
+fn a_relay_that_is_slow_to_answer_does_not_hold_up_other_clients() {
+    use openaide_app_server_protocol::devices::{
+        DevicesRelayAddPersonParams, DevicesRelayPeopleParams, DevicesSetRelayParams,
+    };
+    use openaide_app_server_protocol::methods::{
+        DEVICES_RELAY_ADD_PERSON, DEVICES_RELAY_PEOPLE, DEVICES_SET_RELAY,
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let relay = crate::remote_devices::relay_api::fake::FakeRelay::default();
+    let manage = relay.issue("owner", true);
+    let (entered_sender, entered) = std::sync::mpsc::channel();
+    let (release, release_receiver) = std::sync::mpsc::channel();
+    let devices = RemoteDevices::open_with(
+        root.path(),
+        std::sync::Arc::new(GatedRelay {
+            relay: relay.clone(),
+            entered: std::sync::Mutex::new(entered_sender),
+            release: std::sync::Mutex::new(release_receiver),
+        }),
+    );
+    devices.attach_edge(|_command| {});
+    let gateway = SharedRpcGateway::new(gateway().with_remote_devices(devices));
+    let (asking, waiting) = (ConnectionId::new("conn-1"), ConnectionId::new("conn-2"));
+    for (connection_id, client) in [(&asking, "client-1"), (&waiting, "client-2")] {
+        response_value(gateway.handle_inbound(
+            connection_id.clone(),
+            request("1", CLIENT_INITIALIZE, init_params(client)),
+            AppServerTime(1),
+        ));
+    }
+    response_value(gateway.handle_inbound(
+        waiting.clone(),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Devices,
+                known_revision: None,
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    let setting = std::thread::spawn({
+        let gateway = gateway.clone();
+        let asking = asking.clone();
+        move || {
+            gateway.handle_inbound(
+                asking,
+                request(
+                    "3",
+                    DEVICES_SET_RELAY,
+                    DevicesSetRelayParams {
+                        relay: Some(manage),
+                    },
+                ),
+                AppServerTime(3),
+            )
+        }
+    });
+    entered.recv().unwrap();
+    // While the relay has not answered, another client is still served.
+    let invite = response_value(gateway.handle_inbound(
+        waiting.clone(),
+        request("4", DEVICES_CREATE_INVITE, DevicesCreateInviteParams {}),
+        AppServerTime(4),
+    ));
+    assert!(invite["result"]["code"].is_string());
+    release.send(()).unwrap();
+    let events = response_events(setting.join().unwrap());
+
+    assert!(events.iter().any(|delivery| matches!(
+        &delivery.event.payload,
+        AppServerEventPayload::DeviceCollectionUpdated { devices }
+            if devices.own_relay.as_ref().is_some_and(|relay| relay.can_manage)
+    )));
+    let added = response_value(gateway.handle_inbound(
+        asking.clone(),
+        request(
+            "5",
+            DEVICES_RELAY_ADD_PERSON,
+            DevicesRelayAddPersonParams {
+                name: "Olga".to_string(),
+                can_manage: false,
+            },
+        ),
+        AppServerTime(5),
+    ));
+    assert!(added["result"]["key"]
+        .as_str()
+        .is_some_and(|key| key.starts_with("https://relay.example.com/?token=")));
+    let people = response_value(gateway.handle_inbound(
+        asking,
+        request("6", DEVICES_RELAY_PEOPLE, DevicesRelayPeopleParams {}),
+        AppServerTime(6),
+    ));
+    assert_eq!(people["result"]["people"].as_array().unwrap().len(), 3);
+    assert_eq!(people["result"]["people"][1]["thisComputer"], json!(true));
+}

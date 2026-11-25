@@ -1,5 +1,5 @@
 [workspace]
-members = ["openaide-rs/android-remote", "openaide-rs/android-ssh", "openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client", "openaide-rs/remote-core"]
+members = ["openaide-rs/android-remote", "openaide-rs/android-ssh", "openaide-rs/app-server", "openaide-rs/app-server-protocol", "openaide-rs/remote-client", "openaide-rs/relay", "openaide-rs/remote-core"]
 resolver = "2"
 
 [workspace.package]

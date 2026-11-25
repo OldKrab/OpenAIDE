@@ -44,7 +44,11 @@ fn fixture_on(network: Network) -> Fixture {
         }
     });
     let root = tempfile::tempdir().unwrap();
-    let devices = RemoteDevices::open(root.path());
+    // The edge's relays have no management API, like a stock iroh-relay.
+    let devices = RemoteDevices::open_with(
+        root.path(),
+        std::sync::Arc::new(crate::remote_devices::relay_api::fake::FakeRelay::stock()),
+    );
     let lookup = match &network {
         Network::Local(lookup) => lookup.clone(),
         _ => MemoryLookup::new(),
@@ -112,6 +116,7 @@ async fn redeem(
         secret: InviteCode {
             server: invite.server,
             secret: *secret,
+            relay: None,
         }
         .secret_text(),
         name: "Phone".to_string(),
@@ -606,3 +611,6 @@ fn a_connection_through_a_relay_logs_the_bytes_the_relay_carried() {
         "{ended}"
     );
 }
+
+#[path = "edge_own_relay_tests.rs"]
+mod own_relay;

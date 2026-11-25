@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use iroh::endpoint::{Connection, RecvStream, SendStream};
 use iroh::{Endpoint, PublicKey, SecretKey};
-use openaide_remote_core::{application_alpn, InviteCode, Network};
+use openaide_remote_core::{application_alpn, InviteCode, Network, OwnRelay};
 
 use crate::client::{bind_on, elapsed_ms, failure_of, redeem, Failure, PairedServer};
 use crate::Logger;
@@ -53,6 +53,19 @@ pub trait NodeHost: Send + Sync {
     /// The relay `computer` last answered through, as kept by [`NodeHost::save_relay`].
     fn relay(&self, computer: &PublicKey) -> Option<String>;
     fn save_relay(&self, computer: &PublicKey, relay: &str) -> Result<(), StorageUnavailable>;
+    /// The Own Relay line `computer`'s Pairing Code carried (ADR-0085), password
+    /// included, or `None` for a computer on the public relays. Unlike
+    /// [`NodeHost::relay`], which is only a hint learned after a connect, it is part
+    /// of the pairing: every dial of `computer` goes through it. It is a secret, kept
+    /// only in app-private storage and never logged.
+    fn own_relay(&self, computer: &PublicKey) -> Result<Option<String>, StorageUnavailable>;
+    /// Replaces `computer`'s Own Relay line; `None` clears it. The node calls it when
+    /// pairing succeeds; the platform clears the line itself when it forgets `computer`.
+    fn save_own_relay(
+        &self,
+        computer: &PublicKey,
+        line: Option<&str>,
+    ) -> Result<(), StorageUnavailable>;
     /// How this device is online now, for the records of a dial and of a check.
     fn network(&self) -> NetworkKind {
         NetworkKind::UNKNOWN
@@ -170,7 +183,28 @@ impl RemoteNode {
         model: Option<&str>,
     ) -> Result<PairedServer, Failure> {
         let endpoint = self.endpoint().await?;
-        redeem(&endpoint, invite, name, model, &self.inner.log).await
+        let paired = redeem(&endpoint, invite, name, model, &self.inner.log).await?;
+        self.keep_own_relay(&paired)?;
+        Ok(paired)
+    }
+
+    /// Keeps the Own Relay of a computer just paired, or clears the line an earlier
+    /// pairing left. It is kept before the caller saves the computer, so no computer
+    /// is ever kept without the relay it must be dialled at; that would silently
+    /// dial it on the public relays.
+    fn keep_own_relay(&self, paired: &PairedServer) -> Result<(), Failure> {
+        let line = paired.relay.as_ref().map(OwnRelay::line);
+        let saved = self.inner.host.save_own_relay(&paired.id, line.as_deref());
+        let outcome = match (&saved, &paired.relay) {
+            (Ok(()), Some(_)) => "saved",
+            (Ok(()), None) => "cleared",
+            (Err(_), _) => "storage_unavailable",
+        };
+        self.log(
+            "remote_pairing_own_relay_kept",
+            serde_json::json!({ "outcome": outcome, "computer_own_relay": paired.relay.is_some() }),
+        );
+        saved.map_err(|_| Failure::Storage)
     }
 
     /// The live connection to the computer in use, opened or reopened on demand.

@@ -22,6 +22,7 @@ use serde_json::json;
 
 pub(crate) mod launch;
 pub(crate) mod local_client;
+mod relay;
 mod text;
 
 use launch::Connection;
@@ -42,6 +43,14 @@ Usage:
   openaide-app-server remote devices        List the paired devices
   openaide-app-server remote remove <number> [--yes]
                                             Remove a paired device by its number in the list
+  openaide-app-server remote relay          Show the relay this computer is reached through
+  openaide-app-server remote relay set [--yes]
+                                            Use your own relay: reads its relay key on standard input
+  openaide-app-server remote relay clear [--yes]
+                                            Go back to the free public relays
+
+Changing the relay removes every paired device; each must be paired again.
+Setting up your own relay: https://github.com/OldKrab/OpenAIDE/blob/main/docs/own-relay.md
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +59,9 @@ pub(crate) enum Action {
     Pair,
     Devices,
     Remove { number: usize, confirmed: bool },
+    Relay,
+    SetRelay { confirmed: bool },
+    ClearRelay { confirmed: bool },
     Help,
 }
 
@@ -63,6 +75,30 @@ pub(crate) fn parse(arguments: &[String]) -> Result<Action, String> {
         Some("pair") if words.next().is_none() => Ok(Action::Pair),
         Some("devices") if words.next().is_none() => Ok(Action::Devices),
         Some("help" | "--help" | "-h") => Ok(Action::Help),
+        Some("relay") => {
+            let change = words.next();
+            let mut confirmed = false;
+            for word in words {
+                match word {
+                    "--yes" | "-y" => confirmed = true,
+                    // A relay key holds a password, which must not sit in the arguments.
+                    word if word.contains("://") => {
+                        return Err("Paste the relay key on standard input, not as an argument."
+                            .to_string())
+                    }
+                    word => return Err(format!("Unexpected \"{word}\".")),
+                }
+            }
+            match change {
+                None => Ok(Action::Relay),
+                Some("set") => Ok(Action::SetRelay { confirmed }),
+                Some("clear") => Ok(Action::ClearRelay { confirmed }),
+                Some(word) if word.contains("://") => {
+                    Err("Paste the relay key on standard input, not as an argument.".to_string())
+                }
+                Some(word) => Err(format!("Unknown relay command \"{word}\".")),
+            }
+        }
         Some("remove") => {
             let mut number = None;
             let mut confirmed = false;
@@ -100,6 +136,9 @@ pub(crate) fn run(arguments: &[String], state_root: &StateRoot, runtime_root: &P
         Action::Pair => "pair",
         Action::Devices => "devices",
         Action::Remove { .. } => "remove",
+        Action::Relay => "relay",
+        Action::SetRelay { .. } => "relay_set",
+        Action::ClearRelay { .. } => "relay_clear",
         Action::Help => {
             print!("{USAGE}");
             return 0;
@@ -116,6 +155,13 @@ pub(crate) fn run(arguments: &[String], state_root: &StateRoot, runtime_root: &P
         }),
         Action::Remove { number, confirmed } => with_running(state_root, runtime_root, |client| {
             remove_device(client, number, confirmed)
+        }),
+        Action::Relay => with_running(state_root, runtime_root, relay::show),
+        Action::SetRelay { confirmed } => with_running(state_root, runtime_root, |client| {
+            relay::change(client, true, confirmed)
+        }),
+        Action::ClearRelay { confirmed } => with_running(state_root, runtime_root, |client| {
+            relay::change(client, false, confirmed)
         }),
         Action::Help => unreachable!("help returned above"),
     };
@@ -151,6 +197,10 @@ enum Failure {
     RemoteAccess,
     NoSuchDevice(usize),
     Cancelled,
+    BadRelay(openaide_remote_core::OwnRelayError),
+    /// Paired devices would be removed, and standard input could not confirm it.
+    RelayNeedsConfirmation(usize),
+    RelayKept,
     Stopped,
 }
 
@@ -170,7 +220,9 @@ impl Failure {
             Self::Client(error) => error.class(),
             Self::RemoteAccess => "remote_access_failed",
             Self::NoSuchDevice(_) => "no_such_device",
-            Self::Cancelled => "cancelled",
+            Self::Cancelled | Self::RelayKept => "cancelled",
+            Self::BadRelay(_) => "bad_relay",
+            Self::RelayNeedsConfirmation(_) => "confirmation_needed",
             Self::Stopped => "app_server_stopped",
         }
     }
@@ -188,6 +240,9 @@ impl Failure {
             Self::RemoteAccess => "This computer could not open its connection for devices. Check its network and try again.".to_string(),
             Self::NoSuchDevice(number) => format!("There is no device number {number}. See the list with: openaide-app-server remote devices"),
             Self::Cancelled => "Nothing was removed.".to_string(),
+            Self::BadRelay(problem) => format!("That is not a relay key: {problem}."),
+            Self::RelayNeedsConfirmation(paired) => format!("Changing the relay removes the {paired} paired device(s). Add --yes to go ahead."),
+            Self::RelayKept => "The relay was not changed.".to_string(),
             Self::Stopped => "OpenAIDE stopped unexpectedly. Its log has the reason.".to_string(),
         }
     }

@@ -3,11 +3,13 @@
 //! other key as the App Server does.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU32;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
-use openaide_remote_core::close;
+use iroh_relay::server::{Access, AccessControl, ClientRequest};
+use openaide_remote_core::{close, PairingResult, PAIRING_ALPN, PAIRING_MESSAGE_LIMIT};
 
 use super::*;
 
@@ -22,10 +24,19 @@ struct Computer {
 
 impl Computer {
     async fn start(network: &Network, alpn: Vec<u8>) -> Self {
+        Self::start_with(network, vec![alpn]).await
+    }
+
+    /// A computer that also spends any invite, trusting every device that pairs.
+    async fn start_pairing(network: &Network) -> Self {
+        Self::start_with(network, vec![application_alpn(), PAIRING_ALPN.to_vec()]).await
+    }
+
+    async fn start_with(network: &Network, alpns: Vec<Vec<u8>>) -> Self {
         let endpoint = network
             .builder()
             .secret_key(SecretKey::generate())
-            .alpns(vec![alpn])
+            .alpns(alpns)
             .bind()
             .await
             .unwrap();
@@ -40,6 +51,10 @@ impl Computer {
                     let Ok(connection) = incoming.await else {
                         return;
                     };
+                    if connection.alpn() == PAIRING_ALPN {
+                        spend_invite(&connection, &trust).await;
+                        return;
+                    }
                     if !lock(&trust).contains(&connection.remote_id()) {
                         connection.close(close::UNTRUSTED.into(), b"untrusted");
                         return;
@@ -66,6 +81,25 @@ impl Computer {
     }
 }
 
+/// Answers one invite as the App Server does when its secret is right.
+async fn spend_invite(connection: &Connection, trusted: &Mutex<HashSet<PublicKey>>) {
+    let Ok((mut send, mut recv)) = connection.accept_bi().await else {
+        return;
+    };
+    if recv.read_to_end(PAIRING_MESSAGE_LIMIT).await.is_err() {
+        return;
+    }
+    lock(trusted).insert(connection.remote_id());
+    let answer = PairingResult {
+        trusted: true,
+        server_name: Some("Desk".to_string()),
+    };
+    let _ = send.write_all(&serde_json::to_vec(&answer).unwrap()).await;
+    let _ = send.finish();
+    // The device closes the connection once it has read the answer.
+    let _ = connection.closed().await;
+}
+
 /// Holds a dial for `computer` at its relay lookup, after the dial has its
 /// endpoint, until the test releases it.
 struct Gate {
@@ -80,6 +114,7 @@ struct Host {
     saved_keys: Mutex<usize>,
     in_use: Mutex<Option<PublicKey>>,
     relays: Mutex<HashMap<PublicKey, String>>,
+    own_relays: Mutex<HashMap<PublicKey, String>>,
     gate: Mutex<Option<Gate>>,
 }
 
@@ -112,6 +147,23 @@ impl NodeHost for Host {
 
     fn save_relay(&self, computer: &PublicKey, relay: &str) -> Result<(), StorageUnavailable> {
         lock(&self.relays).insert(*computer, relay.to_string());
+        Ok(())
+    }
+
+    fn own_relay(&self, computer: &PublicKey) -> Result<Option<String>, StorageUnavailable> {
+        Ok(lock(&self.own_relays).get(computer).cloned())
+    }
+
+    fn save_own_relay(
+        &self,
+        computer: &PublicKey,
+        line: Option<&str>,
+    ) -> Result<(), StorageUnavailable> {
+        let mut own_relays = lock(&self.own_relays);
+        match line {
+            Some(line) => own_relays.insert(*computer, line.to_string()),
+            None => own_relays.remove(computer),
+        };
         Ok(())
     }
 }
@@ -448,5 +500,143 @@ async fn a_check_names_how_each_computer_answered() {
     assert_eq!(
         f.records.outcomes("remote_check_completed", "outcome"),
         ["ok", "relay_not_reached", "ok"]
+    );
+}
+
+const RELAY_PASSWORD: &str = "right-password";
+
+/// An Own Relay's access control: admits a client that presents [`RELAY_PASSWORD`],
+/// and counts whom it admitted and turned away. Clones share the counts.
+#[derive(Debug, Default, Clone)]
+struct PasswordGate {
+    admitted: Arc<AtomicU32>,
+    refused: Arc<AtomicU32>,
+}
+
+impl AccessControl for PasswordGate {
+    async fn on_connect(&self, request: &ClientRequest) -> Access {
+        if request.auth_token().as_deref() == Some(RELAY_PASSWORD) {
+            self.admitted.fetch_add(1, Ordering::SeqCst);
+            Access::Allow
+        } else {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            Access::Deny { reason: None }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_computer_paired_through_its_own_relay_is_dialled_there_with_the_password() {
+    let gate = PasswordGate::default();
+    let (_, relay_url, _relay_server) =
+        iroh::test_utils::run_relay_server_with_access(true, Arc::new(gate.clone()))
+            .await
+            .unwrap();
+    let relay = OwnRelay::parse(&format!("{relay_url}?token={RELAY_PASSWORD}")).unwrap();
+    // The device knows no relay, as a phone knows none but the public ones, so it can
+    // reach the computer only at the relay its code names.
+    let network = Network::Relay(iroh::RelayMap::empty());
+    let host = Arc::new(Host::default());
+    let records = Records::default();
+    let timings = Timings {
+        // timing: data — any absence counts, so the return always starts over.
+        stale_after_hidden: Duration::ZERO,
+        ..Timings::default()
+    };
+    let node = RemoteNode::with_timings(network.clone(), host.clone(), records.logger(), timings);
+    let computer = Computer::start_pairing(&network.with_own_relay(Some(&relay))).await;
+    let invite = InviteCode {
+        server: computer.id(),
+        secret: [5; 16],
+        relay: Some(relay.clone()),
+    };
+
+    let paired = node.redeem(&invite, "Phone", None).await.unwrap();
+    assert_eq!(paired.relay.as_ref(), Some(&relay));
+    assert_eq!(
+        lock(&host.own_relays).get(&computer.id()),
+        Some(&relay.line())
+    );
+
+    *lock(&host.in_use) = Some(computer.id());
+    let first = node.connection().await.unwrap();
+    assert!(answered(&node).await);
+    // A return to the screen replaces the endpoint, and the new one learns the relay too.
+    node.hidden();
+    node.shown();
+    records.wait_for("remote_endpoint_closed").await;
+    let second = node.connection().await.unwrap();
+    assert!(!same(&first, &second));
+    assert!(answered(&node).await);
+
+    assert_eq!(
+        records.outcomes("remote_connect_completed", "address"),
+        ["own_relay", "own_relay"]
+    );
+    assert!(records
+        .of("remote_connect_completed")
+        .iter()
+        .all(|fields| fields["computer_own_relay"] == true));
+    assert_eq!(gate.refused.load(Ordering::SeqCst), 0);
+    assert!(
+        gate.admitted.load(Ordering::SeqCst) >= 3,
+        "the computer and both of the device's endpoints"
+    );
+    let logged = format!("{:?}", lock(&records.0));
+    assert!(!logged.contains(RELAY_PASSWORD));
+    assert!(!logged.contains(relay.url().as_str()));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_damaged_own_relay_asks_to_pair_again_instead_of_dialling_elsewhere() {
+    let f = fixture(Timings::default());
+    // Reachable by key on this network, so only the damaged line stops the dial.
+    let computer = f.trusting().await;
+    f.host.use_computer(&computer);
+    lock(&f.host.own_relays).insert(
+        computer.id(),
+        "http://relay.example.com/?token=abc".to_string(),
+    );
+
+    assert_eq!(f.node.connection().await.unwrap_err(), Failure::NotTrusted);
+    assert_eq!(
+        f.records
+            .outcomes("remote_connect_completed", "error_class"),
+        ["own_relay_damaged"]
+    );
+    assert_eq!(
+        f.records.outcomes("remote_connect_completed", "stage"),
+        ["address"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pairing_again_without_an_own_relay_clears_the_line() {
+    let f = fixture(Timings::default());
+    f.host.device();
+    let computer = Computer::start_pairing(&f.network).await;
+    lock(&f.host.own_relays).insert(
+        computer.id(),
+        "https://relay.example.com/?token=abc".to_string(),
+    );
+    let invite = InviteCode {
+        server: computer.id(),
+        secret: [6; 16],
+        relay: None,
+    };
+
+    f.node.redeem(&invite, "Phone", None).await.unwrap();
+    assert!(lock(&f.host.own_relays).is_empty());
+    assert_eq!(
+        f.records
+            .outcomes("remote_pairing_own_relay_kept", "outcome"),
+        ["cleared"]
+    );
+
+    f.host.use_computer(&computer);
+    assert!(answered(&f.node).await);
+    assert_eq!(
+        f.records.outcomes("remote_connect_completed", "address"),
+        ["lookup"]
     );
 }

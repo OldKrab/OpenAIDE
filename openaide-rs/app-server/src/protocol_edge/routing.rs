@@ -301,6 +301,13 @@ impl RpcGateway {
             openaide_app_server_protocol::methods::DEVICES_REMOVE => {
                 self.handle_devices_remove(connection_id, id, params, meta, now)
             }
+            openaide_app_server_protocol::methods::DEVICES_SET_RELAY
+            | openaide_app_server_protocol::methods::DEVICES_RELAY_PEOPLE
+            | openaide_app_server_protocol::methods::DEVICES_RELAY_ADD_PERSON
+            | openaide_app_server_protocol::methods::DEVICES_RELAY_REVOKE_PERSON => {
+                let method = method.clone();
+                self.handle_relay_request(connection_id, id, &method, params, meta, now)
+            }
             openaide_app_server_protocol::methods::TERMINALS_OPEN => {
                 self.handle_terminals_open(connection_id, id, params, meta, now)
             }

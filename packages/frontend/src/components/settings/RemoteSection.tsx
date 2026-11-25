@@ -8,12 +8,15 @@ import type { PhoneSshComputer } from "../../services/connectionSettings";
 import { currentFrontendShell } from "../../services/frontendShell";
 import { AddDeviceDialog, UseAnotherComputerDialog } from "./devicePairingDialogs";
 import type { PhoneConnection } from "./phoneConnection";
+import { useRelaySettings } from "./relaySettings";
 import { settingsInfo } from "./settingsInfo";
 import { AddSshComputerDialog, UpdateSshComputerDialog, useSshStatus } from "./sshComputers";
 import { errorSentence, SettingsButton, SettingsChoice, SettingsConfirm, SettingsInlineError, SettingsNotice } from "./settingsKit";
 import type { SettingsGroup, SettingsRow, SettingsSection } from "./settingsModel";
 
 export type RemoteSectionProps = {
+  /** The section is on screen. */
+  active?: boolean;
   deviceIntents?: RemoteDeviceIntents;
   devices?: DeviceCollectionSnapshot;
   phone?: PhoneConnection;
@@ -34,9 +37,9 @@ type Dialog =
 /**
  * Both sides of remote use on one page (ADR-0081): which computer this shell uses,
  * ending in "Use another computer", and which devices use that computer, with
- * "Add a device".
+ * "Add a device", and the relay those devices go through (ADR-0085).
  */
-export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectionProps): SettingsSection | undefined {
+export function useRemoteSection({ active = false, deviceIntents, devices, phone }: RemoteSectionProps): SettingsSection | undefined {
   const capability = currentFrontendShell()?.computers;
   const computers = useSettingsComputers(capability);
   const ssh = capability?.ssh;
@@ -44,13 +47,16 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
   const [sshNotice, setSshNotice] = useState<string>();
   const [dialog, setDialog] = useState<Dialog>();
   const close = () => setDialog(undefined);
-  if (!capability && !deviceIntents) return undefined;
-
   const inUse = currentComputer(computers.snapshot);
   const phoneSsh = phone?.state?.sshComputers?.find((computer) => computer.current);
   const remoteName = inUse ? computerName(inUse) : phoneSsh?.name;
   const device = computers.snapshot?.device === "phone" || phone ? "phone" : "computer";
   const here = `this ${device}`;
+  // The App Server names itself; a browser tab on another machine is not "this computer".
+  const owner = devices?.serverName || remoteName || here;
+  const relay = useRelaySettings({ active, intents: deviceIntents, devices, owner });
+  if (!capability && !deviceIntents) return undefined;
+
   const groups: SettingsGroup[] = [];
   if (capability) {
     groups.push(computersGroup(computers, phone, {
@@ -65,8 +71,8 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
     }));
   }
   if (deviceIntents) {
-    // The App Server names itself; a browser tab on another machine is not "this computer".
-    groups.push(devicesGroup(devices, devices?.serverName || remoteName || here, (next) => setDialog(next)));
+    groups.push(devicesGroup(devices, owner, (next) => setDialog(next)));
+    groups.push(...relay.groups);
   }
 
   return {
@@ -75,9 +81,10 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
     icon: Wifi,
     value: remoteName,
     groups,
-    overlay: dialog ? (
+    overlay: dialog || relay.overlay ? (
       <>
-        {dialog.kind === "use-another-computer" && capability?.pair ? (
+        {relay.overlay}
+        {dialog?.kind === "use-another-computer" && capability?.pair ? (
           <UseAnotherComputerDialog
             device={device}
             devices={devices}
@@ -85,7 +92,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             pair={capability.pair}
           />
         ) : null}
-        {dialog.kind === "forget" ? (
+        {dialog?.kind === "forget" ? (
           <SettingsConfirm
             confirmLabel="Forget"
             detail={dialog.computer.ssh
@@ -98,8 +105,8 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             title={`Forget ${computerName(dialog.computer)}?`}
           />
         ) : null}
-        {dialog.kind === "add-ssh" && ssh ? <AddSshComputerDialog onClose={close} ssh={ssh} /> : null}
-        {dialog.kind === "update-ssh" && ssh && sshStatus ? (
+        {dialog?.kind === "add-ssh" && ssh ? <AddSshComputerDialog onClose={close} ssh={ssh} /> : null}
+        {dialog?.kind === "update-ssh" && ssh && sshStatus ? (
           <UpdateSshComputerDialog
             computer={remoteName ?? "The SSH computer"}
             impact={deviceIntents?.replacementImpact}
@@ -108,7 +115,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             status={sshStatus}
           />
         ) : null}
-        {dialog.kind === "stop-ssh" && ssh ? (
+        {dialog?.kind === "stop-ssh" && ssh ? (
           <SettingsConfirm
             confirmLabel="Stop"
             detail={`OpenAIDE on ${dialog.computer.name} stops once no app is connected to it, ending work in progress there.${dialog.computer.current ? " This app stays connected until you switch away." : ""}`}
@@ -126,7 +133,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             title={`Stop OpenAIDE on ${dialog.computer.name}?`}
           />
         ) : null}
-        {dialog.kind === "stop-phone-ssh" && phone ? (
+        {dialog?.kind === "stop-phone-ssh" && phone ? (
           <SettingsConfirm
             confirmLabel="Stop"
             detail={`OpenAIDE on ${dialog.computer.name} stops once no app is connected to it, ending work in progress there.${dialog.computer.current ? " This phone stays connected until you switch away." : ""}`}
@@ -137,7 +144,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             title={`Stop OpenAIDE on ${dialog.computer.name}?`}
           />
         ) : null}
-        {dialog.kind === "forget-phone-ssh" && phone ? (
+        {dialog?.kind === "forget-phone-ssh" && phone ? (
           <SettingsConfirm
             confirmLabel="Forget"
             detail={`This phone forgets it and its host key.${dialog.computer.current ? " Work moves to this phone." : ""} OpenAIDE keeps running there until you stop it or no app uses it.`}
@@ -148,7 +155,7 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             title={`Forget ${dialog.computer.name}?`}
           />
         ) : null}
-        {dialog.kind === "update-phone-ssh" && phone?.state?.ssh ? (
+        {dialog?.kind === "update-phone-ssh" && phone?.state?.ssh ? (
           <UpdateSshComputerDialog
             computer={phoneSsh?.name || "The SSH computer"}
             impact={deviceIntents?.replacementImpact}
@@ -157,10 +164,16 @@ export function useRemoteSection({ deviceIntents, devices, phone }: RemoteSectio
             status={phone.state.ssh}
           />
         ) : null}
-        {dialog.kind === "add-device" && deviceIntents ? (
-          <AddDeviceDialog computer={dialog.computer} devices={devices?.devices ?? []} intents={deviceIntents} onClose={close} />
+        {dialog?.kind === "add-device" && deviceIntents ? (
+          <AddDeviceDialog
+            computer={dialog.computer}
+            devices={devices?.devices ?? []}
+            intents={deviceIntents}
+            onClose={close}
+            relayHost={devices?.ownRelay?.host}
+          />
         ) : null}
-        {dialog.kind === "remove" && deviceIntents ? (
+        {dialog?.kind === "remove" && deviceIntents ? (
           <SettingsConfirm
             confirmLabel="Remove device"
             detail="It is disconnected now and must be paired again to return."

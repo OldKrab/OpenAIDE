@@ -9,7 +9,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.insert_str(output.len() - ";\n".len(), " | typeof TASK_QUEUE_RESUME");
     output.insert_str(
         output.len() - ";\n".len(),
-        " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE",
+        " | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof DEVICES_SET_RELAY | typeof DEVICES_RELAY_PEOPLE | typeof DEVICES_RELAY_ADD_PERSON | typeof DEVICES_RELAY_REVOKE_PERSON",
     );
     output.insert_str(
         output.len() - ";\n".len(),
@@ -76,6 +76,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteParams;\n");
     output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteParams;\n");
     output.push_str("  [DEVICES_REMOVE]: DevicesRemoveParams;\n");
+    output.push_str("  [DEVICES_SET_RELAY]: DevicesSetRelayParams;\n");
+    output.push_str("  [DEVICES_RELAY_PEOPLE]: DevicesRelayPeopleParams;\n");
+    output.push_str("  [DEVICES_RELAY_ADD_PERSON]: DevicesRelayAddPersonParams;\n");
+    output.push_str("  [DEVICES_RELAY_REVOKE_PERSON]: DevicesRelayRevokePersonParams;\n");
     output.push_str("  [TASK_ATTENTION_WAIT]: TaskAttentionWaitParams;\n");
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenParams;\n");
     output.push_str("  [TERMINALS_ATTACH]: TerminalsAttachParams;\n");
@@ -207,6 +211,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [DEVICES_CREATE_INVITE]: DevicesCreateInviteResult;\n");
     output.push_str("  [DEVICES_CANCEL_INVITE]: DevicesCancelInviteResult;\n");
     output.push_str("  [DEVICES_REMOVE]: DevicesRemoveResult;\n");
+    output.push_str("  [DEVICES_SET_RELAY]: DevicesSetRelayResult;\n");
+    output.push_str("  [DEVICES_RELAY_PEOPLE]: DevicesRelayPeopleResult;\n");
+    output.push_str("  [DEVICES_RELAY_ADD_PERSON]: DevicesRelayAddPersonResult;\n");
+    output.push_str("  [DEVICES_RELAY_REVOKE_PERSON]: DevicesRelayRevokePersonResult;\n");
     output.push_str("  [TASK_ATTENTION_WAIT]: TaskAttentionWaitResult;\n");
     output.push_str("  [TERMINALS_OPEN]: TerminalsOpenResult;\n");
     output.push_str("  [TERMINALS_ATTACH]: TerminalsAttachResult;\n");

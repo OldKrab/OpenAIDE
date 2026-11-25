@@ -25,6 +25,27 @@ fn reads_each_command() {
             confirmed: true
         })
     );
+    assert_eq!(parse(&words("relay")), Ok(Action::Relay));
+    assert_eq!(
+        parse(&words("relay set")),
+        Ok(Action::SetRelay { confirmed: false })
+    );
+    assert_eq!(
+        parse(&words("relay clear --yes")),
+        Ok(Action::ClearRelay { confirmed: true })
+    );
+}
+
+#[test]
+fn a_relay_line_is_never_taken_from_the_arguments() {
+    for wrong in [
+        "relay set https://relay.example.com/?token=secret",
+        "relay https://relay.example.com/?token=secret",
+    ] {
+        let problem = parse(&words(wrong)).unwrap_err();
+        assert!(problem.contains("standard input"), "{problem}");
+        assert!(!problem.contains("secret"), "{problem}");
+    }
 }
 
 #[test]
@@ -37,6 +58,8 @@ fn refuses_what_it_cannot_read_rather_than_guessing() {
         "remove phone",
         "remove 1 2",
         "--pair x",
+        "relay sett",
+        "relay set now",
     ] {
         assert!(parse(&words(wrong)).is_err(), "{wrong}");
     }
@@ -58,6 +81,9 @@ fn every_failure_has_a_sentence_and_a_stable_class() {
         }),
         Failure::RemoteAccess,
         Failure::NoSuchDevice(4),
+        Failure::BadRelay(openaide_remote_core::OwnRelayError::NoPassword),
+        Failure::RelayNeedsConfirmation(2),
+        Failure::RelayKept,
         Failure::Cancelled,
         Failure::Stopped,
     ];

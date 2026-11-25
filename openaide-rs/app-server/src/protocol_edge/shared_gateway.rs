@@ -40,6 +40,7 @@ use super::{
 /// every request and publication on this gateway is serialized behind one mutex.
 const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
 
+mod relay;
 mod task_image;
 mod uploads;
 
@@ -230,6 +231,15 @@ impl SharedRpcGateway {
             if matches!(method.as_str(), FILE_VIEWER_OPEN | FILE_VIEWER_OPEN_FROM_HANDLE | FILE_VIEWER_REFRESH))
         {
             return self.handle_file_viewer_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if super::device_handlers::is_relay_method(method))
+        {
+            return self.handle_relay_without_protocol_lock(
                 connection_id,
                 message,
                 now,

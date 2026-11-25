@@ -1,6 +1,6 @@
 # Remote Devices Are App Server Clients
 
-Status: accepted; join request removed by ADR-0081
+Status: accepted; join request removed by ADR-0081; own relay added by ADR-0085
 
 An App Shell on another machine, such as the Mobile App on a phone, connects to the App Server as a regular client. It ships its own Frontend, speaks the App Server Protocol, and is trusted by a key pair instead of an account. OpenAIDE runs no sign-in service and stores no password: a Remote Device is trusted because a device that was already trusted paired it.
 
@@ -35,7 +35,7 @@ An OpenAIDE-operated account and broker service was rejected because the product
 
 A VPN or tunnel the user configures was rejected as the default because it moves the whole setup burden to the user. It remains possible for a Web App deployment.
 
-Running OpenAIDE's own relays was rejected for now: the public relays are operated at larger scale than the project could match, and no relay can read the traffic. A setting for a custom relay can be added without changing this decision.
+Running OpenAIDE's own relays was rejected for now: the public relays are operated at larger scale than the project could match, and no relay can read the traffic. A computer may instead use a relay someone runs for it, reached with a password ([ADR-0085](0085-a-computer-can-use-its-own-relay.md)).
 
 Full semantic versioning of the protocol was rejected because a patch number carries no compatibility meaning for a wire protocol.
 

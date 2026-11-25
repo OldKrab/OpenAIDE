@@ -14,6 +14,8 @@ import javax.crypto.spec.GCMParameterSpec;
 
 final class ConnectionStore {
     private static final String RELAY_PREFIX = "server_relay_";
+    /** A paired computer's Own Relay line (ADR-0085), encrypted: it carries the relay's password. */
+    private static final String OWN_RELAY_PREFIX = "server_own_relay_";
     private static final String LAST_CONNECTED_PREFIX = "last_connected_";
     private final SharedPreferences preferences;
     /** The computer this phone is paired with: its key and the name it reported. */
@@ -119,7 +121,8 @@ final class ConnectionStore {
         SharedPreferences.Editor edit = preferences.edit().putString("servers", PairedServers.format(PairedServers.without(pairedServers(), id)));
         PairedServer selected = pairedServer();
         if (selected != null && selected.id.equals(id)) edit.remove("server_id").remove("server_name").putBoolean("paired", false);
-        edit.remove(RELAY_PREFIX + id).remove(LAST_CONNECTED_PREFIX + ConnectionFailure.computerKey(id)).apply();
+        edit.remove(RELAY_PREFIX + id).remove(OWN_RELAY_PREFIX + id)
+            .remove(LAST_CONNECTED_PREFIX + ConnectionFailure.computerKey(id)).apply();
     }
 
     /**
@@ -144,6 +147,24 @@ final class ConnectionStore {
     String relay(String id) { return preferences.getString(RELAY_PREFIX + id, null); }
 
     void saveRelay(String id, String relay) { preferences.edit().putString(RELAY_PREFIX + id, relay).apply(); }
+
+    /**
+     * The Own Relay line a computer's Pairing Code carried (ADR-0085), or null for a computer on
+     * the public relays. Unlike {@link #relay}, it is part of the pairing: every dial goes through
+     * it. It holds a password, so it is kept encrypted like the device key and never logged.
+     */
+    String ownRelay(String id) {
+        String stored = preferences.getString(OWN_RELAY_PREFIX + id, "");
+        return stored.isEmpty() ? null : decrypt(stored);
+    }
+
+    /** Pairing replaces a computer's Own Relay line; null clears it. {@link #forgetPaired} clears it too. */
+    void saveOwnRelay(String id, String line) {
+        SharedPreferences.Editor edit = preferences.edit();
+        if (line == null) edit.remove(OWN_RELAY_PREFIX + id);
+        else edit.putString(OWN_RELAY_PREFIX + id, encrypt(line));
+        edit.apply();
+    }
 
     /** Selects one of the paired computers; returns false for one this phone does not know. */
     boolean selectPaired(String id) {

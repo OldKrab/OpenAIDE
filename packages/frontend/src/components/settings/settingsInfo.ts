@@ -72,6 +72,21 @@ export const settingsInfo = {
       "The connection is encrypted end to end. It goes directly when the networks allow it, otherwise through public relays run by the iroh project, which see addresses and keys, never content.",
     ],
   },
+  relay: {
+    title: "Relay",
+    body: [
+      "A device that can't reach this computer directly connects through a relay. The free public relays are run by the iroh project and can be slow on mobile networks.",
+      "Your own relay serves only the people it lets in, each with their own relay key. Like the public relays, it sees addresses and keys, never content.",
+      "Changing the relay removes every paired device, because each one found this computer through the old relay. Pair them again afterwards.",
+    ],
+  },
+  myRelay: {
+    title: "My relay",
+    body: [
+      "Each person gets their own relay key, so one can be revoked without affecting the others. Anyone holding a key can use the relay, so hand it over privately.",
+      "People who can add and remove people can also revoke anyone else, this computer included.",
+    ],
+  },
   exportLogs: {
     title: "Diagnostics",
     body: [

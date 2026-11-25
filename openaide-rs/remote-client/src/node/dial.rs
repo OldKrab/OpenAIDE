@@ -5,11 +5,14 @@ use std::time::{Duration, Instant};
 
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr, PublicKey, RelayUrl, TransportAddr};
+use openaide_remote_core::OwnRelay;
 
 use super::policy;
 use super::report::{DialReport, Purpose, Stage};
 use super::RemoteNode;
-use crate::client::{connect_stage, elapsed_ms, failure_of, names_no_protocol, Failure};
+use crate::client::{
+    connect_stage, elapsed_ms, failure_of, names_no_protocol, server_address, Failure,
+};
 
 /// Why one attempt failed: the failure for the caller, the record's outcome
 /// word, and the error's variant when the transport named one.
@@ -178,18 +181,34 @@ impl RemoteNode {
         let report = &mut attempt.report;
         report.stage = Stage::Address;
         report.own_relay = Some(endpoint.addr().relay_urls().next().is_some());
-        let remembered = self.inner.host.relay(&server);
-        let relay = policy::relay_for(index, remembered.as_deref())
-            .and_then(|relay| relay.parse::<RelayUrl>().ok());
-        report.address = if relay.is_some() {
-            "remembered_relay"
-        } else {
-            "lookup"
-        };
-        report.stage = Stage::Connect;
-        let address = match relay.clone() {
-            Some(relay) => EndpointAddr::new(server).with_relay_url(relay),
-            None => EndpointAddr::new(server),
+        let own = self.computer_own_relay(server)?;
+        report.computer_own_relay = Some(own.is_some());
+        let (address, relay) = match own {
+            // Every attempt runs on whichever endpoint is current, possibly a new one,
+            // so each teaches its endpoint the relay and its password again (ADR-0085).
+            // There is no fallback: the computer is not on the public relays.
+            Some(own) => {
+                report.address = "own_relay";
+                report.stage = Stage::Connect;
+                let address = server_address(&endpoint, server, Some(&own)).await;
+                (address, Some(own.url().clone()))
+            }
+            None => {
+                let remembered = self.inner.host.relay(&server);
+                let relay = policy::relay_for(index, remembered.as_deref())
+                    .and_then(|relay| relay.parse::<RelayUrl>().ok());
+                report.address = if relay.is_some() {
+                    "remembered_relay"
+                } else {
+                    "lookup"
+                };
+                report.stage = Stage::Connect;
+                let address = match relay.clone() {
+                    Some(relay) => EndpointAddr::new(server).with_relay_url(relay),
+                    None => EndpointAddr::new(server),
+                };
+                (address, relay)
+            }
         };
         let connecting = endpoint.connect(address, &self.inner.alpn);
         let connection = match tokio::time::timeout(timeout, connecting).await {
@@ -229,6 +248,25 @@ impl RemoteNode {
         Ok(connection)
     }
 
+    /// The Own Relay `server` was paired through, read for every attempt. A line that
+    /// no longer reads is a damaged pairing: without it the computer cannot be found,
+    /// so the user is asked to pair again rather than dialled on the public relays.
+    fn computer_own_relay(&self, server: PublicKey) -> Result<Option<OwnRelay>, Missed> {
+        let line = self.inner.host.own_relay(&server).map_err(|_| Missed {
+            failure: Failure::Storage,
+            outcome: Failure::Storage.class(),
+            error_class: Some("own_relay_storage"),
+        })?;
+        let Some(line) = line else {
+            return Ok(None);
+        };
+        OwnRelay::parse(&line).map(Some).map_err(|_| Missed {
+            failure: Failure::NotTrusted,
+            outcome: Failure::NotTrusted.class(),
+            error_class: Some("own_relay_damaged"),
+        })
+    }
+
     async fn known_address(&self, endpoint: &Endpoint, server: PublicKey, report: &mut DialReport) {
         let wait = self.inner.timings.known_address_wait;
         let Ok(Some(info)) = tokio::time::timeout(wait, endpoint.remote_info(server)).await else {
@@ -243,7 +281,8 @@ impl RemoteNode {
     }
 
     /// Keeps the relay the computer answered through, so the next connect can skip
-    /// the address lookup.
+    /// the address lookup. For a computer on an Own Relay, `used` is that relay, so
+    /// the hint normally stays as it was; it is never read for such a computer.
     fn remember_relay(
         &self,
         connection: &Connection,

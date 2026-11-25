@@ -26,6 +26,7 @@ fn list(devices: Vec<RemoteDeviceSummary>) -> DeviceCollectionSnapshot {
         server_name: "studio".to_string(),
         server_key: None,
         devices,
+        own_relay: None,
     }
 }
 

@@ -5,6 +5,7 @@ fn computer(id: &str, name: &str) -> RemoteComputer {
         id: id.to_string(),
         name: name.to_string(),
         ssh: None,
+        relay: None,
     }
 }
 

@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use iroh::address_lookup::MemoryLookup;
 use openaide_app_server_protocol::devices::RemoteAccessState;
-use openaide_remote_client::{Logger, SecretKey};
+use openaide_remote_client::{Logger, OwnRelay, SecretKey};
 use openaide_remote_core::Network;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 use super::folder::{Computer, Folder};
-use super::wire::{ComputerInUse, Event};
+use super::wire::{self, ComputerInUse, Event};
 use super::{serve, ComputerGateway};
 use crate::client_lifecycle::AppServerTime;
 use crate::remote_devices::edge::start_on;
@@ -462,17 +462,24 @@ fn the_folder_keeps_its_key_and_list_private_and_across_restarts() {
     let folder = Folder::open(&path).unwrap();
     let (key, created) = folder.key().unwrap();
     assert!(created);
+    let relay = OwnRelay::parse("https://relay.example.com/?token=folder-secret").unwrap();
     folder
-        .remember(Computer {
-            id: "a".repeat(64),
-            name: "Studio".to_string(),
-        })
+        .remember(
+            Computer {
+                id: "a".repeat(64),
+                name: "Studio".to_string(),
+            },
+            None,
+        )
         .unwrap();
     folder
-        .remember(Computer {
-            id: "a".repeat(64),
-            name: "Studio again".to_string(),
-        })
+        .remember(
+            Computer {
+                id: "a".repeat(64),
+                name: "Studio again".to_string(),
+            },
+            Some(&relay),
+        )
         .unwrap();
 
     let reopened = Folder::open(&path).unwrap();
@@ -486,6 +493,11 @@ fn the_folder_keeps_its_key_and_list_private_and_across_restarts() {
             name: "Studio again".to_string()
         }]
     );
+    // Pairing again through an Own Relay keeps its line, and the list browsers see
+    // never carries the password.
+    assert_eq!(reopened.relay(&"a".repeat(64)).unwrap(), Some(relay));
+    let shown = wire::computers_result(reopened.computers().unwrap()).to_string();
+    assert!(!shown.contains("folder-secret"), "{shown}");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

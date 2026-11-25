@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use iroh::{PublicKey, SecretKey};
 use openaide_app_server_protocol::devices::{
-    DeviceCollectionSnapshot, DevicesCreateInviteResult, RemoteAccessState, RemoteDeviceConnection,
-    RemoteDeviceSummary,
+    DeviceCollectionSnapshot, DevicesCreateInviteResult, DevicesRelayAddPersonResult,
+    DevicesRelayPeopleResult, DevicesSetRelayResult, OwnRelayAccess, OwnRelaySnapshot,
+    RemoteAccessState, RemoteDeviceConnection, RemoteDeviceSummary,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
@@ -21,10 +22,13 @@ pub(crate) use bridge::BridgeTarget;
 pub mod edge;
 pub(crate) mod host_name;
 mod network_watch;
+pub(crate) mod relay_api;
 mod relay_check;
+mod relay_management;
 mod store;
 
-use openaide_remote_core::{clamp_label, InviteCode, INVITE_SECRET_LEN};
+use openaide_remote_core::{clamp_label, InviteCode, OwnRelay, INVITE_SECRET_LEN};
+use relay_api::{HttpRelayApi, RelayApi};
 use store::{RemoteDeviceStore, StoredRemoteDevice, StoredRemoteDevices};
 
 /// An invite is refreshed by the client that shows it; this bounds one left open.
@@ -40,6 +44,19 @@ pub(crate) trait RemoteDevicesWorkflow: Send + Sync {
     ) -> Result<DevicesCreateInviteResult, ProtocolError>;
     fn cancel_invite(&self);
     fn remove(&self, device_id: &str) -> Result<(), ProtocolError>;
+    /// Moves the App Server onto `relay`, a relay key, or back to the public relays
+    /// when it is `None` (ADR-0085). The relay is asked about the key first, so
+    /// this and the people calls below block on the network: call them without the
+    /// protocol lock.
+    fn set_relay(&self, relay: Option<&str>) -> Result<DevicesSetRelayResult, ProtocolError>;
+    /// The people the relay admits, when this computer holds a key that can manage.
+    fn relay_people(&self) -> Result<DevicesRelayPeopleResult, ProtocolError>;
+    fn relay_add_person(
+        &self,
+        name: &str,
+        can_manage: bool,
+    ) -> Result<DevicesRelayAddPersonResult, ProtocolError>;
+    fn relay_revoke_person(&self, name: &str) -> Result<(), ProtocolError>;
     /// The Remote Device behind a protocol connection, or `None` for a same-machine client.
     fn device_name_for_connection(&self, connection_id: &str) -> Option<String>;
 }
@@ -82,12 +99,17 @@ struct Inner {
     store: RemoteDeviceStore,
     server_name: String,
     state: Mutex<State>,
+    relay_api: Arc<dyn RelayApi>,
+    /// Serializes relay changes, which call the relay without the state lock.
+    relay_ops: Mutex<()>,
 }
 
 struct State {
     stored: StoredRemoteDevices,
     invite: Option<Invite>,
     access: RemoteAccessState,
+    /// Whether the Own Relay accepted this computer's key when last asked.
+    relay_access: OwnRelayAccess,
     connections: HashMap<String, ConnectedDevice>,
     /// Protocol connection ids seen on a device's streams, to label what it pairs.
     connection_devices: HashMap<String, String>,
@@ -112,6 +134,10 @@ impl RemoteDevices {
     /// A damaged trust file is reported and remote access stays off: failing closed
     /// keeps a corrupted file from turning into trust nobody granted.
     pub fn open(state_root: &Path) -> Self {
+        Self::open_with(state_root, Arc::new(HttpRelayApi))
+    }
+
+    pub(crate) fn open_with(state_root: &Path, relay_api: Arc<dyn RelayApi>) -> Self {
         let store = RemoteDeviceStore::new(state_root);
         let stored = store.read().unwrap_or_else(|_error| {
             crate::logging::error(
@@ -128,11 +154,14 @@ impl RemoteDevices {
                     stored,
                     invite: None,
                     access: RemoteAccessState::Off,
+                    relay_access: OwnRelayAccess::Unknown,
                     connections: HashMap::new(),
                     connection_devices: HashMap::new(),
                     edge: None,
                     changed: None,
                 }),
+                relay_api,
+                relay_ops: Mutex::new(()),
             }),
         }
     }
@@ -159,6 +188,11 @@ impl RemoteDevices {
             .wants_endpoint()
             .then(|| state.stored.secret_key())
             .flatten()
+    }
+
+    /// The Own Relay the endpoint homes on, or `None` for the public relays.
+    pub(crate) fn own_relay(&self) -> Option<OwnRelay> {
+        self.state().stored.own_relay()
     }
 
     pub(crate) fn is_trusted(&self, device: &PublicKey) -> bool {
@@ -314,6 +348,11 @@ impl RemoteDevicesWorkflow for RemoteDevices {
                 .stored
                 .secret_key()
                 .map(|key| key.public().to_string()),
+            own_relay: state.stored.own_relay().map(|relay| OwnRelaySnapshot {
+                host: relay.host().to_string(),
+                can_manage: state.stored.relay_manager().is_some(),
+                access: state.relay_access,
+            }),
             devices: state
                 .stored
                 .devices
@@ -363,6 +402,7 @@ impl RemoteDevicesWorkflow for RemoteDevices {
             code: InviteCode {
                 server: secret_key.public(),
                 secret,
+                relay: state.stored.own_relay(),
             }
             .encode(),
             expires_at_ms,
@@ -406,6 +446,26 @@ impl RemoteDevicesWorkflow for RemoteDevices {
         }
         state.send(EdgeCommand::Reconcile);
         Ok(())
+    }
+
+    fn set_relay(&self, relay: Option<&str>) -> Result<DevicesSetRelayResult, ProtocolError> {
+        self.change_relay(relay)
+    }
+
+    fn relay_people(&self) -> Result<DevicesRelayPeopleResult, ProtocolError> {
+        RemoteDevices::relay_people(self)
+    }
+
+    fn relay_add_person(
+        &self,
+        name: &str,
+        can_manage: bool,
+    ) -> Result<DevicesRelayAddPersonResult, ProtocolError> {
+        RemoteDevices::relay_add_person(self, name, can_manage)
+    }
+
+    fn relay_revoke_person(&self, name: &str) -> Result<(), ProtocolError> {
+        RemoteDevices::relay_revoke_person(self, name)
     }
 
     fn device_name_for_connection(&self, connection_id: &str) -> Option<String> {
@@ -453,6 +513,7 @@ impl RemoteDevicesWorkflow for NoRemoteDevices {
             remote_access: RemoteAccessState::Off,
             server_name: String::new(),
             server_key: None,
+            own_relay: None,
             devices: Vec::new(),
         }
     }
@@ -468,6 +529,26 @@ impl RemoteDevicesWorkflow for NoRemoteDevices {
     fn cancel_invite(&self) {}
 
     fn remove(&self, _device_id: &str) -> Result<(), ProtocolError> {
+        Err(remote_access_unavailable())
+    }
+
+    fn set_relay(&self, _relay: Option<&str>) -> Result<DevicesSetRelayResult, ProtocolError> {
+        Err(remote_access_unavailable())
+    }
+
+    fn relay_people(&self) -> Result<DevicesRelayPeopleResult, ProtocolError> {
+        Err(remote_access_unavailable())
+    }
+
+    fn relay_add_person(
+        &self,
+        _name: &str,
+        _can_manage: bool,
+    ) -> Result<DevicesRelayAddPersonResult, ProtocolError> {
+        Err(remote_access_unavailable())
+    }
+
+    fn relay_revoke_person(&self, _name: &str) -> Result<(), ProtocolError> {
         Err(remote_access_unavailable())
     }
 

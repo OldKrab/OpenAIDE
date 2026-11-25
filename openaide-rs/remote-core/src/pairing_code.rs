@@ -1,7 +1,9 @@
 //! Pairing Codes: the plain text a QR code carries between two devices.
 //!
 //! A code is an invite (ADR-0081). It names the App Server and holds a
-//! single-use secret. It is base32, so a QR code can use its compact
+//! single-use secret. A computer on an Own Relay also puts that relay and its
+//! password in the invite (ADR-0085), because no public lookup tells the device
+//! where to find it. A code is base32, so a QR code can use its compact
 //! alphanumeric mode and a user can paste the text. Older OpenAIDE versions
 //! also showed join-request codes; those are only recognized, so the user can
 //! be told where they came from.
@@ -9,7 +11,12 @@
 use data_encoding::BASE32_NOPAD;
 use iroh::PublicKey;
 
+use crate::OwnRelay;
+
 const INVITE_PREFIX: &str = "OAI1";
+/// An invite that also carries an Own Relay. A version before ADR-0085 does not
+/// read it, which is right: it could not reach that computer anyway.
+const RELAY_INVITE_PREFIX: &str = "OAI2";
 /// The prefix of a join-request code that an OpenAIDE before ADR-0081 showed.
 const OLD_JOIN_PREFIX: &str = "OAJ1";
 const KEY_LEN: usize = 32;
@@ -18,11 +25,13 @@ pub const INVITE_SECRET_LEN: usize = 16;
 /// Labels are shown to the user, so they stay short enough for one row.
 pub const MAX_LABEL_BYTES: usize = 64;
 
-/// An invite: the App Server to reach and the single-use secret to present.
+/// An invite: the App Server to reach, the single-use secret to present, and the
+/// Own Relay the App Server is on, if it uses one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InviteCode {
     pub server: PublicKey,
     pub secret: [u8; INVITE_SECRET_LEN],
+    pub relay: Option<OwnRelay>,
 }
 
 /// Why a text is not an invite. Each end words the message for its own users.
@@ -39,23 +48,40 @@ pub enum PairingCodeError {
 }
 
 impl InviteCode {
+    /// The invite as text. Without an Own Relay it is the `OAI1` code every version
+    /// reads; with one, `OAI2` followed by the relay line after the key and secret.
     pub fn encode(&self) -> String {
         let mut bytes = Vec::with_capacity(KEY_LEN + INVITE_SECRET_LEN);
         bytes.extend_from_slice(self.server.as_bytes());
         bytes.extend_from_slice(&self.secret);
-        format!("{INVITE_PREFIX}{}", BASE32_NOPAD.encode(&bytes))
+        let prefix = match &self.relay {
+            None => INVITE_PREFIX,
+            Some(relay) => {
+                bytes.extend_from_slice(relay.line().as_bytes());
+                RELAY_INVITE_PREFIX
+            }
+        };
+        format!("{prefix}{}", BASE32_NOPAD.encode(&bytes))
     }
 
     pub fn decode(code: &str) -> Result<Self, PairingCodeError> {
-        let bytes = decode_payload(code)?;
-        if bytes.len() != KEY_LEN + INVITE_SECRET_LEN {
-            return Err(PairingCodeError::Malformed);
-        }
+        let (bytes, has_relay) = decode_payload(code)?;
+        let fixed = KEY_LEN + INVITE_SECRET_LEN;
+        let relay = match (has_relay, bytes.len()) {
+            (false, length) if length == fixed => None,
+            (true, length) if length > fixed => {
+                let line = std::str::from_utf8(&bytes[fixed..])
+                    .map_err(|_| PairingCodeError::Malformed)?;
+                Some(OwnRelay::parse(line).map_err(|_| PairingCodeError::Malformed)?)
+            }
+            _ => return Err(PairingCodeError::Malformed),
+        };
         Ok(Self {
             server: public_key(&bytes[..KEY_LEN])?,
-            secret: bytes[KEY_LEN..]
+            secret: bytes[KEY_LEN..fixed]
                 .try_into()
                 .map_err(|_| PairingCodeError::Malformed)?,
+            relay,
         })
     }
 
@@ -89,7 +115,8 @@ pub fn clamp_label(label: &str) -> String {
         .collect()
 }
 
-fn decode_payload(code: &str) -> Result<Vec<u8>, PairingCodeError> {
+/// The decoded bytes, and whether the code is the kind that carries an Own Relay.
+fn decode_payload(code: &str) -> Result<(Vec<u8>, bool), PairingCodeError> {
     // A pasted code may carry spaces, dashes, or a change of case that a person or
     // an app added.
     let code: String = code
@@ -97,7 +124,11 @@ fn decode_payload(code: &str) -> Result<Vec<u8>, PairingCodeError> {
         .filter(|character| !character.is_whitespace() && *character != '-')
         .map(|character| character.to_ascii_uppercase())
         .collect();
-    let Some(payload) = code.strip_prefix(INVITE_PREFIX) else {
+    let (payload, has_relay) = if let Some(payload) = code.strip_prefix(INVITE_PREFIX) {
+        (payload, false)
+    } else if let Some(payload) = code.strip_prefix(RELAY_INVITE_PREFIX) {
+        (payload, true)
+    } else {
         return Err(if code.starts_with(OLD_JOIN_PREFIX) {
             PairingCodeError::FromOlderOpenAide
         } else {
@@ -106,6 +137,7 @@ fn decode_payload(code: &str) -> Result<Vec<u8>, PairingCodeError> {
     };
     BASE32_NOPAD
         .decode(payload.as_bytes())
+        .map(|bytes| (bytes, has_relay))
         .map_err(|_| PairingCodeError::Malformed)
 }
 

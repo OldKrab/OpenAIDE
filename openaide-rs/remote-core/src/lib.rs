@@ -2,7 +2,7 @@
 //!
 //! - The Pairing Code format.
 //! - The pairing exchange on the wire.
-//! - The network that endpoints bind on.
+//! - The network that endpoints bind on, and an Own Relay.
 //!
 //! The App Server and `openaide-remote-client` both build on this crate, so the two
 //! ends cannot drift apart. It holds no connection logic: connecting, retrying, and
@@ -13,10 +13,12 @@
 // bindings, so that one implementation remains.
 
 mod network;
+mod own_relay;
 mod pairing_code;
 mod wire;
 
 pub use network::Network;
+pub use own_relay::{OwnRelay, OwnRelayError};
 pub use pairing_code::{
     clamp_label, InviteCode, PairingCodeError, INVITE_SECRET_LEN, MAX_LABEL_BYTES,
 };

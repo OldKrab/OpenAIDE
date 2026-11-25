@@ -551,6 +551,22 @@
   background: transparent;
 }
 
+/* A yes-or-no option inside a form dialog. */
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.settings-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--oa-focus);
+}
+
 .settings-code-input {
   width: 100%;
   resize: vertical;

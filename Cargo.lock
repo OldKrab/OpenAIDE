@@ -2061,6 +2061,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
+ "rustls-platform-verifier",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -2354,6 +2356,32 @@ checksum = "3a580c13f0ffc335ef42dd3f6b1a41b726051c5e1656d9a3aa6fddb3c5dfbbf9"
 dependencies = [
  "block-padding",
  "hybrid-array",
+]
+
+[[package]]
+name = "instant-acme"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f05ad37c421b962354c358d347d4a6130151df9407978372d3ad7f0c8f71a64"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -2862,6 +2890,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "memoffset"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3216,6 +3253,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.2",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -3571,6 +3609,7 @@ dependencies = [
  "ignore",
  "image",
  "iroh",
+ "iroh-relay",
  "nix 0.31.3",
  "notify",
  "nucleo-matcher",
@@ -3580,6 +3619,7 @@ dependencies = [
  "portable-pty",
  "qrcode",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3605,12 +3645,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "openaide-relay"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "fs2",
+ "http",
+ "http-body-util",
+ "hyper",
+ "instant-acme",
+ "iroh",
+ "iroh-base",
+ "iroh-relay",
+ "n0-future",
+ "nix 0.31.3",
+ "openaide-remote-core",
+ "rcgen",
+ "reqwest",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "x509-parser",
+]
+
+[[package]]
 name = "openaide-remote-client"
 version = "0.0.0"
 dependencies = [
  "data-encoding",
  "flate2",
  "iroh",
+ "iroh-relay",
  "openaide-app-server-protocol",
  "openaide-remote-core",
  "serde",
