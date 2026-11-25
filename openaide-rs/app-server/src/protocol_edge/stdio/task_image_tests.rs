@@ -129,7 +129,11 @@ fn a_chat_row_gets_a_smaller_jpeg_and_the_full_view_gets_the_stored_bytes() {
     let served: Vec<Value> = logs
         .snapshot()
         .into_iter()
-        .filter(|line| line["event"] == "task_image_served")
+        // The log capture is process-wide, so keep only this fixture's image.
+        .filter(|line| {
+            line["event"] == "task_image_served"
+                && line["fields"]["image_id"] == fixture.image_id.as_str()
+        })
         .map(|line| line["fields"].clone())
         .collect();
     assert_eq!(served.len(), 3, "{served:?}");
@@ -167,7 +171,9 @@ fn making_a_preview_does_not_block_protocol_requests() {
     });
     crate::test_sync::wait_until("the preview request to pass its access check", || {
         logs.snapshot().iter().any(|line| {
-            line["event"] == "task_image_started" && line["fields"]["variant"] == "preview"
+            line["event"] == "task_image_started"
+                && line["fields"]["variant"] == "preview"
+                && line["fields"]["image_id"] == fixture.image_id.as_str()
         })
     });
     let (sender, receiver) = std::sync::mpsc::channel();
