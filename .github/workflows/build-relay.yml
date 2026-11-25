@@ -46,7 +46,8 @@ jobs:
         shell: bash
         run: |
           binary="target/${{ matrix.rust_target }}/release/openaide-relay"
-          file "$binary" | grep -Eq 'static(-pie)? linked'
+          # x64 links as "static-pie linked"; arm64 musl links as "statically linked".
+          file "$binary" | tee /dev/stderr | grep -Eq 'static(-pie|ally) linked'
           if readelf -l "$binary" | grep -q 'INTERP'; then
             echo "The relay must not require a dynamic loader" >&2
             exit 1
