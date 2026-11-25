@@ -36,7 +36,10 @@ key and name. Any client of that computer can remove the phone under **Settings 
 
 The paired connection is end-to-end encrypted between the two keys by
 [iroh](https://www.iroh.computer). It uses a direct path when the networks allow one
-and otherwise a public relay that sees only ciphertext. The WebView loads the bundled
+and otherwise a public relay that sees only ciphertext. A computer that uses an Own
+Relay shows a code that names it, with a password; the phone keeps that line encrypted
+with the computer and dials the computer only through that relay
+([ADR-0085](../../docs/adr/0085-a-computer-can-use-its-own-relay.md)). The WebView loads the bundled
 Frontend from a gateway inside the app, on `127.0.0.1:5475` for a paired computer and
 `127.0.0.1:5476` for this phone, so each workspace keeps its own stored drafts and
 preferences. The gateway carries App Server requests to the App Server, one stream

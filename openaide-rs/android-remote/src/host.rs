@@ -91,6 +91,13 @@ pub trait RemoteHost: Send + Sync {
     /// The relay `computer` last answered through.
     fn relay(&self, computer: String) -> Option<String>;
     fn save_relay(&self, computer: String, relay: String) -> Result<(), StorageError>;
+    /// The Own Relay line `computer`'s Pairing Code carried (ADR-0085), or `None` for
+    /// a computer on the public relays. Separate from [`RemoteHost::relay`]. The line
+    /// holds a password: the shell keeps it in app-private storage and never logs it.
+    fn own_relay(&self, computer: String) -> Result<Option<String>, StorageError>;
+    /// Replaces `computer`'s line when pairing succeeds; `None` clears it. Forgetting
+    /// the computer must clear it too.
+    fn save_own_relay(&self, computer: String, line: Option<String>) -> Result<(), StorageError>;
     fn network(&self) -> NetworkKind;
     /// One metadata-only lifecycle event; `fields` is a JSON object.
     fn log(&self, event: String, fields: String);
@@ -127,6 +134,22 @@ impl NodeHost for Bridge {
     fn save_relay(&self, computer: &PublicKey, relay: &str) -> Result<(), StorageUnavailable> {
         self.0
             .save_relay(computer.to_string(), relay.to_string())
+            .map_err(|_| StorageUnavailable)
+    }
+
+    fn own_relay(&self, computer: &PublicKey) -> Result<Option<String>, StorageUnavailable> {
+        self.0
+            .own_relay(computer.to_string())
+            .map_err(|_| StorageUnavailable)
+    }
+
+    fn save_own_relay(
+        &self,
+        computer: &PublicKey,
+        line: Option<&str>,
+    ) -> Result<(), StorageUnavailable> {
+        self.0
+            .save_own_relay(computer.to_string(), line.map(str::to_string))
             .map_err(|_| StorageUnavailable)
     }
 

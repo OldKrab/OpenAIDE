@@ -15,12 +15,12 @@ import { errorSentence, SettingsButton, SettingsInlineError } from "./settingsKi
  * side's control as a path, so the user knows where the code goes.
  */
 
-/** Names the public service at the moment pairing starts to use it (ADR 0062). */
-function ConnectionNote() {
+/** Names the relay at the moment pairing starts to use it: the public service (ADR 0062) or an Own Relay (ADR-0085). */
+function ConnectionNote({ relayHost }: { relayHost?: string }) {
   return (
     <p className="settings-dialog-note">
-      Encrypted end to end. Direct when the networks allow it, otherwise through iroh’s public relays, which cannot
-      read it.
+      Encrypted end to end. Direct when the networks allow it, otherwise through{" "}
+      {relayHost ? <>your relay {relayHost}</> : <>iroh’s public relays</>}, which cannot read it.
     </p>
   );
 }
@@ -60,7 +60,7 @@ function PairingDirection({ from, to }: { from: PairingEnd; to: PairingEnd }) {
 }
 
 /** The other side's step as the path of controls the user follows there. */
-function PairingPath({ lead, steps, tail }: { lead: string; steps: string[]; tail?: string }) {
+export function PairingPath({ lead, steps, tail }: { lead: string; steps: string[]; tail?: string }) {
   return (
     <p aria-label={`${lead} ${steps.join(", then ")}${tail ? `, ${tail}` : ""}`} className="settings-pairing-path">
       <span aria-hidden="true">{lead}</span>
@@ -81,11 +81,14 @@ export function AddDeviceDialog({
   devices,
   intents,
   onClose,
+  relayHost,
 }: {
   computer: string;
   devices: RemoteDeviceSummary[];
   intents: RemoteDeviceIntents;
   onClose: () => void;
+  /** The Own Relay the code carries, if any. */
+  relayHost?: string;
 }) {
   const [invite, setInvite] = useState<DevicesCreateInviteResult>();
   const [error, setError] = useState<string>();
@@ -125,7 +128,7 @@ export function AddDeviceDialog({
       />
       {paired ? null : invite && !expired ? (
         <>
-          <PairingQr code={invite.code} />
+          <SecretQr label="Pairing code as a QR code" text={invite.code} />
           <code aria-label="Pairing code text" className="settings-code">{groupCode(invite.code)}</code>
           <p className="settings-dialog-note">Works once · expires in {formatCountdown(invite.expiresAtMs - now)}</p>
           <PairingPath
@@ -133,7 +136,7 @@ export function AddDeviceDialog({
             steps={["Settings", "Remote", "Use another computer"]}
             tail="or the first screen of a new phone."
           />
-          <ConnectionNote />
+          <ConnectionNote relayHost={relayHost} />
         </>
       ) : expired ? (
         <p>This code expired. Make a new one to continue.</p>
@@ -221,16 +224,19 @@ export function UseAnotherComputerDialog({
   );
 }
 
-/** Dark-on-light regardless of theme: scanners need the contrast and the quiet border. */
-function PairingQr({ code }: { code: string }) {
+/**
+ * A code another device reads with its camera: a Pairing Code or a relay key.
+ * Dark-on-light regardless of theme: scanners need the contrast and the quiet border.
+ */
+export function SecretQr({ label, text }: { label: string; text: string }) {
   const { path, size } = useMemo(() => {
-    const qr = encode(code, { border: 3, ecc: "M" });
+    const qr = encode(text, { border: 3, ecc: "M" });
     let d = "";
     qr.data.forEach((row, y) => row.forEach((dark, x) => { if (dark) d += `M${x} ${y}h1v1h-1z`; }));
     return { path: d, size: qr.size };
-  }, [code]);
+  }, [text]);
   return (
-    <svg aria-label="Pairing code as a QR code" className="settings-qr" role="img" shapeRendering="crispEdges" viewBox={`0 0 ${size} ${size}`}>
+    <svg aria-label={label} className="settings-qr" role="img" shapeRendering="crispEdges" viewBox={`0 0 ${size} ${size}`}>
       <rect fill="#fff" height={size} width={size} />
       <path d={path} fill="#000" />
     </svg>

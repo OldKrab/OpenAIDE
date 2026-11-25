@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use openaide_remote_client::{
-    bind, messages, redeem, Endpoint, Failure, Gateway, InviteCode, Logger, PublicKey,
+    bind, messages, redeem, Endpoint, Failure, Gateway, InviteCode, Logger, OwnRelay, PublicKey,
     RemoteClient, SecretKey, CONNECT_TIMEOUT,
 };
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
@@ -150,8 +150,11 @@ impl ComputerGateway {
             },
         };
         // A connection or a refusal kept from before a removal belongs to the old trust.
-        self.reset(&computer.id, || self.folder.remember(computer.clone()))
-            .await?;
+        self.reset(&computer.id, || {
+            self.folder
+                .remember(computer.clone(), paired.relay.as_ref())
+        })
+        .await?;
         Ok(computer)
     }
 
@@ -173,12 +176,14 @@ impl ComputerGateway {
             .find(id)
             .map_err(storage_refusal)?
             .ok_or_else(not_paired)?;
-        let server: PublicKey = id.parse().map_err(|_| {
+        let damaged = || {
             Refusal::new(
                 "pairing_damaged",
                 "This pairing is damaged. Pair with the computer again.",
             )
-        })?;
+        };
+        let server: PublicKey = id.parse().map_err(|_| damaged())?;
+        let relay = self.folder.relay(id).map_err(|_| damaged())?;
         let unusable = |failure: Failure| {
             Refusal::new(failure.class(), messages::unusable(failure, &computer.name))
         };
@@ -212,7 +217,7 @@ impl ComputerGateway {
         if slot.refused == Some(Failure::NotTrusted) {
             return Err(unusable(Failure::NotTrusted));
         }
-        let failure = match self.reach(id, server).await {
+        let failure = match self.reach(id, server, relay).await {
             Ok(Reached::Running(running)) => {
                 let connection = connection_of(&running.gateway);
                 slot.running = Some(running);
@@ -239,9 +244,15 @@ impl ComputerGateway {
     }
 
     /// Reaches the Computer `server`, then starts the loopback gateway to it.
-    async fn reach(&self, id: &str, server: PublicKey) -> Result<Reached, Failure> {
+    async fn reach(
+        &self,
+        id: &str,
+        server: PublicKey,
+        relay: Option<OwnRelay>,
+    ) -> Result<Reached, Failure> {
         let endpoint = self.endpoint().await?;
-        let client = Arc::new(RemoteClient::new(endpoint, server, self.log.clone()));
+        let client =
+            Arc::new(RemoteClient::new(endpoint, server, self.log.clone()).on_relay(relay));
         client.connection().await?;
         let refused = Arc::new(OnceLock::new());
         let on_failure = {

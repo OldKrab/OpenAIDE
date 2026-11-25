@@ -188,7 +188,7 @@ export function SettingsView({
     projects,
     repositories: worktreeRepositories,
   });
-  const remote = useRemoteSection({ deviceIntents, devices: state.devices, phone });
+  const remote = useRemoteSection({ active: state.activeTab === "remote", deviceIntents, devices: state.devices, phone });
   const troubleshooting = useTroubleshootingSection({
     backendConnection,
     onResetTaskHistory,

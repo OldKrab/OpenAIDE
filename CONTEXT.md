@@ -304,6 +304,14 @@ _Avoid_: Console, Agent terminal, treating a Terminal as Task context
 A single-use plain-text code, also drawn as a QR code, that lets one more device use a Computer. The Computer shows it, or a device already using that Computer does, and the device that will use the Computer enters or scans it. A device never shows a code for itself to be added.
 _Avoid_: Password, token, invite link, join request
 
+**Own Relay**:
+A relay that someone runs for a few people, which a Computer uses instead of the public relays. It admits each person by their own Relay Key. The Computer's Pairing Codes carry the relay and a Relay Key, and changing the relay means pairing every device again.
+_Avoid_: Custom relay, private relay, relay server
+
+**Relay Key**:
+One person's admission to an Own Relay: a line with the relay's address and a password. A Relay Key that can manage may also add and revoke Relay Keys; a Computer given one keeps it for managing and relays with an ordinary key of its own.
+_Avoid_: Relay line, relay password, token, owner key
+
 **SSH Computer**:
 A Linux computer reached over SSH where an App Shell installs, starts, and keeps the App Server, and holds its token like a same-machine App Shell. It is not a Remote Device: no Pairing Code is involved.
 _Avoid_: Remote host, server, SSH remote

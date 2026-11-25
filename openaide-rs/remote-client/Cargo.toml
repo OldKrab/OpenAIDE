@@ -26,7 +26,11 @@ thiserror.workspace = true
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
-# The node's tests run App Servers on the in-memory network.
+# A relay run in the test, for a computer on an Own Relay.
+iroh = { workspace = true, features = ["test-utils"] }
+# The relay's access control, so a test relay can ask for a password as an Own Relay does.
+iroh-relay = { version = "1.4", default-features = false, features = ["server"] }
+# The node's tests run App Servers on the in-memory network or on a relay they run.
 openaide-remote-core = { workspace = true, features = ["test-network"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

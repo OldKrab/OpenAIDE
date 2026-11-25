@@ -78,6 +78,8 @@ impl Invite {
 }
 
 /// Reads a scanned or pasted code; spaces, dashes and case a person added are ignored.
+/// A code may name an Own Relay (ADR-0085): pairing keeps it with the computer
+/// through [`RemoteHost::save_own_relay`], and every dial of that computer uses it.
 #[uniffi::export]
 pub fn parse_invite(code: String) -> Result<Arc<Invite>, CodeError> {
     InviteCode::decode(&code)
@@ -161,6 +163,9 @@ impl Remote {
     }
 
     /// Spends `invite`: connects to the App Server it names and presents its secret.
+    /// Before it returns, the node has kept the computer's Own Relay line through the
+    /// host, or cleared one an earlier pairing left, so the line never crosses into
+    /// the shell's records.
     pub async fn redeem(
         self: Arc<Self>,
         invite: Arc<Invite>,

@@ -25,10 +25,11 @@ import kotlinx.coroutines.SupervisorJob
  * `openaide-rs/android-remote`, which owns the endpoint, pairing, the connection to
  * the computer in use, and the rules that keep that connection on a phone.
  *
- * The shell keeps what only it can: the key and paired computers in [ConnectionStore],
- * the network Android reports, the app leaving and returning to the screen, and the
- * diagnostics log the node's metadata-only events are written to. The node is made
- * on first use, so a phone that never pairs never loads its library.
+ * The shell keeps what only it can: the key, the paired computers and the Own Relay
+ * each was paired through in [ConnectionStore], the network Android reports, the app
+ * leaving and returning to the screen, and the diagnostics log the node's
+ * metadata-only events are written to. The node is made on first use, so a phone
+ * that never pairs never loads its library.
  */
 internal object RemoteNode {
     /** Why the paired computer cannot be used right now. */
@@ -169,6 +170,11 @@ internal object RemoteNode {
         override fun relay(computer: String): String? = runCatching { ConnectionStore(context).relay(computer) }.getOrNull()
 
         override fun saveRelay(computer: String, relay: String) = stored { ConnectionStore(context).saveRelay(computer, relay) }
+
+        /** A computer's Own Relay line: it holds a password, so it is never logged or kept elsewhere. */
+        override fun ownRelay(computer: String): String? = stored { ConnectionStore(context).ownRelay(computer) }
+
+        override fun saveOwnRelay(computer: String, line: String?) = stored { ConnectionStore(context).saveOwnRelay(computer, line) }
 
         override fun network(): NetworkKind = RemoteNode.network(context)
 

@@ -13,7 +13,7 @@ use iroh::endpoint::{ConnectingError, Connection, ConnectionError, Incoming, Inc
 use iroh::{Endpoint, PublicKey, SecretKey};
 use openaide_app_server_protocol::devices::RemoteAccessState;
 use openaide_remote_core::{
-    application_alpn, close, InviteRequest, Network, PairingResult, PAIRING_ALPN,
+    application_alpn, close, InviteRequest, Network, OwnRelay, PairingResult, PAIRING_ALPN,
     PAIRING_MESSAGE_LIMIT,
 };
 use tokio::sync::mpsc;
@@ -30,6 +30,7 @@ const REMOVAL_CLOSE_GRACE: Duration = Duration::from_millis(750);
 const PAIRING_STEP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Starts the edge on its own runtime thread. It binds nothing until remote access is in use.
+/// It binds on the public network, or on the Own Relay when one is set (ADR-0085).
 pub fn start(devices: RemoteDevices, local_http: std::net::SocketAddr, auth_token: String) {
     start_on(
         devices,
@@ -75,17 +76,36 @@ pub(crate) fn start_on(devices: RemoteDevices, target: BridgeTarget, network: Ne
 
 type Connections = Arc<Mutex<HashMap<PublicKey, Vec<Connection>>>>;
 
+/// The endpoint the edge holds and the network it was bound on.
+struct Bound {
+    endpoint: Option<Endpoint>,
+    /// The Own Relay the endpoint was bound with; meaningless while none is bound.
+    relay: Option<OwnRelay>,
+    /// The network without an Own Relay. The relay is read from the store at each bind.
+    base: Network,
+}
+
+impl Bound {
+    fn network(&self) -> Network {
+        self.base.with_own_relay(self.relay.as_ref())
+    }
+}
+
 async fn run(
     devices: RemoteDevices,
     target: BridgeTarget,
     network: Network,
     mut commands: mpsc::UnboundedReceiver<EdgeCommand>,
 ) {
-    let mut endpoint: Option<Endpoint> = None;
+    let mut bound = Bound {
+        endpoint: None,
+        relay: None,
+        base: network,
+    };
     let connections = Connections::default();
     // Removals still owed their close; the endpoint must not stop under them.
     let mut closing: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let relay_check = RelayCheck::on(&network);
+    let mut relay_check = RelayCheck::on(&bound.network());
     let mut check_timer = tokio::time::interval_at(
         tokio::time::Instant::now() + relay_check::CHECK_INTERVAL,
         relay_check::CHECK_INTERVAL,
@@ -99,12 +119,14 @@ async fn run(
             command = commands.recv() => match command {
                 None => break,
                 Some(EdgeCommand::Reconcile) => {
-                    if reconcile(&devices, &network, &mut endpoint, &mut closing).await {
+                    if reconcile(&devices, &mut bound, &mut closing).await {
                         // A check of the endpoint just replaced says nothing about this one.
                         if let Some(running) = check.take() {
                             running.task.abort();
                         }
                         health = RelayHealth::default();
+                        relay_check = RelayCheck::on(&bound.network());
+                        check_relay_access(&devices, &bound);
                     }
                 }
                 Some(EdgeCommand::Disconnect(device)) => {
@@ -125,7 +147,7 @@ async fn run(
                     }));
                 }
             },
-            incoming = accept(&endpoint) => match incoming {
+            incoming = accept(&bound.endpoint) => match incoming {
                 Some(incoming) => {
                     tokio::spawn(handle_incoming(
                         incoming,
@@ -137,13 +159,13 @@ async fn run(
                 None => {
                     // The endpoint stopped on its own; the next trust change retries.
                     logging::error("remote_devices_endpoint_closed", serde_json::json!({}));
-                    endpoint = None;
+                    bound.endpoint = None;
                     devices.set_access(RemoteAccessState::Failed);
                 }
             },
             _ = check_timer.tick(), if check.is_none() => {
-                if let (Some(relay_check), Some(bound)) = (&relay_check, &endpoint) {
-                    let (relay_check, address) = (relay_check.clone(), bound.addr());
+                if let (Some(relay_check), Some(endpoint)) = (&relay_check, &bound.endpoint) {
+                    let (relay_check, address) = (relay_check.clone(), endpoint.addr());
                     check = Some(RunningCheck {
                         started: Instant::now(),
                         task: tokio::spawn(async move { relay_check.check(&address).await }),
@@ -156,14 +178,28 @@ async fn run(
                 let failures_before = health.failures();
                 let rebind = health.record(outcome);
                 log_check(outcome, failures_before, health.failures(), started, rebind);
+                if matches!(outcome, CheckOutcome::Unreached(_)) {
+                    // A relay that revoked this computer's key looks unreached too.
+                    check_relay_access(&devices, &bound);
+                }
                 if rebind {
-                    rebind_edge(&devices, &network, &mut endpoint, &mut closing).await;
+                    rebind_edge(&devices, &mut bound, &mut closing).await;
+                    relay_check = RelayCheck::on(&bound.network());
                 }
             }
         }
     }
-    if let Some(endpoint) = endpoint {
+    if let Some(endpoint) = bound.endpoint {
         endpoint.close().await;
+    }
+}
+
+/// Asks the Own Relay whether it still accepts this computer's key (ADR-0085), so
+/// Settings can say so. The call blocks, so it runs on the blocking pool.
+fn check_relay_access(devices: &RemoteDevices, bound: &Bound) {
+    if bound.endpoint.is_some() && bound.relay.is_some() {
+        let devices = devices.clone();
+        tokio::task::spawn_blocking(move || devices.check_relay_access());
     }
 }
 
@@ -209,23 +245,24 @@ fn log_check(
 /// reconnect. A wedged relay is left behind with the old endpoint.
 async fn rebind_edge(
     devices: &RemoteDevices,
-    network: &Network,
-    endpoint: &mut Option<Endpoint>,
+    bound: &mut Bound,
     closing: &mut Vec<tokio::task::JoinHandle<()>>,
 ) {
-    let Some(old) = endpoint.take() else { return };
+    let Some(old) = bound.endpoint.take() else {
+        return;
+    };
     let started = Instant::now();
     logging::warn("remote_devices_endpoint_rebinding", serde_json::json!({}));
     let closed = tokio::time::timeout(relay_check::CLOSE_TIMEOUT, old.close())
         .await
         .is_ok();
-    reconcile(devices, network, endpoint, closing).await;
+    reconcile(devices, bound, closing).await;
     let fields = serde_json::json!({
-        "outcome": if endpoint.is_some() { "ok" } else { "failed" },
+        "outcome": if bound.endpoint.is_some() { "ok" } else { "failed" },
         "old_closed": closed,
         "duration_ms": elapsed_ms(started),
     });
-    if endpoint.is_some() {
+    if bound.endpoint.is_some() {
         logging::info("remote_devices_endpoint_rebound", fields);
     } else {
         logging::error("remote_devices_endpoint_rebound", fields);
@@ -239,20 +276,22 @@ async fn accept(endpoint: &Option<Endpoint>) -> Option<Incoming> {
     }
 }
 
-/// Makes the endpoint match the trust state: bound with the current identity
-/// while remote access is in use, and absent otherwise. Returns whether it changed.
+/// Makes the endpoint match the trust state: bound with the current identity and
+/// Own Relay while remote access is in use, and absent otherwise. Returns whether
+/// it changed.
 async fn reconcile(
     devices: &RemoteDevices,
-    network: &Network,
-    endpoint: &mut Option<Endpoint>,
+    bound: &mut Bound,
     closing: &mut Vec<tokio::task::JoinHandle<()>>,
 ) -> bool {
     let wanted = devices.endpoint_secret_key();
-    let current = endpoint.as_ref().map(Endpoint::id);
-    if current == wanted.as_ref().map(SecretKey::public) {
+    let relay = devices.own_relay();
+    let current = bound.endpoint.as_ref().map(Endpoint::id);
+    let same_relay = bound.endpoint.is_none() || bound.relay == relay;
+    if current == wanted.as_ref().map(SecretKey::public) && same_relay {
         return false;
     }
-    if let Some(endpoint) = endpoint.take() {
+    if let Some(endpoint) = bound.endpoint.take() {
         // Removing the last device stops the endpoint. Stopping first would end
         // that device's connection without the reason, and it would report an
         // unreachable computer instead of its own removal.
@@ -268,21 +307,25 @@ async fn reconcile(
     };
     devices.set_access(RemoteAccessState::Starting);
     let started = Instant::now();
-    logging::info("remote_devices_endpoint_starting", serde_json::json!({}));
-    match bind(secret_key, network).await {
-        Ok(bound) => {
+    logging::info(
+        "remote_devices_endpoint_starting",
+        serde_json::json!({ "own_relay": relay.is_some() }),
+    );
+    bound.relay = relay;
+    match bind(secret_key, &bound.network()).await {
+        Ok(endpoint) => {
             logging::info(
                 "remote_devices_endpoint_started",
                 serde_json::json!({
                     "outcome": "ok",
                     "duration_ms": elapsed_ms(started),
-                    "endpoint": bound.id().fmt_short().to_string(),
+                    "endpoint": endpoint.id().fmt_short().to_string(),
                 }),
             );
-            relay_check::watch_home_relay(&bound);
-            relay_check::watch_rate_limits(&bound);
-            network_watch::watch_net_report(&bound);
-            *endpoint = Some(bound);
+            relay_check::watch_home_relay(&endpoint);
+            relay_check::watch_rate_limits(&endpoint);
+            network_watch::watch_net_report(&endpoint);
+            bound.endpoint = Some(endpoint);
             devices.set_access(RemoteAccessState::On);
         }
         Err(class) => {

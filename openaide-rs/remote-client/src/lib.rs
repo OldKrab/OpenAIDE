@@ -31,8 +31,8 @@ pub type Logger = Arc<dyn Fn(&'static str, serde_json::Value) + Send + Sync>;
 
 #[cfg(feature = "pairing")]
 pub use client::{
-    bind, device_key_from_text, device_key_text, new_device_key, redeem, Failure, PairedServer,
-    RemoteClient, CONNECT_TIMEOUT,
+    bind, device_key_from_text, device_key_text, new_device_key, redeem, server_address, Failure,
+    PairedServer, RemoteClient, CONNECT_TIMEOUT,
 };
 #[cfg(feature = "pairing")]
 pub use gateway::Gateway;
@@ -48,7 +48,7 @@ pub use node::{
 /// The code format and protocols shared with the App Server (ADR-0081).
 #[cfg(feature = "pairing")]
 pub use openaide_remote_core::{
-    application_alpn, clamp_label, InviteCode, Network, PairingCodeError,
+    application_alpn, clamp_label, InviteCode, Network, OwnRelay, OwnRelayError, PairingCodeError,
 };
 #[cfg(feature = "pairing")]
 pub use relay_limits::watch_relay_rate_limits;

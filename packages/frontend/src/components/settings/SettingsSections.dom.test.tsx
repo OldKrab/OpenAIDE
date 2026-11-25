@@ -267,6 +267,10 @@ function deviceIntents() {
     createInvite: vi.fn(async () => ({ code: "OAI1ABCDEFGH", expiresAtMs: Date.now() + 600_000 })),
     remove: vi.fn(async () => undefined),
     replacementImpact: vi.fn(async () => ({ activeTurns: 0, pendingTaskRequests: 0, openTerminals: 0 })),
+    setRelay: vi.fn(async () => ({ removedDevices: 0 })),
+    relayPeople: vi.fn(async () => []),
+    relayAddPerson: vi.fn(async (name: string, canManage: boolean) => ({ person: { name, canManage, thisComputer: false }, key: "https://relay.example/?token=k" })),
+    relayRevokePerson: vi.fn(async () => undefined),
   };
 }
 

@@ -36,6 +36,8 @@ nucleo-matcher.workspace = true
 tempfile.workspace = true
 zstd.workspace = true
 iroh.workspace = true
+# The Own Relay management API (ADR-0085); iroh already builds it with rustls.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 ctrlc = "3.4"
@@ -59,6 +61,8 @@ tauri-winres = "=0.3.7"
 [dev-dependencies]
 # A relay run in the test, for the edge's relay check.
 iroh = { workspace = true, features = ["test-utils"] }
+# The relay's access control, so a test relay can ask for a password as an Own Relay does.
+iroh-relay = { version = "1.4", default-features = false, features = ["server"] }
 # Tests bind on in-memory addresses or on a relay they run.
 openaide-remote-core = { workspace = true, features = ["test-network"] }
 # Paused time lets deadline contracts run on a controlled clock.

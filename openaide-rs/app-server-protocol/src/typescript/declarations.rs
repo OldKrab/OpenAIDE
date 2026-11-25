@@ -48,8 +48,12 @@ use crate::client::{
 };
 use crate::devices::{
     DeviceCollectionSnapshot, DevicesCancelInviteParams, DevicesCancelInviteResult,
-    DevicesCreateInviteParams, DevicesCreateInviteResult, DevicesRemoveParams, DevicesRemoveResult,
-    RemoteAccessState, RemoteDeviceConnection, RemoteDevicePath, RemoteDeviceSummary,
+    DevicesCreateInviteParams, DevicesCreateInviteResult, DevicesRelayAddPersonParams,
+    DevicesRelayAddPersonResult, DevicesRelayPeopleParams, DevicesRelayPeopleResult,
+    DevicesRelayRevokePersonParams, DevicesRelayRevokePersonResult, DevicesRemoveParams,
+    DevicesRemoveResult, DevicesSetRelayParams, DevicesSetRelayResult, OwnRelayAccess,
+    OwnRelaySnapshot, RelayPerson, RemoteAccessState, RemoteDeviceConnection, RemoteDevicePath,
+    RemoteDeviceSummary,
 };
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, ClientDiagnosticEvent, ClientDiagnosticEventsParams,
@@ -387,6 +391,17 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<DevicesCancelInviteParams>(output, config);
     push_decl::<DevicesCancelInviteResult>(output, config);
     push_decl::<DevicesRemoveParams>(output, config);
+    push_decl::<DevicesSetRelayParams>(output, config);
+    push_decl::<DevicesSetRelayResult>(output, config);
+    push_decl::<OwnRelaySnapshot>(output, config);
+    push_decl::<OwnRelayAccess>(output, config);
+    push_decl::<RelayPerson>(output, config);
+    push_decl::<DevicesRelayPeopleParams>(output, config);
+    push_decl::<DevicesRelayPeopleResult>(output, config);
+    push_decl::<DevicesRelayAddPersonParams>(output, config);
+    push_decl::<DevicesRelayAddPersonResult>(output, config);
+    push_decl::<DevicesRelayRevokePersonParams>(output, config);
+    push_decl::<DevicesRelayRevokePersonResult>(output, config);
     push_decl::<DevicesRemoveResult>(output, config);
     push_decl::<TaskAttentionWaitParams>(output, config);
     push_decl::<TaskAttentionWaitResult>(output, config);

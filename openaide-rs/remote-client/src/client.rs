@@ -7,10 +7,10 @@ use iroh::endpoint::{
     ConnectError, ConnectWithOptsError, Connection, ConnectionError, QuicTransportConfig,
     RecvStream, SendStream,
 };
-use iroh::{Endpoint, PublicKey, SecretKey, Watcher};
+use iroh::{Endpoint, EndpointAddr, PublicKey, SecretKey, Watcher};
 use openaide_remote_core::{
-    application_alpn, clamp_label, close, InviteCode, InviteRequest, Network, PairingResult,
-    PAIRING_ALPN, PAIRING_MESSAGE_LIMIT,
+    application_alpn, clamp_label, close, InviteCode, InviteRequest, Network, OwnRelay,
+    PairingResult, PAIRING_ALPN, PAIRING_MESSAGE_LIMIT,
 };
 
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(20);
@@ -55,6 +55,29 @@ impl Failure {
 pub struct PairedServer {
     pub id: PublicKey,
     pub name: String,
+    /// The Own Relay the App Server is on, from its invite (ADR-0085). The device
+    /// stores it with the computer, password included, and dials there.
+    pub relay: Option<OwnRelay>,
+}
+
+/// Where to dial `server`. A computer on an Own Relay is dialed at that relay, which
+/// the endpoint first learns along with its password (ADR-0085); iroh sends the
+/// password to that relay only. Any other computer is dialed by key alone, and the
+/// public address lookup finds it.
+pub async fn server_address(
+    endpoint: &Endpoint,
+    server: PublicKey,
+    relay: Option<&OwnRelay>,
+) -> EndpointAddr {
+    match relay {
+        None => EndpointAddr::new(server),
+        Some(relay) => {
+            endpoint
+                .insert_relay(relay.url().clone(), relay.config())
+                .await;
+            EndpointAddr::new(server).with_relay_url(relay.url().clone())
+        }
+    }
 }
 
 pub fn new_device_key() -> SecretKey {
@@ -141,12 +164,16 @@ pub async fn redeem(
     log: &Logger,
 ) -> Result<PairedServer, Failure> {
     let started = Instant::now();
-    log("remote_pairing_invite_started", serde_json::json!({}));
+    log(
+        "remote_pairing_invite_started",
+        serde_json::json!({ "own_relay": invite.relay.is_some() }),
+    );
     let name = clamp_label(name);
     let model = model.map(clamp_label).filter(|model| !model.is_empty());
     let exchange = async {
+        let address = server_address(endpoint, invite.server, invite.relay.as_ref()).await;
         let connection = endpoint
-            .connect(invite.server, PAIRING_ALPN)
+            .connect(address, PAIRING_ALPN)
             .await
             .map_err(|_| Failure::Unreachable)?;
         let answer = async {
@@ -171,6 +198,7 @@ pub async fn redeem(
         Ok(Ok(result)) if result.trusted => Ok(PairedServer {
             id: invite.server,
             name: clamp_label(result.server_name.as_deref().unwrap_or("")),
+            relay: invite.relay.clone(),
         }),
         // A spent, expired or mistyped secret; the App Server does not say which.
         Ok(Ok(_)) => Err(Failure::NotTrusted),
@@ -194,6 +222,7 @@ pub async fn redeem(
 pub struct RemoteClient {
     endpoint: Endpoint,
     server: PublicKey,
+    relay: Option<OwnRelay>,
     alpn: Vec<u8>,
     connection: tokio::sync::Mutex<Option<Connection>>,
     attempts: AtomicU32,
@@ -211,11 +240,18 @@ impl RemoteClient {
         Self {
             endpoint,
             server,
+            relay: None,
             alpn,
             connection: tokio::sync::Mutex::new(None),
             attempts: AtomicU32::new(0),
             log,
         }
+    }
+
+    /// Dials the App Server at its Own Relay, as its invite named it (ADR-0085).
+    pub fn on_relay(mut self, relay: Option<OwnRelay>) -> Self {
+        self.relay = relay;
+        self
     }
 
     pub fn server(&self) -> PublicKey {
@@ -278,7 +314,8 @@ impl RemoteClient {
 
     /// Fails with the reason and the stage it was reached at.
     async fn connect(&self) -> Result<Connection, (Failure, &'static str)> {
-        let connecting = self.endpoint.connect(self.server, &self.alpn);
+        let address = server_address(&self.endpoint, self.server, self.relay.as_ref()).await;
+        let connecting = self.endpoint.connect(address, &self.alpn);
         let connection = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
             Ok(Ok(connection)) => connection,
             // An App Server of another protocol major does not offer this name.

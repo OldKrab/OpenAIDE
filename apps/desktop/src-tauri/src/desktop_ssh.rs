@@ -317,6 +317,7 @@ pub(crate) async fn desktop_ssh_add(
             id: id.clone(),
             name,
             ssh: Some(destination),
+            relay: None,
         });
         write_bootstrap_preferences(&state.preferences_path, &preferences)?;
         id

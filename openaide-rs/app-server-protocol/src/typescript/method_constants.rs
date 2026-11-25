@@ -33,8 +33,9 @@ use crate::methods::{
     WORKTREE_RESOLVE_FOLDER,
 };
 use crate::methods::{
-    DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE, DEVICES_REMOVE, TASK_ATTENTION_WAIT, TASK_IMAGE,
-    TERMINALS_ATTACH, TERMINALS_CLOSE, TERMINALS_OPEN,
+    DEVICES_CANCEL_INVITE, DEVICES_CREATE_INVITE, DEVICES_RELAY_ADD_PERSON, DEVICES_RELAY_PEOPLE,
+    DEVICES_RELAY_REVOKE_PERSON, DEVICES_REMOVE, DEVICES_SET_RELAY, TASK_ATTENTION_WAIT,
+    TASK_IMAGE, TERMINALS_ATTACH, TERMINALS_CLOSE, TERMINALS_OPEN,
 };
 use crate::methods::{
     FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF, FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY,
@@ -249,6 +250,22 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const DEVICES_REMOVE = {:?} as const;\n",
         DEVICES_REMOVE
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_SET_RELAY = {:?} as const;\n",
+        DEVICES_SET_RELAY
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_RELAY_PEOPLE = {:?} as const;\n",
+        DEVICES_RELAY_PEOPLE
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_RELAY_ADD_PERSON = {:?} as const;\n",
+        DEVICES_RELAY_ADD_PERSON
+    ));
+    output.push_str(&format!(
+        "export const DEVICES_RELAY_REVOKE_PERSON = {:?} as const;\n",
+        DEVICES_RELAY_REVOKE_PERSON
     ));
     output.push_str(&format!(
         "export const TASK_ATTENTION_WAIT = {:?} as const;\n",

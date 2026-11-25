@@ -136,10 +136,15 @@ pub(crate) struct DialReport {
     network: NetworkKind,
     pub stage: Stage,
     /// `remembered_relay` when the stored relay was tried first, `lookup` when the
-    /// address was looked up.
+    /// address was looked up, `own_relay` when the computer was dialled at the Own
+    /// Relay it was paired through.
     pub address: &'static str,
-    /// Whether this device's own endpoint had a home relay when it dialled.
+    /// Whether this device's own endpoint had a home relay when it dialled. Not
+    /// about an Own Relay (ADR-0085); [`DialReport::computer_own_relay`] says that.
     pub own_relay: Option<bool>,
+    /// Whether the computer was paired through an Own Relay (ADR-0085). Only whether:
+    /// its address and password are never recorded.
+    pub computer_own_relay: Option<bool>,
     /// What the endpoint knew of the computer's address when the attempt failed.
     pub known_relay: Option<bool>,
     pub known_direct: Option<usize>,
@@ -155,6 +160,7 @@ impl DialReport {
             stage: Stage::Bind,
             address: "none",
             own_relay: None,
+            computer_own_relay: None,
             known_relay: None,
             known_direct: None,
         }
@@ -187,6 +193,9 @@ impl DialReport {
         let presence = |present: bool| if present { "present" } else { "absent" };
         if let Some(own) = self.own_relay {
             fields["own_relay"] = presence(own).into();
+        }
+        if let Some(own) = self.computer_own_relay {
+            fields["computer_own_relay"] = own.into();
         }
         if let Some(known) = self.known_relay {
             fields["known_relay"] = presence(known).into();

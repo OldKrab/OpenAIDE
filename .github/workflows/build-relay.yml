@@ -1,0 +1,63 @@
+name: Build Relay
+
+# `openaide-relay` (ADR-0085): a static Linux program an operator installs on a
+# server with `sudo ./openaide-relay setup`. The release publishes one archive per
+# architecture under a name without the version, so the setup guide can link
+# `releases/latest/download/<name>`.
+
+on:
+  workflow_call:
+  # Lets a maintainer check both builds before a release.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build relay for Linux ${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+          targets: ${{ matrix.rust_target }}
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+        with:
+          key: relay-${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install static Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+      - name: Build
+        run: cargo build --locked --release -p openaide-relay --target ${{ matrix.rust_target }}
+      - name: Check, smoke-test and package
+        shell: bash
+        run: |
+          binary="target/${{ matrix.rust_target }}/release/openaide-relay"
+          file "$binary" | grep -Eq 'static(-pie)? linked'
+          if readelf -l "$binary" | grep -q 'INTERP'; then
+            echo "The relay must not require a dynamic loader" >&2
+            exit 1
+          fi
+          "$binary" --help
+          mkdir -p artifacts
+          tar -czf "artifacts/openaide-relay-linux-${{ matrix.arch }}.tar.gz" \
+            -C "$(dirname "$binary")" openaide-relay
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: relay-linux-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

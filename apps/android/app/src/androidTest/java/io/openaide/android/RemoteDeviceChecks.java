@@ -55,6 +55,17 @@ public final class RemoteDeviceChecks extends InstrumentationTestCase {
         assertTrue(refused.body, refused.body.contains("incompatibleProtocol"));
     }
 
+    /** A forgotten computer leaves no Own Relay line behind: the line carries a relay's password. */
+    public void testForgettingAComputerClearsItsOwnRelay() {
+        var store = new ConnectionStore(getInstrumentation().getTargetContext());
+        String id = "0".repeat(63) + "f";
+        String line = "https://relay.example.com/?token=device-check";
+        store.saveOwnRelay(id, line);
+        assertEquals(line, store.ownRelay(id));
+        store.forgetPaired(id);
+        assertNull(store.ownRelay(id));
+    }
+
     private static String initialize(int major, int minor) {
         return "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"client/initialize\",\"params\":{\"clientInstanceId\":\"device-check-" + minor + "\","
             + "\"shell\":{\"kind\":\"web\"},\"requestedSurface\":{\"kind\":\"home\"},\"capabilities\":{\"protocol\":[],\"shell\":[]},"

@@ -49,6 +49,10 @@ pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
 pub const DEVICES_CREATE_INVITE: &str = "devices/createInvite";
 pub const DEVICES_CANCEL_INVITE: &str = "devices/cancelInvite";
 pub const DEVICES_REMOVE: &str = "devices/remove";
+pub const DEVICES_SET_RELAY: &str = "devices/setRelay";
+pub const DEVICES_RELAY_PEOPLE: &str = "devices/relayPeople";
+pub const DEVICES_RELAY_ADD_PERSON: &str = "devices/relayAddPerson";
+pub const DEVICES_RELAY_REVOKE_PERSON: &str = "devices/relayRevokePerson";
 pub const TERMINALS_OPEN: &str = "terminals/open";
 pub const TERMINALS_ATTACH: &str = "terminals/attach";
 pub const TERMINALS_CLOSE: &str = "terminals/close";
@@ -172,6 +176,10 @@ pub const CLIENT_METHODS: &[&str] = &[
     DEVICES_CREATE_INVITE,
     DEVICES_CANCEL_INVITE,
     DEVICES_REMOVE,
+    DEVICES_SET_RELAY,
+    DEVICES_RELAY_PEOPLE,
+    DEVICES_RELAY_ADD_PERSON,
+    DEVICES_RELAY_REVOKE_PERSON,
     TERMINALS_OPEN,
     TERMINALS_ATTACH,
     TERMINALS_CLOSE,

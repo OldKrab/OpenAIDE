@@ -13,6 +13,7 @@ fn invite(secret: u8) -> InviteCode {
     InviteCode {
         server: key(1),
         secret: [secret; INVITE_SECRET_LEN],
+        relay: None,
     }
 }
 
@@ -86,4 +87,39 @@ fn the_secret_travels_as_base32_like_the_code() {
     };
 
     assert_eq!(request.secret_bytes(), Some(invite.secret.to_vec()));
+}
+
+#[test]
+fn an_invite_with_an_own_relay_carries_the_relay_and_its_password() {
+    let relay = OwnRelay::parse("https://relay.example.com:4443/?token=friend-password").unwrap();
+    let with_relay = InviteCode {
+        relay: Some(relay.clone()),
+        ..invite(9)
+    };
+    let code = with_relay.encode();
+
+    assert!(code.starts_with("OAI2"), "{code}");
+    let decoded = InviteCode::decode(&code).unwrap();
+    assert_eq!(decoded, with_relay);
+    assert_eq!(decoded.relay.unwrap().line(), relay.line());
+    // An invite without a relay stays the code every earlier version reads.
+    assert!(invite(9).encode().starts_with("OAI1"));
+}
+
+#[test]
+fn a_relay_invite_with_a_damaged_relay_is_malformed() {
+    let mut bytes = key(1).as_bytes().to_vec();
+    bytes.extend_from_slice(&[3; INVITE_SECRET_LEN]);
+    let without_relay = format!("OAI2{}", BASE32_NOPAD.encode(&bytes));
+    bytes.extend_from_slice(b"https://relay.example.com/");
+    let without_password = format!("OAI2{}", BASE32_NOPAD.encode(&bytes));
+
+    assert_eq!(
+        InviteCode::decode(&without_relay),
+        Err(PairingCodeError::Malformed)
+    );
+    assert_eq!(
+        InviteCode::decode(&without_password),
+        Err(PairingCodeError::Malformed)
+    );
 }

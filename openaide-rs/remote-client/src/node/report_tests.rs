@@ -43,6 +43,19 @@ fn a_failure_before_the_endpoint_is_named_by_its_class_at_the_bind_stage() {
 }
 
 #[test]
+fn a_dial_at_the_computers_own_relay_says_so_apart_from_the_endpoints_relay() {
+    let mut report = DialReport::new(Purpose::Live, 0, &server(), WIFI);
+    report.stage = Stage::Done;
+    report.address = "own_relay";
+    report.computer_own_relay = Some(true);
+    let fields = report.fields(1, "relay", 300, None);
+
+    assert_eq!(fields["address"], "own_relay");
+    assert_eq!(fields["computer_own_relay"], true);
+    assert!(fields.get("own_relay").is_none());
+}
+
+#[test]
 fn the_target_is_a_short_prefix_of_the_public_key() {
     assert_eq!(short_id(&server()), "ab12cd34");
     assert_eq!(short_id("--"), "none");

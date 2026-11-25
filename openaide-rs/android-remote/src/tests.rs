@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use openaide_remote_client::{NodeHost, SecretKey};
+use openaide_remote_client::{NodeHost, OwnRelay, SecretKey};
 
 use super::host::Bridge;
 use super::*;
@@ -10,6 +11,7 @@ use super::*;
 struct Host {
     key: Mutex<Option<Vec<u8>>>,
     in_use: Mutex<Option<String>>,
+    own_relays: Mutex<HashMap<String, String>>,
     broken: AtomicBool,
 }
 
@@ -35,6 +37,22 @@ impl RemoteHost for Host {
     }
 
     fn save_relay(&self, _computer: String, _relay: String) -> Result<(), StorageError> {
+        Ok(())
+    }
+
+    fn own_relay(&self, computer: String) -> Result<Option<String>, StorageError> {
+        if self.broken.load(Ordering::SeqCst) {
+            return Err(StorageError::Unavailable);
+        }
+        Ok(self.own_relays.lock().unwrap().get(&computer).cloned())
+    }
+
+    fn save_own_relay(&self, computer: String, line: Option<String>) -> Result<(), StorageError> {
+        let mut own_relays = self.own_relays.lock().unwrap();
+        match line {
+            Some(line) => own_relays.insert(computer, line),
+            None => own_relays.remove(&computer),
+        };
         Ok(())
     }
 
@@ -100,6 +118,7 @@ fn a_code_names_its_computer_and_a_refusal_says_why() {
     let code = InviteCode {
         server,
         secret: [3; 16],
+        relay: None,
     }
     .encode();
     let invite = parse_invite(format!(" {} ", code.to_lowercase())).unwrap();
@@ -115,6 +134,41 @@ fn a_code_names_its_computer_and_a_refusal_says_why() {
         parse_invite("OAI1ABC".into()).unwrap_err(),
         CodeError::Malformed
     );
+}
+
+#[test]
+fn a_code_that_names_an_own_relay_is_read_with_its_relay() {
+    let server = SecretKey::generate().public();
+    let relay = OwnRelay::parse("https://relay.example.com/?token=t").unwrap();
+    let code = InviteCode {
+        server,
+        secret: [3; 16],
+        relay: Some(relay.clone()),
+    }
+    .encode();
+    assert!(code.starts_with("OAI2"));
+
+    let invite = parse_invite(code).unwrap();
+    assert_eq!(invite.server_id(), server.to_string());
+    assert_eq!(invite.0.relay, Some(relay));
+    // The relay's password stays out of anything printed.
+    assert!(!format!("{invite:?}").contains("token"));
+}
+
+#[test]
+fn the_own_relay_line_crosses_to_the_shell_and_back_unchanged() {
+    let host = Arc::new(Host::default());
+    let bridge = Bridge(host.clone());
+    let computer = SecretKey::generate().public();
+    let line = "https://relay.example.com/?token=t";
+
+    bridge.save_own_relay(&computer, Some(line)).unwrap();
+    assert_eq!(bridge.own_relay(&computer).unwrap().as_deref(), Some(line));
+    bridge.save_own_relay(&computer, None).unwrap();
+    assert_eq!(bridge.own_relay(&computer).unwrap(), None);
+    // Unreadable storage is a failure, never a computer without an Own Relay.
+    host.broken.store(true, Ordering::SeqCst);
+    assert!(bridge.own_relay(&computer).is_err());
 }
 
 #[test]

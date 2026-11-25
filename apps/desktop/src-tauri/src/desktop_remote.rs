@@ -25,14 +25,41 @@ use crate::desktop_runtime::{DesktopBootstrapPreferences, write_bootstrap_prefer
 
 /// A computer whose App Server this Desktop may use instead of its own. A
 /// paired computer is known by its public key and the name it gave itself; an
-/// SSH Computer (ADR-0069) by its `ssh` destination. None is a credential; the
-/// device key is stored apart.
+/// SSH Computer (ADR-0069) by its `ssh` destination. The device key is stored
+/// apart; the only secret here is an Own Relay's password.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct RemoteComputer {
     pub(crate) id: String,
     pub(crate) name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) ssh: Option<String>,
+    /// The Own Relay the computer's pairing code named (ADR-0085), or `None` for
+    /// the public relays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) relay: Option<RelayLine>,
+}
+
+/// An Own Relay line as saved, password included. It is read when the computer
+/// is reached, so a damaged line costs that pairing alone, not every saved
+/// preference. `Debug` hides it.
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub(crate) struct RelayLine(String);
+
+impl RelayLine {
+    pub(crate) fn of(relay: &remote::OwnRelay) -> Self {
+        Self(relay.line())
+    }
+
+    fn relay(&self) -> Option<remote::OwnRelay> {
+        remote::OwnRelay::parse(&self.0).ok()
+    }
+}
+
+impl std::fmt::Debug for RelayLine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RelayLine(..)")
+    }
 }
 
 impl DesktopBootstrapPreferences {
@@ -121,13 +148,18 @@ pub(crate) async fn connect(
     app: &tauri::AppHandle,
     computer: &RemoteComputer,
 ) -> Result<(LocalHttpConnection, remote::Gateway), ConnectError> {
+    let damaged = || ConnectError {
+        class: "pairing_damaged",
+        message: "The saved pairing is damaged. Pair with the computer again.".to_string(),
+    };
     let server = computer
         .id
         .parse::<remote::PublicKey>()
-        .map_err(|_| ConnectError {
-            class: "pairing_damaged",
-            message: "The saved pairing is damaged. Pair with the computer again.".to_string(),
-        })?;
+        .map_err(|_| damaged())?;
+    let relay = match &computer.relay {
+        Some(line) => Some(line.relay().ok_or_else(damaged)?),
+        None => None,
+    };
     let this_computer = |message: String| ConnectError {
         class: "endpoint",
         message,
@@ -137,7 +169,7 @@ pub(crate) async fn connect(
         .endpoint()
         .await
         .map_err(this_computer)?;
-    let client = Arc::new(remote::RemoteClient::new(endpoint, server, logger()));
+    let client = Arc::new(remote::RemoteClient::new(endpoint, server, logger()).on_relay(relay));
     client.connection().await.map_err(|failure| ConnectError {
         class: failure.class(),
         message: message(failure, &computer.name),
@@ -327,6 +359,7 @@ pub(crate) async fn desktop_remote_pair(
                 paired.name
             },
             ssh: None,
+            relay: paired.relay.as_ref().map(RelayLine::of),
         });
         write_bootstrap_preferences(&state.preferences_path, &preferences)?;
     }
