@@ -2,9 +2,8 @@ use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, TaskListCursor};
 use openaide_app_server_protocol::snapshot::{
     ChatSnapshot, SubagentCapabilitiesSnapshot, SubagentCatalogEntrySnapshot,
-    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentHistoryAvailability,
-    SubagentHistorySnapshot, SubagentOverviewSnapshot, SubagentStatus, TaskHistorySyncSnapshot,
-    TaskSnapshot, TaskSummary,
+    SubagentCatalogSnapshot, SubagentDetailSnapshot, SubagentOverviewSnapshot, SubagentStatus,
+    TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
 };
 use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot, ToolImagePreview};
 use std::sync::Arc;
@@ -20,6 +19,9 @@ use crate::tasks::snapshot::snapshot_from_record_and_chat;
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 
 mod chat_image;
+mod entity_subscription;
+#[cfg(test)]
+mod entity_subscription_tests;
 mod tool_image_preview;
 
 /// Projects one committed lazy artifact into the complete replica baseline.
@@ -94,13 +96,15 @@ pub trait TaskSnapshotSource: Send + Sync {
         })
     }
 
-    /// Reads one expanded Tool detail after enforcing Task access for the client.
+    /// Answers a Tool detail subscription after enforcing Task access: every current field,
+    /// and the terminal output as current, the appends after `known_version`, or all of it.
     fn tool_detail_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
         artifact_id: &str,
-    ) -> Result<ToolDetailSnapshot, ProtocolError>;
+        known_version: Option<u64>,
+    ) -> Result<crate::snapshots::ToolDetailSubscription, ProtocolError>;
 
     fn subagent_catalog_for_client(
         &self,
@@ -115,12 +119,15 @@ pub trait TaskSnapshotSource: Send + Sync {
         })
     }
 
+    /// Answers a Subagent History subscription after enforcing Task access: every current
+    /// field, and the Chat as current or the tail page.
     fn subagent_history_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
         _task_id: &TaskId,
         _subagent_id: &openaide_app_server_protocol::ids::SubagentId,
-    ) -> Result<SubagentHistorySnapshot, ProtocolError> {
+        _known_version: Option<u64>,
+    ) -> Result<crate::snapshots::SubagentHistorySubscription, ProtocolError> {
         Err(ProtocolError {
             code: ProtocolErrorCode::NotFound,
             message: "Subagent history is unavailable".to_string(),
@@ -289,23 +296,9 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
         artifact_id: &str,
-    ) -> Result<ToolDetailSnapshot, ProtocolError> {
-        let task = self
-            .store
-            .read_task(task_id.as_str())
-            .map_err(task_snapshot_error)?;
-        crate::tasks::access::require_client_task_access(&task, client_instance_id)
-            .map_err(task_snapshot_error)?;
-        let artifact = self
-            .store
-            .read_tool_artifact_projection(task_id.as_str(), artifact_id)
-            .map_err(task_snapshot_error)?;
-        project_tool_artifact(artifact).ok_or_else(|| ProtocolError {
-            code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotFound,
-            message: "Tool detail baseline is unavailable".to_string(),
-            recoverable: true,
-            target: None,
-        })
+        known_version: Option<u64>,
+    ) -> Result<crate::snapshots::ToolDetailSubscription, ProtocolError> {
+        self.tool_detail_subscription(client_instance_id, task_id, artifact_id, known_version)
     }
 
     fn subagent_catalog_for_client(
@@ -330,86 +323,9 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
         subagent_id: &openaide_app_server_protocol::ids::SubagentId,
-    ) -> Result<SubagentHistorySnapshot, ProtocolError> {
-        let task = self
-            .store
-            .read_task(task_id.as_str())
-            .map_err(task_snapshot_error)?;
-        crate::tasks::access::require_client_task_access(&task, client_instance_id)
-            .map_err(task_snapshot_error)?;
-        let catalog = self
-            .store
-            .subagent_catalog(task_id.as_str())
-            .map_err(task_snapshot_error)?;
-        let Some(record) = catalog
-            .entries
-            .iter()
-            .find(|entry| entry.subagent_id == subagent_id.as_str())
-        else {
-            return Err(ProtocolError {
-                code: ProtocolErrorCode::NotFound,
-                message: "Subagent is unavailable".to_string(),
-                recoverable: false,
-                target: None,
-            });
-        };
-        let history = self
-            .store
-            .subagent_history(task_id.as_str(), subagent_id.as_str());
-        Ok(match history {
-            Ok(history) => {
-                let tail_limit = self.tail_limit;
-                let start = history.messages.len().saturating_sub(tail_limit);
-                let retained = &history.messages[start..];
-                SubagentHistorySnapshot {
-                    task_id: task_id.clone(),
-                    subagent_id: subagent_id.clone(),
-                    revision: history.revision,
-                    availability: if history.messages.is_empty()
-                        && matches!(
-                            record.status,
-                            crate::storage::subagents::SubagentStatusRecord::WaitingForActivity
-                        ) {
-                        SubagentHistoryAvailability::WaitingForActivity
-                    } else {
-                        SubagentHistoryAvailability::Available
-                    },
-                    chat: ChatSnapshot {
-                        items: retained
-                            .iter()
-                            .map(|stored| project_chat_item(&stored.chat))
-                            .collect(),
-                        has_more_before: start > 0,
-                        has_messages: !history.messages.is_empty(),
-                        start_cursor: retained
-                            .first()
-                            .map(|stored| stored.chat.cursor.clone().into()),
-                        end_cursor: retained
-                            .last()
-                            .map(|stored| stored.chat.cursor.clone().into()),
-                    },
-                    current_plan: history.current_plan.map(project_agent_plan),
-                    start_cursor: retained
-                        .first()
-                        .map(|stored| stored.chat.cursor.clone().into()),
-                }
-            }
-            Err(_) => SubagentHistorySnapshot {
-                task_id: task_id.clone(),
-                subagent_id: subagent_id.clone(),
-                revision: record.history_revision,
-                availability: SubagentHistoryAvailability::Unavailable,
-                chat: ChatSnapshot {
-                    items: Vec::new(),
-                    has_more_before: false,
-                    has_messages: false,
-                    start_cursor: None,
-                    end_cursor: None,
-                },
-                current_plan: None,
-                start_cursor: None,
-            },
-        })
+        known_version: Option<u64>,
+    ) -> Result<crate::snapshots::SubagentHistorySubscription, ProtocolError> {
+        self.subagent_history_subscription(client_instance_id, task_id, subagent_id, known_version)
     }
 
     fn tool_image_preview_for_client(

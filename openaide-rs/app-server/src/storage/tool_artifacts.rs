@@ -54,12 +54,21 @@ impl Store {
             })
     }
 
-    pub(crate) fn read_tool_artifact_projection(
+    /// Reads a Tool artifact with the terminal output appended after `known_sequence`.
+    pub(crate) fn read_tool_artifact_since(
         &self,
         task_id: &str,
         artifact_id: &str,
-    ) -> Result<super::task_journal::ToolArtifactProjection, RuntimeError> {
-        self.task_journal().load_tool_artifact(task_id, artifact_id)
+        known_sequence: Option<u64>,
+    ) -> Result<
+        (
+            super::task_journal::ToolArtifactProjection,
+            Vec<super::task_journal::TerminalOutputAppend>,
+        ),
+        RuntimeError,
+    > {
+        self.task_journal()
+            .load_tool_artifact_since(task_id, artifact_id, known_sequence)
     }
 }
 

@@ -113,10 +113,10 @@ pub enum AppServerEventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current_plan: Option<Option<AgentPlanSnapshot>>,
     },
-    ToolDetailUpdated {
+    /// The Task is deleted, so its Subagent catalog, Subagent Histories and Tool details are
+    /// gone. The final notification of each of their subscriptions.
+    TaskContentRemoved {
         task_id: TaskId,
-        artifact_id: String,
-        details: ToolDetailSnapshot,
     },
     ToolDetailChanged {
         task_id: TaskId,

@@ -6,6 +6,7 @@ import type {
 } from "./generated/protocol.js";
 import type { ReplicaSnapshot } from "./backendConnection.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
+import { installSubagentHistoryReply, installToolDetailReply } from "./stateIngestionEntities.js";
 import { installTaskReply } from "./stateIngestionTask.js";
 import { matchSubscriptionEvent } from "./subscriptionScope.js";
 import type { SubscriptionIngestionContext } from "./subscriptionScope.js";
@@ -52,9 +53,9 @@ export function createSubscriptionIngestionState(
 }
 
 /**
- * Installs any subscribe reply. A Task reply is built on `retained`, the copy the client offered
- * as its known version (ADR-0086); `undefined` means it could not be, and the caller must
- * subscribe again without one.
+ * Installs any subscribe reply. A Task, Subagent History or Tool detail reply is built on
+ * `retained`, the copy the client offered as its known version (ADR-0086); `undefined` means it
+ * could not be, and the caller must subscribe again without one.
  */
 export function installSubscriptionReply(
   result: StateSubscribeResult,
@@ -62,8 +63,23 @@ export function installSubscriptionReply(
   retained?: ReplicaSnapshot,
 ): SubscriptionIngestionState | undefined {
   const { snapshot } = result;
-  if (snapshot.kind !== "task") return createSubscriptionIngestionState({ ...result, snapshot }, context);
-  const installed = installTaskReply(snapshot, retained?.kind === "task" ? retained : undefined);
+  let installed: ReplicaSnapshot | undefined;
+  switch (snapshot.kind) {
+    case "task":
+      installed = installTaskReply(snapshot, retained?.kind === "task" ? retained : undefined);
+      break;
+    case "toolDetail":
+      installed = installToolDetailReply(snapshot, retained?.kind === "toolDetail" ? retained : undefined);
+      break;
+    case "subagentHistory":
+      installed = installSubagentHistoryReply(
+        snapshot,
+        retained?.kind === "subagentHistory" ? retained : undefined,
+      );
+      break;
+    default:
+      installed = snapshot;
+  }
   if (!installed) return undefined;
   return createSubscriptionIngestionState({ ...result, snapshot: installed }, context);
 }

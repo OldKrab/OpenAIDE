@@ -33,8 +33,8 @@ pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore}
 pub use worktree_repository::WorktreeRepositorySnapshotSource;
 
 pub trait SnapshotProvider {
-    /// Builds the baseline for a subscription. `known_version` is the Chat version the client
-    /// holds; only a Task scope honors it.
+    /// Builds the baseline for a subscription. `known_version` is the content version the client
+    /// holds; only a Task, Subagent History or Tool detail scope honors it.
     fn snapshot(
         &self,
         ctx: &ClientContext,
@@ -51,6 +51,20 @@ pub struct TaskSubscription {
     pub task: openaide_app_server_protocol::snapshot::TaskSnapshot,
     pub chat_version: u64,
     pub chat_sync: openaide_app_server_protocol::state::TaskChatSync,
+}
+
+/// A Subagent History subscription's reply: see `SubscriptionSnapshot::SubagentHistory`.
+#[derive(Debug, Clone)]
+pub struct SubagentHistorySubscription {
+    pub history: openaide_app_server_protocol::snapshot::SubagentHistorySnapshot,
+    pub chat_sync: openaide_app_server_protocol::state::SubagentChatSync,
+}
+
+/// A Tool detail subscription's reply: see `SubscriptionSnapshot::ToolDetail`.
+#[derive(Debug, Clone)]
+pub struct ToolDetailSubscription {
+    pub details: openaide_app_server_protocol::task::ToolDetailSnapshot,
+    pub terminal_sync: openaide_app_server_protocol::state::ToolTerminalSync,
 }
 
 pub trait NewTaskDefaultsSnapshotSource: Send + Sync {
@@ -332,25 +346,35 @@ impl SnapshotProvider for SnapshotBuilder {
             SubscriptionScope::SubagentHistory {
                 task_id,
                 subagent_id,
-            } => SubscriptionSnapshot::SubagentHistory {
-                history: self.task_snapshots.subagent_history_for_client(
+            } => {
+                let subscription = self.task_snapshots.subagent_history_for_client(
                     &ctx.client_instance_id,
                     task_id,
                     subagent_id,
-                )?,
-            },
+                    known_version,
+                )?;
+                SubscriptionSnapshot::SubagentHistory {
+                    history: subscription.history,
+                    chat_sync: subscription.chat_sync,
+                }
+            }
             SubscriptionScope::ToolDetail {
                 task_id,
                 artifact_id,
-            } => SubscriptionSnapshot::ToolDetail {
-                task_id: task_id.clone(),
-                artifact_id: artifact_id.clone(),
-                details: self.task_snapshots.tool_detail_for_client(
+            } => {
+                let subscription = self.task_snapshots.tool_detail_for_client(
                     &ctx.client_instance_id,
                     task_id,
                     artifact_id,
-                )?,
-            },
+                    known_version,
+                )?;
+                SubscriptionSnapshot::ToolDetail {
+                    task_id: task_id.clone(),
+                    artifact_id: artifact_id.clone(),
+                    details: subscription.details,
+                    terminal_sync: subscription.terminal_sync,
+                }
+            }
             SubscriptionScope::WorktreeRepository { repository_id } => {
                 SubscriptionSnapshot::WorktreeRepository {
                     repository: self.worktrees.snapshot(repository_id)?,
@@ -458,7 +482,8 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
         _task_id: &TaskId,
         _artifact_id: &str,
-    ) -> Result<openaide_app_server_protocol::task::ToolDetailSnapshot, ProtocolError> {
+        _known_version: Option<u64>,
+    ) -> Result<ToolDetailSubscription, ProtocolError> {
         Err(ProtocolError {
             code: ProtocolErrorCode::NotFound,
             message: "Tool detail is unavailable".to_string(),

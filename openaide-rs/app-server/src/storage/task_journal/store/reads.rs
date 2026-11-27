@@ -1,6 +1,7 @@
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
+use crate::storage::task_journal::TerminalOutputAppend;
 
 use crate::storage::task_journal::chat_log::{self, ChatChangesSince};
 
@@ -193,6 +194,19 @@ impl TaskJournalStore {
         task_id: &str,
         artifact_id: &str,
     ) -> Result<ToolArtifactProjection, RuntimeError> {
+        self.load_tool_artifact_since(task_id, artifact_id, None)
+            .map(|(artifact, _)| artifact)
+    }
+
+    /// Loads Tool detail and, for a `known_sequence` below its head, the terminal output
+    /// appended after it, in order. The appends are read with the artifact, so they describe
+    /// exactly the head the projection reports.
+    pub fn load_tool_artifact_since(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+        known_sequence: Option<u64>,
+    ) -> Result<(ToolArtifactProjection, Vec<TerminalOutputAppend>), RuntimeError> {
         validate_task_id(task_id)?;
         artifact::validate_artifact_id(artifact_id)?;
         let committed_head = self
@@ -217,9 +231,14 @@ impl TaskJournalStore {
             )?;
             entry.insert(reconciled);
         }
-        let mut artifact =
-            artifact::load(&self.inner.tasks_root, task_id, artifact_id, committed_head)?;
+        let (mut artifact, appends) = artifact::load(
+            &self.inner.tasks_root,
+            task_id,
+            artifact_id,
+            committed_head,
+            known_sequence.unwrap_or(committed_head),
+        )?;
         artifact.revision = committed_head;
-        Ok(artifact)
+        Ok((artifact, appends))
     }
 }

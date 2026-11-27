@@ -7,7 +7,7 @@ import type {
   SubagentHistorySnapshot,
   TaskId,
 } from "./generated/protocol.js";
-import { updateSubagentHistorySnapshot } from "./stateIngestionSubagentHistory.js";
+import { updateSubagentHistorySnapshot } from "./stateIngestionEntities.js";
 
 const taskId = "task_1" as TaskId;
 const subagentId = "subagent_1" as SubagentId;

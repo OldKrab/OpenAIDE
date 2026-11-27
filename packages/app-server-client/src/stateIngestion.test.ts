@@ -608,51 +608,79 @@ describe("scope-local state ingestion", () => {
     expect(result).toMatchObject({ kind: "resyncRequired", reason: "toolDetailRevisionGap" });
   });
 
-  it.each(["baseline-first", "delta-first"] as const)(
-    "keeps mixed structured and terminal output when the %s event arrives",
-    (order) => {
-      const baseline: AppServerEventPayload = {
-        kind: "toolDetailUpdated",
-        taskId: taskId("task-1"),
-        artifactId: "artifact-1",
-        details: {
-          revision: 1,
-          locations: [],
-          content: [],
-          terminalOutputs: [{ terminalId: "term-1", output: "complete" }],
+  it("skips a Tool-detail notification the installed baseline already contains", () => {
+    const state = toolDetailState(1);
+    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+      kind: "toolDetailChanged",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      revision: 1,
+      deltas: [{ kind: "appendTerminal", terminalId: "term-1", data: "already-in-baseline" }],
+    }));
+
+    expect(result).toMatchObject({ kind: "applied", snapshotChanged: false });
+  });
+
+  it("applies the fields and terminal appends of one Tool-detail commit together", () => {
+    const state = toolDetailState(1);
+    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+      kind: "toolDetailChanged",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      revision: 2,
+      deltas: [
+        {
+          kind: "replaceDetails",
+          details: { revision: 2, locations: [], content: [{ kind: "text", text: "done" }], terminalOutputs: [] },
         },
-      };
-      const delta: AppServerEventPayload = {
-        kind: "toolDetailChanged",
-        taskId: taskId("task-1"),
-        artifactId: "artifact-1",
-        revision: 1,
-        deltas: [
-          {
-            kind: "replaceDetails",
-            details: { revision: 1, locations: [], content: [], terminalOutputs: [] },
-          },
-          { kind: "appendTerminal", terminalId: "term-1", data: "complete" },
-        ],
-      };
-      const payloads = order === "baseline-first" ? [baseline, delta] : [delta, baseline];
-      let state = toolDetailState(0);
-      for (const [index, payload] of payloads.entries()) {
-        const result = applySubscriptionEvent(
-          state,
-          toolDetailEvent(`cursor-${index + 1}`, `cursor-${index + 2}`, payload),
-        );
-        expect(result.kind).toBe("applied");
-        if (result.kind !== "applied") return;
-        state = result.state;
-      }
-      expect(state.snapshot.kind).toBe("toolDetail");
-      if (state.snapshot.kind !== "toolDetail") return;
-      expect(state.snapshot.details.terminalOutputs).toEqual([
-        { terminalId: "term-1", output: "complete" },
-      ]);
-    },
-  );
+        { kind: "appendTerminal", terminalId: "term-1", data: "out" },
+      ],
+    }));
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "toolDetail") return;
+    expect(result.state.snapshot.details).toEqual({
+      revision: 2,
+      locations: [],
+      content: [{ kind: "text", text: "done" }],
+      terminalOutputs: [{ terminalId: "term-1", output: "out" }],
+    });
+  });
+
+  it.each([
+    ["toolDetail", { kind: "toolDetail", taskId: taskId("task-1"), artifactId: "artifact-1" }],
+    ["subagentHistory", { kind: "subagentHistory", taskId: taskId("task-1"), subagentId: "subagent-1" as never }],
+    ["subagentCatalog", { kind: "subagentCatalog", taskId: taskId("task-1") }],
+  ] as const)("hands a %s subscription its Task's removal and ignores another Task's", (_, scope) => {
+    const state = createSubscriptionIngestionState({
+      scope: scope as SubscriptionScope,
+      cursor: cursor("cursor-1"),
+      snapshot: scope.kind === "toolDetail"
+        ? { kind: "toolDetail", taskId: taskId("task-1"), artifactId: "artifact-1", details: { revision: 1, locations: [], content: [] } }
+        : scope.kind === "subagentHistory"
+          ? {
+            kind: "subagentHistory",
+            history: {
+              taskId: taskId("task-1"),
+              subagentId: "subagent-1" as never,
+              revision: 1,
+              availability: "available",
+              chat: { items: [], hasMoreBefore: false, hasMessages: false },
+            },
+          }
+          : { kind: "subagentCatalog", catalog: { taskId: taskId("task-1"), revision: 1, entries: [] } },
+    }, context());
+    const event = (id: string): AppServerEvent => ({
+      subscription: scope as SubscriptionScope,
+      previousCursor: cursor("cursor-1"),
+      cursor: cursor("cursor-2"),
+      scope: { kind: "task", stateRootId: rootId, taskId: taskId(id) },
+      payload: { kind: "taskContentRemoved", taskId: taskId(id) },
+    });
+
+    expect(applySubscriptionEvent(state, event("task-1"))).toMatchObject({ kind: "applied" });
+    expect(applySubscriptionEvent(state, event("task-2"))).toMatchObject({ kind: "ignored" });
+  });
 });
 
 function toolDetailState(revision: number) {

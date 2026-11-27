@@ -44,19 +44,17 @@ fn tool_summary_and_full_detail_are_distinct_event_shapes() {
     }))
     .unwrap();
     let detail: AppServerEventPayload = serde_json::from_value(json!({
-        "kind": "toolDetailUpdated",
+        "kind": "toolDetailChanged",
         "taskId": "task-1",
         "artifactId": "artifact-1",
-        "details": {
-            "locations": [],
-            "content": [{ "kind": "text", "text": "complete output" }]
-        }
+        "revision": 3,
+        "deltas": [{ "kind": "appendTerminal", "terminalId": "terminal-1", "data": "complete output" }]
     }))
     .unwrap();
 
     assert_eq!(serde_json::to_value(summary).unwrap()["revision"], json!(8));
     assert_eq!(
-        serde_json::to_value(detail).unwrap()["details"]["content"][0]["text"],
+        serde_json::to_value(detail).unwrap()["deltas"][0]["data"],
         json!("complete output")
     );
 }

@@ -423,8 +423,9 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
         _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
         _task_id: &TaskId,
         _artifact_id: &str,
+        _known_version: Option<u64>,
     ) -> Result<
-        openaide_app_server_protocol::task::ToolDetailSnapshot,
+        crate::snapshots::ToolDetailSubscription,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
         Err(openaide_app_server_protocol::errors::ProtocolError {

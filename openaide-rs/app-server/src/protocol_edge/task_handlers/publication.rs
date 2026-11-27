@@ -249,6 +249,17 @@ impl RpcGateway {
             },
             now,
         );
+        if change.changes.removed {
+            // Subscriptions to the Task's Subagent catalog, Subagent Histories and Tool details
+            // end with the Task.
+            events.extend(self.publish_task_payload(
+                task_id,
+                AppServerEventPayload::TaskContentRemoved {
+                    task_id: task_id.clone(),
+                },
+                now,
+            ));
+        }
 
         let client_hub = self.client_hub.clone();
         for detail in &change.tool_details {

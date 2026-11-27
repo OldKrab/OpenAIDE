@@ -343,16 +343,23 @@ export type ShellCapability = "openExternal" | "revealFile" | "resolveFileReveal
 
 export type StateSubscribeParams = { scope: SubscriptionScope,
 /**
- * The Chat version of a copy this client already holds: the number of the last Chat
- * frame it has applied. Only a Task scope honors it; the reply's `chatSync` then says
- * whether the copy is current, which changes it misses, or that it must take the whole
- * Chat (ADR-0086). The version is durable, so it stays valid across App Server restarts.
+ * The content version of a copy this client already holds (ADR-0086): for a Task the number
+ * of the last Chat frame it has applied, for a Subagent History its revision, for a Tool
+ * detail its artifact sequence. The reply says whether the copy is current, which changes
+ * it misses, or that it must take the whole content. Versions are durable, so they stay
+ * valid across App Server restarts. Other scopes ignore it.
  */
 knownVersion?: number, };
 
 export type StateSubscribeResult = { cursor: EventCursor, scope: SubscriptionScope, snapshot: SubscriptionSnapshot, };
 
 export type TaskChatSync = { "kind": "current" } | { "kind": "deltas", changes: Array<TaskChatChange>, } | { "kind": "full" };
+
+export type SubagentChatSync = { "kind": "current" } | { "kind": "full" };
+
+export type ToolTerminalSync = { "kind": "current" } | { "kind": "deltas", appends: Array<TerminalOutputAppend>, } | { "kind": "full" };
+
+export type TerminalOutputAppend = { terminalId: string, data: string, };
 
 export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
@@ -370,7 +377,19 @@ task: TaskSnapshot,
  * The Chat version after the Chat this reply describes. Later `taskChanged`
  * notifications carry the version their Chat changes lead to.
  */
-chatVersion: number, chatSync: TaskChatSync, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory", history: SubagentHistorySnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
+chatVersion: number, chatSync: TaskChatSync, } | { "kind": "subagentCatalog", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistory",
+/**
+ * Complete and current. `history.chat` is the tail page only when `chatSync` is
+ * `full`; otherwise it is an empty placeholder and the client keeps its own Chat.
+ * `history.revision` is the version later `subagentHistoryChanged` notifications follow.
+ */
+history: SubagentHistorySnapshot, chatSync: SubagentChatSync, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string,
+/**
+ * Complete and current. `details.terminalOutputs` holds the whole output only when
+ * `terminalSync` is `full`; otherwise it is empty and the client keeps its own.
+ * `details.revision` is the artifact sequence later notifications follow.
+ */
+details: ToolDetailSnapshot, terminalSync: ToolTerminalSync, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
 
 export type SubagentOverviewSnapshot = { totalCount: number, runningCount: number, attentionCount: number, available?: boolean, };
 
@@ -1429,7 +1448,7 @@ export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: Clie
 /**
  * Outer option controls delta presence; inner option clears the Agent Plan.
  */
-currentPlan?: AgentPlanSnapshot | null | null, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, } | { "kind": "deviceCollectionUpdated", devices: DeviceCollectionSnapshot, } | { "kind": "terminalCollectionUpdated", terminals: TerminalCollectionSnapshot, };
+currentPlan?: AgentPlanSnapshot | null | null, } | { "kind": "taskContentRemoved", taskId: TaskId, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, } | { "kind": "deviceCollectionUpdated", devices: DeviceCollectionSnapshot, } | { "kind": "terminalCollectionUpdated", terminals: TerminalCollectionSnapshot, };
 
 export type ToolDetailDelta = { "kind": "replaceDetails", details: ToolDetailSnapshot, } | { "kind": "appendTerminal", terminalId: string, data: string, };
 

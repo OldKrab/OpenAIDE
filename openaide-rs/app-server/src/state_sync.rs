@@ -192,12 +192,17 @@ impl StateStream {
     ) -> PublishOutcome {
         let (_, cursor) = self.cursors.advance();
         // A deleted Task ends its subscriptions: the event that reports the removal is the last
-        // one they receive.
+        // one they receive. The Task's own subscriptions end with `TaskChanged { removed }`,
+        // its entity subscriptions with `TaskContentRemoved`.
         let removed_task = match (&scope, &payload) {
             (
                 EventScope::Task { task_id, .. },
                 AppServerEventPayload::TaskChanged { changes, .. },
-            ) if changes.removed => Some(task_id.clone()),
+            ) if changes.removed => Some((task_id.clone(), true)),
+            (
+                EventScope::Task { task_id, .. },
+                AppServerEventPayload::TaskContentRemoved { .. },
+            ) => Some((task_id.clone(), false)),
             _ => None,
         };
         let mut published = Vec::new();
@@ -222,24 +227,30 @@ impl StateStream {
                 },
             });
         }
-        if let Some(task_id) = removed_task {
-            self.end_task_subscriptions(&task_id);
+        if let Some((task_id, is_task_scope)) = removed_task {
+            self.end_task_subscriptions(&task_id, is_task_scope);
         }
         PublishOutcome {
             deliveries: published,
         }
     }
 
-    fn end_task_subscriptions(&mut self, task_id: &TaskId) {
+    /// Drops a deleted Task's subscriptions: the Task's own when `task_scope`, else its entities'.
+    fn end_task_subscriptions(&mut self, task_id: &TaskId, task_scope: bool) {
+        let ends = |scope: &SubscriptionScope| match scope {
+            SubscriptionScope::Task { task_id: t } => task_scope && t == task_id,
+            SubscriptionScope::SubagentCatalog { task_id: t }
+            | SubscriptionScope::SubagentHistory { task_id: t, .. }
+            | SubscriptionScope::ToolDetail { task_id: t, .. } => !task_scope && t == task_id,
+            _ => false,
+        };
         let ended: Vec<ClientInstanceId> = self
             .subscriptions
             .iter()
-            .filter(|s| matches!(&s.scope, SubscriptionScope::Task { task_id: t } if t == task_id))
+            .filter(|s| task_scope && ends(&s.scope))
             .map(|s| s.client_instance_id.clone())
             .collect();
-        self.subscriptions.retain(
-            |s| !matches!(&s.scope, SubscriptionScope::Task { task_id: t } if t == task_id),
-        );
+        self.subscriptions.retain(|s| !ends(&s.scope));
         for client in ended {
             self.task_subscription_presence
                 .observe_unsubscribed(&client, task_id);
@@ -476,41 +487,39 @@ fn payload_matches_subscription(
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::TaskRequestsUpdated { .. }
         ),
-        SubscriptionScope::SubagentCatalog { task_id } => matches!(
-            payload,
-            AppServerEventPayload::SubagentCatalogUpdated { catalog }
-                if &catalog.task_id == task_id
-        ),
+        // A deleted Task ends each of its entity subscriptions with this notification.
+        SubscriptionScope::SubagentCatalog { task_id } => {
+            matches!(
+                payload,
+                AppServerEventPayload::SubagentCatalogUpdated { catalog }
+                    if &catalog.task_id == task_id
+            ) || task_content_removed(payload, task_id)
+        }
         SubscriptionScope::SubagentHistory {
             task_id,
             subagent_id,
-        } => matches!(
-            payload,
-            AppServerEventPayload::SubagentHistoryChanged {
-                task_id: changed_task_id,
-                subagent_id: changed_subagent_id,
-                ..
-            } if changed_task_id == task_id && changed_subagent_id == subagent_id
-        ),
+        } => {
+            matches!(
+                payload,
+                AppServerEventPayload::SubagentHistoryChanged {
+                    task_id: changed_task_id,
+                    subagent_id: changed_subagent_id,
+                    ..
+                } if changed_task_id == task_id && changed_subagent_id == subagent_id
+            ) || task_content_removed(payload, task_id)
+        }
         SubscriptionScope::ToolDetail {
             task_id,
             artifact_id,
         } => {
             matches!(
                 payload,
-                AppServerEventPayload::ToolDetailUpdated {
-                    task_id: updated_task_id,
-                    artifact_id: updated_artifact_id,
-                    ..
-                } if updated_task_id == task_id && updated_artifact_id == artifact_id
-            ) || matches!(
-                payload,
                 AppServerEventPayload::ToolDetailChanged {
                     task_id: updated_task_id,
                     artifact_id: updated_artifact_id,
                     ..
                 } if updated_task_id == task_id && updated_artifact_id == artifact_id
-            )
+            ) || task_content_removed(payload, task_id)
         }
         SubscriptionScope::WorktreeRepository { repository_id } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
@@ -523,6 +532,13 @@ fn payload_matches_subscription(
                 )
         }
     }
+}
+
+fn task_content_removed(payload: &AppServerEventPayload, task_id: &TaskId) -> bool {
+    matches!(
+        payload,
+        AppServerEventPayload::TaskContentRemoved { task_id: removed } if removed == task_id
+    )
 }
 
 fn task_lifecycle_matches_navigation_section(

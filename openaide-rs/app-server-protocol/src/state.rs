@@ -16,10 +16,11 @@ use crate::worktree::WorktreeRepositorySnapshot;
 #[serde(rename_all = "camelCase")]
 pub struct StateSubscribeParams {
     pub scope: SubscriptionScope,
-    /// The Chat version of a copy this client already holds: the number of the last Chat
-    /// frame it has applied. Only a Task scope honors it; the reply's `chatSync` then says
-    /// whether the copy is current, which changes it misses, or that it must take the whole
-    /// Chat (ADR-0086). The version is durable, so it stays valid across App Server restarts.
+    /// The content version of a copy this client already holds (ADR-0086): for a Task the number
+    /// of the last Chat frame it has applied, for a Subagent History its revision, for a Tool
+    /// detail its artifact sequence. The reply says whether the copy is current, which changes
+    /// it misses, or that it must take the whole content. Versions are durable, so they stay
+    /// valid across App Server restarts. Other scopes ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub known_version: Option<u64>,
@@ -122,13 +123,23 @@ pub enum SubscriptionSnapshot {
     SubagentCatalog {
         catalog: SubagentCatalogSnapshot,
     },
+    /// Every current field, with the Chat as `chatSync` says.
     SubagentHistory {
+        /// Complete and current. `history.chat` is the tail page only when `chatSync` is
+        /// `full`; otherwise it is an empty placeholder and the client keeps its own Chat.
+        /// `history.revision` is the version later `subagentHistoryChanged` notifications follow.
         history: SubagentHistorySnapshot,
+        chat_sync: SubagentChatSync,
     },
+    /// Every current field, with the terminal output as `terminalSync` says.
     ToolDetail {
         task_id: TaskId,
         artifact_id: String,
+        /// Complete and current. `details.terminalOutputs` holds the whole output only when
+        /// `terminalSync` is `full`; otherwise it is empty and the client keeps its own.
+        /// `details.revision` is the artifact sequence later notifications follow.
         details: ToolDetailSnapshot,
+        terminal_sync: ToolTerminalSync,
     },
     WorktreeRepository {
         repository: WorktreeRepositorySnapshot,
@@ -156,6 +167,45 @@ pub enum TaskChatSync {
     /// `task.chat` is the tail page and replaces the client's Chat: no version was offered, it
     /// predates the last compaction or replacement, or it is ahead of the Task.
     Full,
+}
+
+/// How a Subagent History subscription reply brings the client's Chat to `history.revision`.
+/// Deltas are not offered: a history is a bounded tail and its change journal restarts at every
+/// compaction, so serving them would need a change log App Server does not keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SubagentChatSync {
+    /// The client's known version is the latest; its Chat is unchanged.
+    Current,
+    /// `history.chat` is the tail page and replaces the client's Chat: no version was offered,
+    /// or it differs from the history's.
+    Full,
+}
+
+/// How a Tool detail subscription reply brings the client's terminal output to
+/// `details.revision`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ToolTerminalSync {
+    /// The client's known version is the latest; its output is unchanged.
+    Current,
+    /// The terminal output appended after the known version, in order.
+    Deltas { appends: Vec<TerminalOutputAppend> },
+    /// `details.terminalOutputs` replaces the client's output: no version was offered, or it
+    /// is ahead of the artifact.
+    Full,
+}
+
+/// Terminal output added to one terminal of a Tool detail.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputAppend {
+    pub terminal_id: String,
+    pub data: String,
 }
 
 #[cfg(test)]

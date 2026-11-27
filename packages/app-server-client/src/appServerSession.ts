@@ -3,12 +3,14 @@ import {
   installSubscriptionReply,
   type SubscriptionIngestionState,
 } from "./stateIngestion.js";
+import { entityVersion } from "./stateIngestionEntities.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
 import {
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AppServerEvent,
   type InitializeResult,
+  type StateSubscribeResult,
   type SubscriptionScope,
 } from "./generated/protocol.js";
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
@@ -21,14 +23,20 @@ import type {
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
   BackendUnsubscribe,
+  EntityReplicaSnapshot,
   ReplicaSnapshot,
-  TaskReplicaSnapshot,
 } from "./backendConnection.js";
 
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
-const MAX_RETAINED_TASK_COPIES = 16;
+/** Copies kept per entity kind after their last observer leaves (ADR-0086). */
+const MAX_RETAINED_COPIES: Record<EntityReplicaSnapshot["kind"], number> = {
+  task: 16,
+  // Terminal output can be large, so fewer of these are worth keeping.
+  toolDetail: 8,
+  subagentHistory: 8,
+};
 
 type ScopeReplica = {
   scope: SubscriptionScope;
@@ -59,10 +67,10 @@ export function createAppServerSession(
   logger = createDiagnosticsLogger("openaide-app-server-session"),
 ): AppServerSession {
   const replicas = new Map<string, ScopeReplica>();
-  // Task copies kept after their last observer leaves, least recently released first.
-  // Returning to the Task offers the copy's revision instead of paying for a baseline
-  // (ADR-0073). A copy is trusted only within the generation that installed it.
-  const retainedTaskCopies = new Map<string, TaskReplicaSnapshot>();
+  // Entity copies (Task, Subagent History, Tool detail) kept after their last observer leaves,
+  // least recently released first. Returning to the entity offers the copy's content version
+  // instead of paying for a baseline (ADR-0086).
+  const retainedCopies = new Map<string, EntityReplicaSnapshot>();
   const statusListeners = new Set<(status: AppServerSessionStatus) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
@@ -209,7 +217,7 @@ export function createAppServerSession(
       stopRecoveryBaseline();
       stopRecoveryFailure();
       replicas.clear();
-      retainedTaskCopies.clear();
+      retainedCopies.clear();
       statusListeners.clear();
       invalidationListeners.clear();
       recoveryBaselineListeners.clear();
@@ -234,11 +242,11 @@ export function createAppServerSession(
       replica_count: replicas.size,
     });
     updateStatus({ status: "recovering", generation, reason: event.reason });
-    // A copy stays valid across a transport loss or an App Server restart: it carries the Chat
-    // version it was built at, and App Server answers it with the missed Chat changes, or the
-    // whole Chat when it cannot. Only another state root makes the copies meaningless.
+    // A copy stays valid across a transport loss or an App Server restart: it carries the content
+    // version it was built at, and App Server answers it with the missed changes, or the whole
+    // content when it cannot. Only another state root makes the copies meaningless.
     for (const [key, replica] of replicas) {
-      retainTaskCopy(key, replica);
+      retainCopy(key, replica);
       invalidateReplica(replica);
     }
     notifyListeners(invalidationListeners, event, logger, "generation_invalidation");
@@ -254,12 +262,12 @@ export function createAppServerSession(
       duration_ms: Date.now() - gate.startedAt,
     });
     if (initialization && initialization.snapshot.stateRoot.stateRootId !== baseline.result.snapshot.stateRoot.stateRootId) {
-      logger.info("app_server_retained_task_copies_dropped", {
+      logger.info("app_server_retained_copies_dropped", {
         generation,
-        retained_copy_count: retainedTaskCopies.size,
+        retained_copy_count: retainedCopies.size,
         reason: "stateRootChanged",
       });
-      retainedTaskCopies.clear();
+      retainedCopies.clear();
     }
     initialization = baseline.result;
     notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
@@ -339,11 +347,11 @@ export function createAppServerSession(
   async function refreshReplicaUntilReady(replica: ScopeReplica, targetGeneration: number) {
     let attempt = 0;
     // Only the first attempt offers a retained copy; a rejected resume falls back to a baseline.
-    let retained = takeRetainedTaskCopy(scopeKey(replica.scope));
+    let retained = takeRetainedCopy(scopeKey(replica.scope));
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
       attempt += 1;
       const startedAt = Date.now();
-      const knownVersion = retained?.chatVersion;
+      const knownVersion = retained ? entityVersion(retained) : undefined;
       try {
         logger.info("app_server_state_baseline_request_started", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
@@ -387,10 +395,7 @@ export function createAppServerSession(
           generation: targetGeneration,
           attempt,
           reply_kind: result.snapshot.kind,
-          chat_sync: result.snapshot.kind === "task" ? result.snapshot.chatSync.kind : undefined,
-          missed_change_count: result.snapshot.kind === "task" && result.snapshot.chatSync.kind === "deltas"
-            ? result.snapshot.chatSync.changes.length
-            : 0,
+          ...replySyncDiagnosticFields(result.snapshot),
           dropped_pending_event_count: droppedPendingCount,
           duration_ms: Date.now() - startedAt,
         });
@@ -503,7 +508,7 @@ export function createAppServerSession(
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
     replicas.delete(key);
-    retainTaskCopy(key, replica);
+    retainCopy(key, replica);
     logger.info("app_server_state_subscription_released", {
       ...scopeDiagnosticFields(replica.scope, key),
       generation,
@@ -511,20 +516,25 @@ export function createAppServerSession(
     void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
   }
 
-  function retainTaskCopy(key: string, replica: ScopeReplica) {
+  function retainCopy(key: string, replica: ScopeReplica) {
     const snapshot = replica.state?.snapshot;
-    if (replica.refreshing || snapshot?.kind !== "task") return;
-    retainedTaskCopies.delete(key);
-    retainedTaskCopies.set(key, snapshot);
-    for (const oldest of retainedTaskCopies.keys()) {
-      if (retainedTaskCopies.size <= MAX_RETAINED_TASK_COPIES) break;
-      retainedTaskCopies.delete(oldest);
+    if (replica.refreshing || !isEntityReplica(snapshot)) return;
+    retainedCopies.delete(key);
+    retainedCopies.set(key, snapshot);
+    // Evict the least recently released copy of the same kind once its kind is over its limit.
+    let sameKind = 0;
+    for (const copy of retainedCopies.values()) if (copy.kind === snapshot.kind) sameKind += 1;
+    for (const [oldestKey, copy] of retainedCopies) {
+      if (sameKind <= MAX_RETAINED_COPIES[snapshot.kind]) break;
+      if (copy.kind !== snapshot.kind) continue;
+      retainedCopies.delete(oldestKey);
+      sameKind -= 1;
     }
   }
 
-  function takeRetainedTaskCopy(key: string) {
-    const snapshot = retainedTaskCopies.get(key);
-    retainedTaskCopies.delete(key);
+  function takeRetainedCopy(key: string) {
+    const snapshot = retainedCopies.get(key);
+    retainedCopies.delete(key);
     return snapshot;
   }
 
@@ -539,6 +549,30 @@ export function createAppServerSession(
     }
     status = next;
     notifyListeners(statusListeners, next, logger, "session_status");
+  }
+}
+
+function isEntityReplica(snapshot: ReplicaSnapshot | undefined): snapshot is EntityReplicaSnapshot {
+  return snapshot?.kind === "task" || snapshot?.kind === "toolDetail" || snapshot?.kind === "subagentHistory";
+}
+
+/** How an entity reply brought the client's copy current; empty for other scopes. */
+function replySyncDiagnosticFields(snapshot: StateSubscribeResult["snapshot"]) {
+  switch (snapshot.kind) {
+    case "task":
+      return {
+        content_sync: snapshot.chatSync.kind,
+        missed_change_count: snapshot.chatSync.kind === "deltas" ? snapshot.chatSync.changes.length : 0,
+      };
+    case "toolDetail":
+      return {
+        content_sync: snapshot.terminalSync.kind,
+        missed_change_count: snapshot.terminalSync.kind === "deltas" ? snapshot.terminalSync.appends.length : 0,
+      };
+    case "subagentHistory":
+      return { content_sync: snapshot.chatSync.kind, missed_change_count: 0 };
+    default:
+      return {};
   }
 }
 

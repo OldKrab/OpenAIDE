@@ -10,8 +10,11 @@ import type {
   InitializeResult,
   MessageId,
   StateSubscribeResult,
+  SubagentChatSync,
+  SubagentId,
   TaskChatSync,
   TaskId,
+  ToolTerminalSync,
   WorktreeRepositoryId,
 } from "./index";
 import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CANCEL } from "./generated/protocol";
@@ -717,6 +720,209 @@ describe("AppServerSession Task resume", () => {
 
     await vi.waitFor(() => expect(snapshots).toHaveLength(1));
     expect(params).toEqual([{ scope }, { scope }]);
+    session.close();
+  });
+});
+
+describe("AppServerSession Tool detail and Subagent History resume", () => {
+  const toolScope = { kind: "toolDetail" as const, taskId: "task_1" as TaskId, artifactId: "artifact_1" };
+  const historyScope = {
+    kind: "subagentHistory" as const,
+    taskId: "task_1" as TaskId,
+    subagentId: "subagent_1" as SubagentId,
+  };
+
+  function toolReply(
+    revision: number,
+    terminalSync: ToolTerminalSync,
+    terminalOutputs: Array<{ terminalId: string; output: string }> = [],
+    content = "text",
+  ): StateSubscribeResult {
+    return {
+      cursor: `cursor_${revision}` as EventCursor,
+      scope: toolScope,
+      snapshot: {
+        kind: "toolDetail",
+        taskId: toolScope.taskId,
+        artifactId: toolScope.artifactId,
+        terminalSync,
+        details: { revision, locations: [], content: [{ kind: "text", text: content }], terminalOutputs },
+      },
+    };
+  }
+
+  function historyReply(
+    revision: number,
+    chatSync: SubagentChatSync,
+    items: ChatItem[] = [],
+    availability: "available" | "waitingForActivity" = "available",
+  ): StateSubscribeResult {
+    return {
+      cursor: `cursor_${revision}` as EventCursor,
+      scope: historyScope,
+      snapshot: {
+        kind: "subagentHistory",
+        chatSync,
+        history: {
+          taskId: historyScope.taskId,
+          subagentId: historyScope.subagentId,
+          revision,
+          availability,
+          chat: { items, hasMoreBefore: false, hasMessages: items.length > 0 },
+        },
+      },
+    };
+  }
+
+  async function released(scope: typeof toolScope | typeof historyScope, replies: StateSubscribeResult[]) {
+    const params: unknown[] = [];
+    const raw = fakeConnection(async (method, value) => {
+      if (method === STATE_UNSUBSCRIBE) return { scope };
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      params.push(value);
+      const reply = replies.shift();
+      if (!reply) throw new Error("No subscribe reply left");
+      return reply;
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const ready = vi.fn();
+    const release = session.subscribeState(scope, { onSnapshot: vi.fn(), onBaselineReady: ready });
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
+    release();
+    return { raw, session, params };
+  }
+
+  function snapshotsOf<K extends "toolDetail" | "subagentHistory">(
+    session: ReturnType<typeof createAppServerSession>,
+    scope: typeof toolScope | typeof historyScope,
+    kind: K,
+  ) {
+    const snapshots: Array<Extract<import("./index").ReplicaSnapshot, { kind: K }>> = [];
+    session.subscribeState(scope, {
+      onSnapshot: (snapshot) => {
+        if (snapshot.kind === kind) snapshots.push(snapshot as never);
+      },
+    });
+    return snapshots;
+  }
+
+  it("offers the released Tool detail's artifact sequence and appends the missed output", async () => {
+    const { session, params } = await released(toolScope, [
+      toolReply(2, { kind: "full" }, [{ terminalId: "t1", output: "ab" }]),
+      toolReply(4, { kind: "deltas", appends: [{ terminalId: "t1", data: "cd" }, { terminalId: "t2", data: "x" }] }, [], "newer"),
+    ]);
+
+    const snapshots = snapshotsOf(session, toolScope, "toolDetail");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope: toolScope }, { scope: toolScope, knownVersion: 2 }]);
+    expect(snapshots[0].details.revision).toBe(4);
+    expect(snapshots[0].details.terminalOutputs).toEqual([
+      { terminalId: "t1", output: "abcd" },
+      { terminalId: "t2", output: "x" },
+    ]);
+    // Fields come from the reply, not the retained copy.
+    expect(snapshots[0].details.content).toEqual([{ kind: "text", text: "newer" }]);
+    session.close();
+  });
+
+  it("keeps the retained terminal output when the Tool detail reply is current", async () => {
+    const { session } = await released(toolScope, [
+      toolReply(2, { kind: "full" }, [{ terminalId: "t1", output: "ab" }]),
+      toolReply(2, { kind: "current" }),
+    ]);
+
+    const snapshots = snapshotsOf(session, toolScope, "toolDetail");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0].details.terminalOutputs).toEqual([{ terminalId: "t1", output: "ab" }]);
+    session.close();
+  });
+
+  it("takes the whole terminal output when the Tool detail reply is full", async () => {
+    const { session } = await released(toolScope, [
+      toolReply(2, { kind: "full" }, [{ terminalId: "t1", output: "ab" }]),
+      toolReply(1, { kind: "full" }, [{ terminalId: "t1", output: "fresh" }]),
+    ]);
+
+    const snapshots = snapshotsOf(session, toolScope, "toolDetail");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0].details.terminalOutputs).toEqual([{ terminalId: "t1", output: "fresh" }]);
+    session.close();
+  });
+
+  it("offers a Tool detail copy across a recovery on the same state root", async () => {
+    const { raw, session, params } = await released(toolScope, [
+      toolReply(2, { kind: "full" }, [{ terminalId: "t1", output: "ab" }]),
+      toolReply(2, { kind: "current" }),
+    ]);
+    raw.invalidate();
+    raw.recover();
+
+    const snapshots = snapshotsOf(session, toolScope, "toolDetail");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope: toolScope }, { scope: toolScope, knownVersion: 2 }]);
+    session.close();
+  });
+
+  it("offers the released Subagent History's revision and keeps its Chat when current", async () => {
+    const { session, params } = await released(historyScope, [
+      historyReply(3, { kind: "full" }, [userItem("one")], "waitingForActivity"),
+      historyReply(3, { kind: "current" }),
+    ]);
+
+    const snapshots = snapshotsOf(session, historyScope, "subagentHistory");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope: historyScope }, { scope: historyScope, knownVersion: 3 }]);
+    expect(snapshots[0].history.chat.items.map((item) => item.messageId)).toEqual(["one"]);
+    expect(snapshots[0].history.availability).toBe("available");
+    session.close();
+  });
+
+  it("takes the tail page when the Subagent History reply is full", async () => {
+    const { session } = await released(historyScope, [
+      historyReply(3, { kind: "full" }, [userItem("one")]),
+      historyReply(5, { kind: "full" }, [userItem("one"), userItem("two")]),
+    ]);
+
+    const snapshots = snapshotsOf(session, historyScope, "subagentHistory");
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0].history.revision).toBe(5);
+    expect(snapshots[0].history.chat.items).toHaveLength(2);
+    session.close();
+  });
+
+  it("evicts the least recently released Tool detail copy past its limit", async () => {
+    const scopeFor = (index: number) => ({ ...toolScope, artifactId: `artifact_${index}` });
+    const params: unknown[] = [];
+    const raw = fakeConnection(async (method, value) => {
+      if (method === STATE_UNSUBSCRIBE) return { scope: toolScope };
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      params.push(value);
+      const scope = (value as { scope: typeof toolScope }).scope;
+      return { ...toolReply(2, { kind: "full" }, [{ terminalId: "t1", output: "ab" }]), scope } as StateSubscribeResult;
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    for (let index = 0; index < 9; index += 1) {
+      const ready = vi.fn();
+      const release = session.subscribeState(scopeFor(index), { onSnapshot: vi.fn(), onBaselineReady: ready });
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
+      release();
+    }
+    params.length = 0;
+    for (const index of [0, 8]) {
+      const ready = vi.fn();
+      session.subscribeState(scopeFor(index), { onSnapshot: vi.fn(), onBaselineReady: ready });
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce());
+    }
+
+    expect(params).toEqual([{ scope: scopeFor(0) }, { scope: scopeFor(8), knownVersion: 2 }]);
     session.close();
   });
 });

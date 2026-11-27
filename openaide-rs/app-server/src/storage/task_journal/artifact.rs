@@ -107,13 +107,17 @@ pub(super) fn prepare_reconciled_with_faults(
     Ok(change)
 }
 
-/// Replays only the artifact prefix made visible by the Task journal head.
+/// Replays only the artifact prefix made visible by the Task journal head, and returns the
+/// terminal appends of frames `known_sequence + 1..=head`, one per operation in commit order.
+/// Compaction keeps every frame and every append (it drops only superseded structured
+/// replacements), so any known sequence up to the head can be served.
 pub(super) fn load(
     tasks_root: &Path,
     task_id: &str,
     artifact_id: &str,
     committed_head: u64,
-) -> Result<ToolArtifactProjection, RuntimeError> {
+    known_sequence: u64,
+) -> Result<(ToolArtifactProjection, Vec<TerminalOutputAppend>), RuntimeError> {
     let path = artifact_path(tasks_root, task_id, artifact_id)?;
     let replayed: ReplayedFrames<ArtifactFrame> = frame::replay(&path)
         .map_err(|error| artifact_frame_error("load_replay", task_id, artifact_id, error))?;
@@ -125,13 +129,21 @@ pub(super) fn load(
     let mut details = None;
     let mut terminal_order = Vec::new();
     let mut terminal_outputs = HashMap::<String, String>::new();
+    let mut appends_after_known = Vec::new();
     for artifact_frame in replayed.frames.into_iter().take(committed_head as usize) {
+        let after_known = artifact_frame.sequence > known_sequence;
         for operation in artifact_frame.operations {
             match operation {
                 ArtifactOperation::ReplaceDetails {
                     details: replacement,
                 } => details = Some(*replacement),
                 ArtifactOperation::AppendTerminal { terminal_id, data } => {
+                    if after_known {
+                        appends_after_known.push(TerminalOutputAppend {
+                            terminal_id: terminal_id.clone(),
+                            data: data.clone(),
+                        });
+                    }
                     match terminal_outputs.entry(terminal_id) {
                         Entry::Occupied(mut output) => output.get_mut().push_str(&data),
                         Entry::Vacant(output) => {
@@ -143,13 +155,16 @@ pub(super) fn load(
             }
         }
     }
-    Ok(ToolArtifactProjection {
-        artifact_id: artifact_id.to_string(),
-        revision: committed_head,
-        details,
-        terminal_order,
-        terminal_outputs,
-    })
+    Ok((
+        ToolArtifactProjection {
+            artifact_id: artifact_id.to_string(),
+            revision: committed_head,
+            details,
+            terminal_order,
+            terminal_outputs,
+        },
+        appends_after_known,
+    ))
 }
 
 /// Removes full structured replacements that do not change the currently

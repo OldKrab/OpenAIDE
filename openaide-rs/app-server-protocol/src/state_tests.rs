@@ -66,3 +66,30 @@ fn tool_detail_scope_identifies_one_task_artifact() {
         })
     );
 }
+
+#[test]
+fn entity_reply_syncs_have_a_distinct_wire_form() {
+    use crate::state::{SubagentChatSync, TerminalOutputAppend, ToolTerminalSync};
+
+    assert_eq!(
+        serde_json::to_value(ToolTerminalSync::Deltas {
+            appends: vec![TerminalOutputAppend {
+                terminal_id: "terminal-1".to_string(),
+                data: "more".to_string(),
+            }],
+        })
+        .unwrap(),
+        json!({
+            "kind": "deltas",
+            "appends": [{ "terminalId": "terminal-1", "data": "more" }],
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(ToolTerminalSync::Current).unwrap(),
+        json!({ "kind": "current" })
+    );
+    assert_eq!(
+        serde_json::to_value(SubagentChatSync::Full).unwrap(),
+        json!({ "kind": "full" })
+    );
+}

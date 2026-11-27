@@ -125,21 +125,30 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "taskHistorySyncUpdated" ||
         payload.kind === "taskRequestsUpdated"
       );
+    // A deleted Task ends each entity subscription with `taskContentRemoved`.
     case "subagentCatalog":
-      return payload.kind === "subagentCatalogUpdated"
-        && payload.catalog.taskId === scope.taskId;
+      return (payload.kind === "subagentCatalogUpdated" && payload.catalog.taskId === scope.taskId)
+        || taskContentRemoved(payload, scope.taskId);
     case "subagentHistory":
-      return payload.kind === "subagentHistoryChanged"
+      return (
+        payload.kind === "subagentHistoryChanged"
         && payload.taskId === scope.taskId
-        && payload.subagentId === scope.subagentId;
+        && payload.subagentId === scope.subagentId
+      ) || taskContentRemoved(payload, scope.taskId);
     case "toolDetail":
-      return (payload.kind === "toolDetailUpdated" || payload.kind === "toolDetailChanged")
+      return (
+        payload.kind === "toolDetailChanged"
         && payload.taskId === scope.taskId
-        && payload.artifactId === scope.artifactId;
+        && payload.artifactId === scope.artifactId
+      ) || taskContentRemoved(payload, scope.taskId);
     case "worktreeRepository":
       return payload.kind === "worktreeRepositoryUpdated"
         && payload.repositoryId === scope.repositoryId;
   }
+}
+
+function taskContentRemoved(payload: AppServerEventPayload, taskId: string): boolean {
+  return payload.kind === "taskContentRemoved" && payload.taskId === taskId;
 }
 
 function normalizeOptional(value: string | null | undefined): string | undefined {

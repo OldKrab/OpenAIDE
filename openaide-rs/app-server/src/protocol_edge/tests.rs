@@ -72,6 +72,7 @@ use super::*;
 
 mod client_probe;
 mod devices;
+mod entity_subscription;
 mod gateway_lock_wait;
 mod navigation_publication;
 mod outbound_order;
@@ -4565,11 +4566,15 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         _client_instance_id: &ClientInstanceId,
         _task_id: &TaskId,
         _artifact_id: &str,
+        _known_version: Option<u64>,
     ) -> Result<
-        openaide_app_server_protocol::task::ToolDetailSnapshot,
+        crate::snapshots::ToolDetailSubscription,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
-        Ok(fixed_tool_detail())
+        Ok(crate::snapshots::ToolDetailSubscription {
+            details: fixed_tool_detail(),
+            terminal_sync: openaide_app_server_protocol::state::ToolTerminalSync::Full,
+        })
     }
 }
 

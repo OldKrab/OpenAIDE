@@ -12,9 +12,12 @@ import type {
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
   StateRootId,
+  SubagentHistorySnapshot,
   SubscriptionScope,
   SubscriptionSnapshot,
+  TaskId,
   TaskSnapshot,
+  ToolDetailSnapshot,
 } from "./generated/protocol.js";
 
 export type BackendEventListener = (event: AppServerEvent) => void;
@@ -44,8 +47,30 @@ export type AppServerSessionStatus =
  * observer sees it (ADR-0086), so it is not kept.
  */
 export type TaskReplicaSnapshot = { kind: "task"; task: TaskSnapshot; chatVersion: number };
+/**
+ * A Tool detail replica's installed state: complete fields and the whole terminal output.
+ * `details.revision` is the artifact sequence it was built at.
+ */
+export type ToolDetailReplicaSnapshot = {
+  kind: "toolDetail";
+  taskId: TaskId;
+  artifactId: string;
+  details: ToolDetailSnapshot;
+};
+/**
+ * A Subagent History replica's installed state: complete fields and the Chat page it holds.
+ * `history.revision` is the history revision it was built at.
+ */
+export type SubagentHistoryReplicaSnapshot = { kind: "subagentHistory"; history: SubagentHistorySnapshot };
+/** An entity replica's installed state: what a subscribe reply resumes from (ADR-0086). */
+export type EntityReplicaSnapshot =
+  | TaskReplicaSnapshot
+  | ToolDetailReplicaSnapshot
+  | SubagentHistoryReplicaSnapshot;
 /** A scope replica's installed state. */
-export type ReplicaSnapshot = Exclude<SubscriptionSnapshot, { kind: "task" }> | TaskReplicaSnapshot;
+export type ReplicaSnapshot =
+  | Exclude<SubscriptionSnapshot, { kind: "task" | "toolDetail" | "subagentHistory" }>
+  | EntityReplicaSnapshot;
 export type AppServerStateObserver = {
   onSnapshot(snapshot: ReplicaSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
   onBaselineLost?(): void;
