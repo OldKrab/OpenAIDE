@@ -12,7 +12,6 @@ import {
   NATIVE_SESSION_RESTORE,
   NATIVE_SESSION_SET_PINNED,
   NATIVE_SESSION_SET_TITLE,
-  TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
   TASK_ARCHIVE_OLDER,
   TASK_SET_PINNED,
@@ -121,14 +120,10 @@ export function createNavigationCallbacks({
       });
     },
     changeSearch: (query) => dispatch({ type: "search:set", query }),
-    loadNativeSessions: (cursor, projectId, targetRowCount) => {
-      if (backendConnection?.request && projectId && targetRowCount !== undefined) {
-        void backendConnection.request(TASK_NAVIGATION_LOAD_MORE, {
-          projectId: projectId as ProjectId,
-          targetRowCount,
-        });
-        return;
-      }
+    setProjectHistoryLimit: (projectId, historyLimit) => {
+      dispatch({ type: "navigation:historyLimit", projectId, historyLimit });
+    },
+    refreshNavigation: () => {
       if (backendConnection?.request) {
         void backendConnection.request(TASK_NAVIGATION_REFRESH, {});
         return;

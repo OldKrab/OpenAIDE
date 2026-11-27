@@ -15,11 +15,12 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
     ATTACHMENT_TRANSFER, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE,
-    NATIVE_SESSION_RESTORE, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE,
-    TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ,
-    TASK_OPEN, TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED,
-    TASK_TOOL_IMAGE_PREVIEW,
+    NATIVE_SESSION_RESTORE, NAVIGATION_SUBSCRIBE, PENDING_REQUEST_RESOLVE,
+    SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
+    TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
+    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
 };
+use openaide_app_server_protocol::navigation::NavigationViewParams;
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 
@@ -762,31 +763,20 @@ fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-1")).unwrap();
+        store.write_task(&navigable_task_record("task-1")).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
 
-    let responses = dispatcher.handle_line(&init_request("1", "client-1"));
-    assert!(response(&responses[0])["result"]["result"]["snapshot"]["tasks"].is_null());
-    let responses = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-navigation",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_version: None,
-            },
-        })
-        .to_string(),
-    );
-    let response = response(&responses[0]);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    let responses = dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-navigation",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
+    // Discovery may queue a frame ahead of the reply; the reply carries the baseline.
+    let response = response(responses.last().unwrap());
     assert_eq!(
-        response["result"]["result"]["snapshot"]["navigation"]["groups"][0]["entries"][0]["task"]
+        response["result"]["result"]["frame"]["groups"][0]["rows"]["task:task-1"]["entry"]["task"]
             ["taskId"],
         "task-1"
     );
@@ -826,18 +816,7 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
             openaide_app_server_protocol::task::TaskNavigationSection::Archive,
         ),
     ] {
-        dispatcher.handle_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": STATE_SUBSCRIBE,
-                "params": StateSubscribeParams {
-                    scope: SubscriptionScope::TaskNavigation { section, project_ids: None },
-                    known_version: None,
-                }
-            })
-            .to_string(),
-        );
+        dispatcher.handle_line(&navigation_subscribe_line(id, section));
     }
 
     let archived = dispatcher.handle_line(
@@ -855,7 +834,7 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
         .unwrap());
     let sections = events
         .iter()
-        .map(|line| response(line)["params"]["payload"]["section"].clone())
+        .map(|line| response(line)["params"]["payload"]["frame"]["section"].clone())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(
         sections,
@@ -919,21 +898,10 @@ fn native_session_title_override_publishes_and_survives_restart() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-tasks",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_version: None,
-            },
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-tasks",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let renamed = dispatcher.handle_line(
         &json!({
@@ -953,7 +921,8 @@ fn native_session_title_override_publishes_and_survives_restart() {
         "My session"
     );
     assert_eq!(
-        response(&renamed[0])["params"]["payload"]["entries"][0]["session"]["title"],
+        response(&renamed[0])["params"]["payload"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["title"],
         "My session"
     );
     let pinned = dispatcher.handle_line(
@@ -974,7 +943,8 @@ fn native_session_title_override_publishes_and_survives_restart() {
         true
     );
     assert_eq!(
-        response(&pinned[0])["params"]["payload"]["entries"][0]["session"]["pinned"],
+        response(&pinned[0])["params"]["payload"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["pinned"],
         true
     );
     let cleanup = dispatcher.handle_line(
@@ -1001,29 +971,18 @@ fn native_session_title_override_publishes_and_survives_restart() {
 
     let mut reopened = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     reopened.handle_line(&init_request("2", "client-2"));
-    let baseline = reopened.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-after-restart",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_version: None,
-            },
-        })
-        .to_string(),
-    );
+    let baseline = reopened.handle_line(&navigation_subscribe_line(
+        "subscribe-after-restart",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
     assert_eq!(
-        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
-            ["entries"][0]["session"]["title"],
+        response(baseline.last().unwrap())["result"]["result"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["title"],
         "My session"
     );
     assert_eq!(
-        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
-            ["entries"][0]["session"]["pinned"],
+        response(baseline.last().unwrap())["result"]["result"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["pinned"],
         true
     );
 }
@@ -2125,18 +2084,10 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_version: None,
-            }
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2153,10 +2104,11 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
 
     assert_eq!(
         responses.len(),
-        1,
-        "the mutation response must not duplicate notifier events"
+        2,
+        "the mutation queues one navigation frame before its reply and nothing else"
     );
-    let response = response(&responses[0]);
+    assert!(event_payload_kind(&responses[0], "navigationFrame"));
+    let response = response(&responses[1]);
     assert_eq!(
         response["result"]["result"]["task"]["task"]["status"],
         "starting"
@@ -2182,7 +2134,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
         navigation_updated = dispatcher
             .handle_task_update(committed)
             .iter()
-            .any(|line| event_payload_kind(line, "taskUpdated"));
+            .any(|line| event_payload_kind(line, "navigationFrame"));
         if navigation_updated {
             break;
         }
@@ -2242,60 +2194,46 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
 }
 
 #[test]
-fn task_update_notification_emits_focused_task_and_navigation_changes() {
+fn a_mutation_queues_the_changed_rows_navigation_frame_before_its_reply() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let record = task_record("task-existing");
-    let navigation_task = crate::snapshots::project_task_summary(record.clone());
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&record).unwrap();
+        store
+            .write_task(&navigable_task_record("task-existing"))
+            .unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-navigation",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
+    // Frames queued by the subscription's own discovery are not what this test observes.
+    dispatcher.outbound().flush(|lines| lines);
+
+    let messages = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
-            "id": "subscribe-task",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Task { task_id: TaskId::from("task-existing") },
-                known_version: None,
-            }
-        })
-        .to_string(),
-    );
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-navigation",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_version: None,
-            }
+            "id": "pin",
+            "method": TASK_SET_PINNED,
+            "params": { "taskId": "task-existing", "pinned": true }
         })
         .to_string(),
     );
 
-    let messages = dispatcher.handle_task_update(TaskUpdate {
-        task_id: "task-existing".to_string(),
-        revision: 2,
-        kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
-            crate::task_events::CommittedTaskChange {
-                changes: openaide_app_server_protocol::events::TaskChanges::default(),
-                tool_details: Vec::new(),
-                navigation: Some(crate::task_events::CommittedNavigationChange::TaskUpdated(
-                    Box::new(navigation_task),
-                )),
-            },
-        )),
-    });
-
-    assert!(messages
+    let (reply, events) = messages.split_last().unwrap();
+    assert_eq!(response(reply)["result"]["result"]["task"]["pinned"], true);
+    let frame = events
         .iter()
-        .any(|line| event_payload_kind(line, "taskUpdated")));
-    assert!(!messages
+        .find(|line| event_payload_kind(line, "navigationFrame"))
+        .expect("navigation frame ahead of the reply");
+    assert_eq!(
+        response(frame)["params"]["payload"]["frame"]["groups"][0]["rows"]["task:task-existing"]
+            ["entry"]["task"]["pinned"],
+        true
+    );
+    assert!(!events
         .iter()
         .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
 }
@@ -2617,18 +2555,10 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_version: None,
-            }
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -3175,6 +3105,13 @@ fn notifications_do_not_emit_responses() {
     assert!(responses.is_empty());
 }
 
+/// A Task with message history, which is what Navigation's membership filter requires.
+fn navigable_task_record(task_id: &str) -> TaskRecord {
+    let mut record = task_record(task_id);
+    record.message_history_version = 1;
+    record
+}
+
 fn task_record(task_id: &str) -> TaskRecord {
     let workspace_root = "/tmp/openaide-stdio-workspace/a";
     std::fs::create_dir_all(workspace_root).unwrap();
@@ -3242,6 +3179,26 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
     crate::test_sync::wait_for("the store to reopen after dispatcher drop", || {
         Store::open(path.to_path_buf()).ok()
     })
+}
+
+/// A `navigation/subscribe` request with the default window used by the Web shell.
+fn navigation_subscribe_line(
+    id: &str,
+    section: openaide_app_server_protocol::task::TaskNavigationSection,
+) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": NAVIGATION_SUBSCRIBE,
+        "params": NavigationViewParams {
+            section,
+            project_ids: None,
+            history_limit: 20,
+            history_limits: Vec::new(),
+            open_row: None,
+        },
+    })
+    .to_string()
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {

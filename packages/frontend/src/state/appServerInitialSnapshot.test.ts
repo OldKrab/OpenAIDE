@@ -38,7 +38,7 @@ describe("App Server initial snapshot ingestion", () => {
   });
 
   it("returns no actions when initialize did not include renderable task state", () => {
-    expect(actionsFromInitialSnapshot(clientSnapshot({ projects: null, tasks: null, activeTask: null }))).toEqual({
+    expect(actionsFromInitialSnapshot(clientSnapshot({ projects: null, activeTask: null }))).toEqual({
       actions: [{ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" }],
       warnings: [],
       requiresNativeSurface: false,
@@ -85,7 +85,6 @@ describe("App Server initial snapshot ingestion", () => {
         projectId: "project-1" as ProjectId,
         agentId: "codex" as AgentId,
       },
-      tasks: null,
       activeTask: null,
     }), {
       retainedNewTaskContext: { projectId: "project-2", agentId: "opencode" },
@@ -142,28 +141,6 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     agents: {
       agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" }],
-    },
-    tasks: {
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{
-        projectId: "project-1" as ProjectId,
-        projectLabel: "Project",
-        taskCount: 1,
-        entries: [
-        { kind: "task", task: taskSummary() },
-        {
-          kind: "nativeSession",
-          session: {
-            reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
-            projectId: "project-1" as ProjectId,
-            workspaceRoot: "/workspace/Project",
-            title: "Cached Native Session",
-            pinned: false,
-          },
-        },
-        ],
-      }],
     },
     activeTask: {
       task: taskSummary(),

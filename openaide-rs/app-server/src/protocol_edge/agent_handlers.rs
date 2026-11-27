@@ -15,8 +15,7 @@ use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
     NativeSessionForkResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
     NativeSessionSetPinnedParams, NativeSessionSetPinnedResult, NativeSessionSetTitleParams,
-    NativeSessionSetTitleResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    NativeSessionSetTitleResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
 };
 use serde_json::Value;
 use std::time::Instant;
@@ -36,7 +35,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionSetTitleParams>(params) {
             Ok(params) => params,
@@ -48,15 +46,14 @@ impl RpcGateway {
             Ok(mutation) => mutation,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
-        self.result_with_events::<NativeSessionSetTitleResult>(
+        self.navigation.mark_project(mutation.project_id.clone());
+        self.result::<NativeSessionSetTitleResult>(
             connection_id,
             id,
             meta,
             NativeSessionSetTitleResult {
                 session: mutation.session,
             },
-            events,
         )
     }
 
@@ -66,7 +63,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionSetPinnedParams>(params) {
             Ok(params) => params,
@@ -78,15 +74,14 @@ impl RpcGateway {
             Ok(mutation) => mutation,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
-        self.result_with_events::<NativeSessionSetPinnedResult>(
+        self.navigation.mark_project(mutation.project_id.clone());
+        self.result::<NativeSessionSetPinnedResult>(
             connection_id,
             id,
             meta,
             NativeSessionSetPinnedResult {
                 session: mutation.session,
             },
-            events,
         )
     }
 
@@ -96,7 +91,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionArchiveParams>(params) {
             Ok(params) => params,
@@ -108,8 +102,8 @@ impl RpcGateway {
             Ok(mutation) => mutation,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
-        self.result_with_events::<NativeSessionArchiveResult>(
+        self.navigation.mark_project(mutation.project_id.clone());
+        self.result::<NativeSessionArchiveResult>(
             connection_id,
             id,
             meta,
@@ -117,7 +111,6 @@ impl RpcGateway {
                 reference: mutation.reference,
                 archived: mutation.archived,
             },
-            events,
         )
     }
 
@@ -127,7 +120,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionRestoreParams>(params) {
             Ok(params) => params,
@@ -139,8 +131,8 @@ impl RpcGateway {
             Ok(mutation) => mutation,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
-        self.result_with_events::<NativeSessionRestoreResult>(
+        self.navigation.mark_project(mutation.project_id.clone());
+        self.result::<NativeSessionRestoreResult>(
             connection_id,
             id,
             meta,
@@ -148,7 +140,6 @@ impl RpcGateway {
                 reference: mutation.reference,
                 archived: mutation.archived,
             },
-            events,
         )
     }
 
@@ -158,7 +149,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionForkParams>(params) {
             Ok(params) => params,
@@ -177,8 +167,8 @@ impl RpcGateway {
             Ok(mutation) => mutation,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
-        self.result_with_events::<NativeSessionForkResult>(
+        self.navigation.mark_project(mutation.project_id.clone());
+        self.result::<NativeSessionForkResult>(
             connection_id,
             id,
             meta,
@@ -187,7 +177,6 @@ impl RpcGateway {
                 project_id: mutation.project_id,
                 close_warning: mutation.close_warning,
             },
-            events,
         )
     }
 
@@ -210,32 +199,6 @@ impl RpcGateway {
             id,
             meta,
             TaskNavigationRefreshResult { accepted: true },
-        )
-    }
-
-    pub(super) fn handle_task_navigation_load_more(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskNavigationLoadMoreParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        self.agent_list_sessions
-            .request_native_session_catalog_load_more(
-                params.project_id.as_str(),
-                params.target_row_count as usize,
-            );
-        self.result(
-            connection_id,
-            id,
-            meta,
-            TaskNavigationLoadMoreResult { accepted: true },
         )
     }
 
@@ -644,7 +607,7 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let client_hub = self.client_hub.clone();
-        let mut events = event_deliveries(self.state_stream.publish_committed(
+        let events = event_deliveries(self.state_stream.publish_committed(
             EventScope::StateRoot {
                 state_root_id: self.state_stream.state_root_id().clone(),
             },
@@ -652,7 +615,8 @@ impl RpcGateway {
             |client_id| client_hub.delivery_for(client_id),
             now,
         ));
-        events.extend(self.publish_navigation_replacement(now));
+        // Agent changes alter membership (enabled Agents) and recovery state of every Project.
+        self.navigation.mark_all();
         events
     }
 

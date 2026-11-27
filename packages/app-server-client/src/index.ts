@@ -14,3 +14,4 @@ export * from "./reliableHttpChannel.js";
 export * from "./reliableBackendConnection.js";
 export * from "./subscriptionScope.js";
 export * from "./stateIngestion.js";
+export * from "./stateIngestionTaskNavigation.js";

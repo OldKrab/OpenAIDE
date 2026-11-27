@@ -660,19 +660,6 @@ pub struct TaskNavigationRefreshResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskNavigationLoadMoreParams {
-    pub project_id: ProjectId,
-    pub target_row_count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskNavigationLoadMoreResult {
-    pub accepted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct NativeSessionArchiveParams {
     pub agent_id: AgentId,
     pub native_session_id: String,

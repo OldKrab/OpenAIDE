@@ -10,6 +10,7 @@ import type {
   RequestParamsByMethod,
   ResponseResultByMethod,
   SubscriptionScope,
+  NavigationViewParams,
 } from "@openaide/app-server-client";
 import type { HealthResult } from "@openaide/app-shell-contracts";
 import { ExtensionLogger } from "../logging/logger";
@@ -77,8 +78,9 @@ export class RuntimeClient implements vscode.Disposable {
   async subscribeAppServerState(
     scope: SubscriptionScope,
     observer: AppServerStateObserver,
+    view?: NavigationViewParams,
   ): Promise<BackendUnsubscribe> {
-    return this.appServerHostClient.subscribeState(scope, observer);
+    return this.appServerHostClient.subscribeState(scope, observer, view);
   }
 
   attachAppServerView(viewId: string, post: (message: AppServerSessionHostMessage) => void) {

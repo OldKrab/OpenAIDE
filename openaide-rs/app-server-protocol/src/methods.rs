@@ -72,12 +72,11 @@ use crate::task::{
     TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
     TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
-    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
-    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
-    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
-    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
-    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
+    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
+    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
+    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
     TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
     TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
     TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
@@ -140,11 +139,13 @@ macro_rules! protocol_method {
 // Declared after the macro so the modules can use it.
 mod devices;
 mod diagnostics;
+mod navigation;
 mod task_attention;
 mod terminals;
 
 pub use devices::*;
 pub use diagnostics::*;
+pub use navigation::*;
 pub use task_attention::*;
 pub use terminals::*;
 
@@ -557,12 +558,6 @@ protocol_method!(
     TASK_NAVIGATION_REFRESH,
     TaskNavigationRefreshParams,
     TaskNavigationRefreshResult
-);
-protocol_method!(
-    TaskNavigationLoadMore,
-    TASK_NAVIGATION_LOAD_MORE,
-    TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult
 );
 protocol_method!(
     NativeSessionArchive,

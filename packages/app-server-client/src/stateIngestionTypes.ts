@@ -2,7 +2,7 @@ import type { ReplicaSnapshot } from "./backendConnection.js";
 
 export type SnapshotUpdate =
   | { kind: "updated"; snapshot: ReplicaSnapshot; changed: boolean }
-  | { kind: "resyncRequired"; reason: "missingChatItem" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap" };
+  | { kind: "resyncRequired"; reason: "missingChatItem" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap" | "missingNavigationRow" | "missingNavigationGroup" };
 
 export function changed(snapshot: ReplicaSnapshot): SnapshotUpdate {
   return { kind: "updated", snapshot, changed: true };

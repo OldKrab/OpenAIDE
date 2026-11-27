@@ -78,7 +78,8 @@ struct NativeCatalogRefreshState {
     exhausted_project_ids: HashSet<String>,
     // TODO: unify global and Project demand by Agent plus canonical workspace;
     // separate coordinators can still repeat a context during overlapping refreshes.
-    project_targets: HashMap<String, usize>,
+    /// Projects with a deepening run in flight. Their target lives on the demand board.
+    deepening_projects: HashSet<String>,
     running: bool,
     /// Who asked during the current run, so the run that answers them can name its cause.
     trailing_requester: Option<NativeCatalogRefreshRequester>,
@@ -155,6 +156,14 @@ impl NativeCatalogRefreshCoordinator {
     }
 
     #[cfg(test)]
+    pub(super) fn is_running(&self) -> bool {
+        self.state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .running
+    }
+
+    #[cfg(test)]
     pub(super) fn trailing_run_requested(&self) -> bool {
         self.state
             .lock()
@@ -192,14 +201,11 @@ impl NativeCatalogRefreshCoordinator {
 }
 
 impl TaskProductApi {
-    pub(crate) fn request_native_session_catalog_load_more(
-        &self,
-        project_id: &str,
-        target_row_count: usize,
-    ) {
-        self.request_native_session_catalog_refresh_for_project_target(
+    /// Deepens one Project's discovery to the target the Navigation owner published on the
+    /// demand board, because a view now wants more history rows than were discovered.
+    pub(crate) fn request_native_session_discovery_deepening(&self, project_id: &str) {
+        self.request_native_session_catalog_refresh_for_project(
             openaide_app_server_protocol::ids::ProjectId::from(project_id.to_string()),
-            target_row_count,
         );
     }
 
@@ -229,10 +235,8 @@ impl TaskProductApi {
             state.running = true;
         }
 
-        self.native_catalog.set_refreshing(true);
-        self.task_notifier.navigation_refresh_state_changed(
-            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
-        );
+        let loading_projects = self.native_catalog.discovery().demanded_projects();
+        self.set_projects_loading(&loading_projects, true);
 
         let api = self.clone();
         let mut requester = requester;
@@ -245,11 +249,7 @@ impl TaskProductApi {
                 serde_json::json!({ "operation": "agent/list_sessions", "operation_id": operation_id, "requester": requester.as_str(), "attempt": 1 }),
             );
             let refresh = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                api.refresh_native_session_project_trees_with_id(
-                    None,
-                    Some(Self::initial_native_session_row_target()),
-                    &operation_id,
-                )
+                api.refresh_native_session_project_trees_with_id(None, &operation_id)
             }))
             .unwrap_or_else(|_| {
                 Err(super::internal_error(
@@ -261,7 +261,7 @@ impl TaskProductApi {
                 .state
                 .lock()
                 .expect("Native Session catalog refresh state poisoned");
-            let refresh = match refresh {
+            match refresh {
                 Ok(()) => {
                     crate::logging::info(
                         "native_session_catalog_refresh_completed",
@@ -274,7 +274,6 @@ impl TaskProductApi {
                             "duration_ms": started_at.elapsed().as_millis(),
                         }),
                     );
-                    openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle
                 }
                 Err(error) => {
                     crate::logging::warn(
@@ -289,26 +288,22 @@ impl TaskProductApi {
                             "error_kind": error.code,
                         }),
                     );
-                    openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed {
-                        message: error.message,
-                    }
                 }
-            };
+            }
             if let Some(next) = state.trailing_requester.take() {
                 requester = next;
                 continue;
             }
             state.running = false;
-            api.native_catalog.set_refresh_state(refresh.clone());
-            api.task_notifier.navigation_refresh_state_changed(refresh);
+            drop(state);
+            api.set_projects_loading(&loading_projects, false);
             break;
         });
     }
 
-    fn request_native_session_catalog_refresh_for_project_target(
+    fn request_native_session_catalog_refresh_for_project(
         &self,
         project_id: openaide_app_server_protocol::ids::ProjectId,
-        target_row_count: usize,
     ) {
         // An exhaustive scan is authoritative until the next ordinary refresh. Archive and
         // Restore only reclassify cached entries, so repeating Agent pagination cannot reveal
@@ -323,15 +318,15 @@ impl TaskProductApi {
                     "operation": "agent/list_sessions/project",
                     "project_id": project_id.as_str(),
                     "reason": "history_exhausted",
-                    "target_row_count": target_row_count,
                 }),
             );
             if self
                 .native_catalog
-                .set_project_has_more(project_id.as_str(), false)
+                .discovery()
+                .set_undiscovered(project_id.as_str(), false)
             {
                 self.task_notifier
-                    .navigation_project_entries_changed(project_id.as_str().to_string());
+                    .navigation_project_changed(project_id.as_str().to_string());
             }
             return;
         }
@@ -341,29 +336,22 @@ impl TaskProductApi {
                 .state
                 .lock()
                 .expect("Native Session catalog refresh state poisoned");
-            if let Some(target) = state.project_targets.get_mut(project_id.as_str()) {
-                *target = (*target).max(target_row_count);
+            if !state
+                .deepening_projects
+                .insert(project_id.as_str().to_string())
+            {
+                // The running worker re-reads the demand board when it finishes a pass.
                 return;
             }
-            state
-                .project_targets
-                .insert(project_id.as_str().to_string(), target_row_count);
         }
-        if self
-            .native_catalog
-            .set_project_refreshing(project_id.as_str(), true)
-        {
-            self.task_notifier
-                .navigation_project_entries_changed(project_id.as_str().to_string());
-        }
+        self.set_projects_loading(&[project_id.as_str().to_string()], true);
         let api = self.clone();
         std::thread::spawn(move || loop {
             let target_row_count = api
-                .native_catalog_refresh
-                .state
-                .lock()
-                .expect("Native Session catalog refresh state poisoned")
-                .project_targets[project_id.as_str()];
+                .native_catalog
+                .discovery()
+                .target(project_id.as_str())
+                .unwrap_or_default();
             let started_at = Instant::now();
             let operation_id = uuid::Uuid::new_v4().to_string();
             crate::logging::info(
@@ -378,7 +366,6 @@ impl TaskProductApi {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 api.refresh_native_session_project_trees_with_id(
                     Some(project_id.as_str()),
-                    Some(target_row_count),
                     &operation_id,
                 )
             }))
@@ -416,24 +403,40 @@ impl TaskProductApi {
                 .state
                 .lock()
                 .expect("Native Session catalog refresh state poisoned");
-            if state.project_targets[project_id.as_str()] > target_row_count {
+            if api
+                .native_catalog
+                .discovery()
+                .target(project_id.as_str())
+                .unwrap_or_default()
+                > target_row_count
+            {
                 continue;
             }
-            state.project_targets.remove(project_id.as_str());
-            api.native_catalog
-                .set_project_refreshing(project_id.as_str(), false);
-            api.task_notifier
-                .navigation_project_entries_changed(project_id.as_str().to_string());
+            state.deepening_projects.remove(project_id.as_str());
+            drop(state);
+            api.set_projects_loading(&[project_id.as_str().to_string()], false);
             break;
         });
     }
 
+    /// Flips the per-Project loading flag and marks Navigation dirty where it changed.
+    pub(super) fn set_projects_loading(&self, project_ids: &[String], loading: bool) {
+        for project_id in project_ids {
+            if self
+                .native_catalog
+                .discovery()
+                .set_loading(project_id, loading)
+            {
+                self.task_notifier
+                    .navigation_project_changed(project_id.clone());
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
-        self.refresh_native_session_project_trees(
-            None,
-            Some(Self::initial_native_session_row_target()),
-        )
+        self.demand_every_project_for_test(20);
+        self.refresh_native_session_project_trees(None)
     }
 
     /// Advances idle owned Task activity from listing and records possible external changes
@@ -657,7 +660,7 @@ impl TaskProductApi {
             )
             .map_err(protocol_error_from_runtime)?;
         self.task_notifier
-            .navigation_project_entries_changed(project_id.to_string());
+            .navigation_project_changed(project_id.to_string());
         Ok(())
     }
 
@@ -712,8 +715,8 @@ impl AgentListSessionsWorkflow for TaskProductApi {
         TaskProductApi::request_due_native_session_catalog_refresh(self, interval)
     }
 
-    fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {
-        TaskProductApi::request_native_session_catalog_load_more(self, project_id, target_row_count)
+    fn request_native_session_discovery_deepening(&self, project_id: &str) {
+        TaskProductApi::request_native_session_discovery_deepening(self, project_id)
     }
 }
 

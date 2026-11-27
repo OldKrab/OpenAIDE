@@ -57,9 +57,7 @@ pub(crate) struct NativeSessionCatalogEntry {
 pub(crate) struct NativeSessionCatalog {
     store: Store,
     state: Arc<Mutex<StoredNativeSessionCatalog>>,
-    refresh_state: Arc<Mutex<openaide_app_server_protocol::snapshot::TaskNavigationRefreshState>>,
-    projects_with_more: Arc<Mutex<std::collections::HashSet<String>>>,
-    projects_refreshing: Arc<Mutex<std::collections::HashSet<String>>>,
+    discovery: super::discovery_state::DiscoveryState,
 }
 
 impl NativeSessionCatalog {
@@ -74,12 +72,13 @@ impl NativeSessionCatalog {
         Ok(Self {
             store,
             state: Arc::new(Mutex::new(state)),
-            refresh_state: Arc::new(Mutex::new(
-                openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
-            )),
-            projects_with_more: Arc::new(Mutex::new(std::collections::HashSet::new())),
-            projects_refreshing: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            discovery: super::discovery_state::DiscoveryState::default(),
         })
+    }
+
+    /// Discovery progress and demand, shared with every clone of the catalog.
+    pub(crate) fn discovery(&self) -> &super::discovery_state::DiscoveryState {
+        &self.discovery
     }
 
     /// Commits one successful page without interpreting omitted sessions as deletion.
@@ -501,81 +500,6 @@ impl NativeSessionCatalog {
         atomic::write_json(&catalog_path(&self.store), &candidate)?;
         *state = candidate;
         Ok(true)
-    }
-
-    pub(crate) fn set_refreshing(&self, refreshing: bool) {
-        self.set_refresh_state(if refreshing {
-            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
-        } else {
-            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle
-        });
-    }
-
-    #[cfg(test)]
-    pub(crate) fn refreshing(&self) -> bool {
-        matches!(
-            self.refresh_state(),
-            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
-        )
-    }
-
-    pub(crate) fn set_refresh_state(
-        &self,
-        state: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState,
-    ) {
-        *self
-            .refresh_state
-            .lock()
-            .expect("native session refresh state poisoned") = state;
-    }
-
-    pub(crate) fn refresh_state(
-        &self,
-    ) -> openaide_app_server_protocol::snapshot::TaskNavigationRefreshState {
-        self.refresh_state
-            .lock()
-            .expect("native session refresh state poisoned")
-            .clone()
-    }
-
-    /// Records whether discovery stopped before exhausting a Project's Agent history.
-    pub(crate) fn set_project_has_more(&self, project_id: &str, has_more: bool) -> bool {
-        let mut projects = self
-            .projects_with_more
-            .lock()
-            .expect("native session pagination state poisoned");
-        if has_more {
-            projects.insert(project_id.to_string())
-        } else {
-            projects.remove(project_id)
-        }
-    }
-
-    pub(crate) fn project_has_more(&self, project_id: &str) -> bool {
-        self.projects_with_more
-            .lock()
-            .expect("native session pagination state poisoned")
-            .contains(project_id)
-    }
-
-    /// Tracks transient discovery independently for each Project navigation group.
-    pub(crate) fn set_project_refreshing(&self, project_id: &str, refreshing: bool) -> bool {
-        let mut projects = self
-            .projects_refreshing
-            .lock()
-            .expect("native session Project refresh state poisoned");
-        if refreshing {
-            projects.insert(project_id.to_string())
-        } else {
-            projects.remove(project_id)
-        }
-    }
-
-    pub(crate) fn project_refreshing(&self, project_id: &str) -> bool {
-        self.projects_refreshing
-            .lock()
-            .expect("native session Project refresh state poisoned")
-            .contains(project_id)
     }
 }
 

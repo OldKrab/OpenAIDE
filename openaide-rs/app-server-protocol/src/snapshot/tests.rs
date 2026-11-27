@@ -28,7 +28,6 @@ fn client_snapshot_omits_categories_outside_scope() {
         new_task_defaults: Default::default(),
         projects: None,
         agents: None,
-        tasks: None,
         active_task: None,
         settings: None,
         pending_requests: Vec::new(),

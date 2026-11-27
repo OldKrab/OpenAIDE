@@ -89,6 +89,7 @@ pub(super) fn gateway(
         agent_statuses.clone(),
     );
     let task_navigation_agents = agent_registry.clone();
+    let navigation_dirty = task_notifier.navigation_dirty();
     let task_product_api = Arc::new(TaskProductApi::new_with_server_requests_and_projects(
         store.clone(),
         Arc::new(project_resolver),
@@ -106,6 +107,10 @@ pub(super) fn gateway(
         task_navigation_agents,
         configured_projects.clone(),
     );
+    let navigation_discovery = task_product_api
+        .native_session_catalog()
+        .discovery()
+        .clone();
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),
         task_product_api.history_sync_snapshots(),
@@ -146,7 +151,6 @@ pub(super) fn gateway(
                     app_preferences.clone(),
                     runtime_settings.clone(),
                 )),
-                Arc::new(task_navigation),
                 task_snapshots.clone(),
             ),
         ),
@@ -179,6 +183,11 @@ pub(super) fn gateway(
         worktrees,
         task_product_api.clone(),
     )
+    .with_navigation(crate::navigation::NavigationOwner::new(
+        Arc::new(task_navigation),
+        navigation_dirty,
+        navigation_discovery,
+    ))
     .with_task_storage_maintenance(task_product_api)
     .with_new_task_defaults(new_task_defaults)
     .with_remote_devices(crate::remote_devices::RemoteDevices::open(

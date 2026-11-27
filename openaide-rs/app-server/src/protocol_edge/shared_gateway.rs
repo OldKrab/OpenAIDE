@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::{atomic::AtomicU64, Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -22,7 +22,6 @@ use crate::protocol::errors::RuntimeError;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::shell_file_handles::ShellFileRevealTarget;
-use crate::snapshots::TaskNavigationSnapshotSource;
 use crate::task_events::TaskUpdate;
 #[cfg(test)]
 use crate::tasks::product_api::NativeCatalogRefreshRequester;
@@ -30,7 +29,6 @@ use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::outbox::{OutboundMessage, Outbox, ProtocolExchange, ReplyRoute};
 use super::stdio::wire::InboundRejection;
-use super::task_handlers::publication::PreparedProjectEntries;
 use super::task_update_publisher::TaskUpdatePublication;
 use super::{
     AppServerProbeFacts, DeliverySignal, GatewayOutcome, InboundProtocolMessage, RpcGateway,
@@ -52,9 +50,6 @@ pub struct SharedRpcGateway {
     outbox: Outbox,
     deliveries: DeliverySignal,
     slow_lock_wait: Duration,
-    /// Held here so publications can read navigation without the protocol lock.
-    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
-    project_entries_generation: Arc<AtomicU64>,
 }
 
 /// A handled inbound message: the outcome, and the protocol lock it was produced under. The
@@ -84,6 +79,13 @@ impl DerefMut for SignallingGateway<'_> {
 
 impl Drop for SignallingGateway<'_> {
     fn drop(&mut self) {
+        // Whatever this holder changed reaches the views before the lock is released, so no
+        // later publication can overtake the frames it owes.
+        if let Some(gateway) = self.gateway.as_mut() {
+            if gateway.navigation.is_dirty() {
+                gateway.flush_navigation(crate::client_lifecycle::AppServerTime::now());
+            }
+        }
         // Unlock first: a woken link drains through the same mutex.
         self.gateway.take();
         self.deliveries.notify();
@@ -117,8 +119,6 @@ impl SharedRpcGateway {
     }
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
-            task_navigation: gateway.snapshots.task_navigation_source(),
-            project_entries_generation: gateway.project_entries_generation.clone(),
             outbox: gateway.outbox.clone(),
             gateway: Arc::new(Mutex::new(gateway)),
             deliveries: DeliverySignal::default(),
@@ -187,18 +187,7 @@ impl SharedRpcGateway {
 
     /// Asked every second and only reads, so it stays silent.
     pub fn has_task_navigation_subscribers(&self) -> bool {
-        self.lock_quiet()
-            .state_stream
-            .subscription_count_for_kind(|scope| {
-                matches!(
-                    scope,
-                    openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation {
-                        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                        ..
-                    }
-                )
-            })
-            > 0
+        self.lock_quiet().navigation.has_tasks_view()
     }
 
     /// Runs one inbound message and appends everything it produced to the outbound sequences
@@ -237,8 +226,10 @@ impl SharedRpcGateway {
         inspect: impl FnOnce(&GatewayOutcome) -> R,
     ) -> (R, bool) {
         let route = ReplyRoute::for_message(&message);
-        let (gateway, outcome) =
+        let (mut gateway, outcome) =
             self.handle_with_completion_clock(connection_id, message, now, completion_clock);
+        // Frames for what this request changed go out ahead of its reply.
+        gateway.flush_navigation(now);
         let inspected = inspect(&outcome);
         let replied = gateway.outbox.push_outcome(outcome, route);
         drop(gateway);
@@ -460,20 +451,13 @@ impl SharedRpcGateway {
         update: &TaskUpdate,
         now: AppServerTime,
     ) -> TaskUpdatePublication {
-        let projection_started_at = Instant::now();
-        let prepared = PreparedProjectEntries::for_update(
-            update,
-            self.task_navigation.as_ref(),
-            &self.project_entries_generation,
-        );
         let wait_started_at = Instant::now();
         let mut gateway = self.lock();
         let held_since = Instant::now();
-        gateway.publish_prepared_task_update(update, prepared, now);
+        gateway.publish_task_update(update, now);
         TaskUpdatePublication {
             lock_wait: held_since.duration_since(wait_started_at),
             lock_held: held_since.elapsed(),
-            projection: wait_started_at.duration_since(projection_started_at),
         }
     }
 

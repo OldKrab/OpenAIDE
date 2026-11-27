@@ -935,7 +935,6 @@ fn client_snapshot() -> ClientSnapshot {
         new_task_defaults: Default::default(),
         projects: None,
         agents: None,
-        tasks: None,
         active_task: None,
         settings: None,
         pending_requests: Vec::new(),

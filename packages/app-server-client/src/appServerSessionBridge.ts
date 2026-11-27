@@ -21,12 +21,13 @@ import type {
   RequestMeta,
   ServerRequestMethod,
   SubscriptionScope,
+  NavigationViewParams,
 } from "./generated/protocol.js";
 
 export type AppServerSessionViewMessage =
   | { type: "appServer.session.initialize"; requestId: string; params?: InitializeParams; meta?: RequestMeta }
   | { type: "appServer.session.request"; requestId: string; method: string; params: unknown; meta?: RequestMeta }
-  | { type: "appServer.session.subscribe"; subscriptionId: string; scope: SubscriptionScope }
+  | { type: "appServer.session.subscribe"; subscriptionId: string; scope: SubscriptionScope; view?: NavigationViewParams }
   | { type: "appServer.session.unsubscribe"; subscriptionId: string }
   | { type: "appServer.session.registerRequestHandler"; method: ServerRequestMethod }
   | { type: "appServer.session.unregisterRequestHandler"; method: ServerRequestMethod }
@@ -116,10 +117,10 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
-    subscribeState(scope, observer) {
+    subscribeState(scope, observer, view) {
       const subscriptionId = `subscription-${nextSubscriptionId++}`;
       observers.set(subscriptionId, observer);
-      port.post({ type: "appServer.session.subscribe", subscriptionId, scope });
+      port.post({ type: "appServer.session.subscribe", subscriptionId, scope, ...(view ? { view } : {}) });
       return () => {
         if (observers.get(subscriptionId) !== observer) return;
         observers.delete(subscriptionId);

@@ -141,7 +141,9 @@ export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_COMPOSER_HISTORY = "task/composerHistory" as const;
 export const TASK_LIST = "task/list" as const;
 export const TASK_NAVIGATION_REFRESH = "taskNavigation/refresh" as const;
-export const TASK_NAVIGATION_LOAD_MORE = "taskNavigation/loadMore" as const;
+export const NAVIGATION_SUBSCRIBE = "navigation/subscribe" as const;
+export const NAVIGATION_UPDATE = "navigation/update" as const;
+export const NAVIGATION_UNSUBSCRIBE = "navigation/unsubscribe" as const;
 export const NATIVE_SESSION_ARCHIVE = "nativeSession/archive" as const;
 export const NATIVE_SESSION_SET_TITLE = "nativeSession/setTitle" as const;
 export const NATIVE_SESSION_SET_PINNED = "nativeSession/setPinned" as const;
@@ -365,9 +367,9 @@ export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
 export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
-export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, projectIds?: Array<ProjectId> | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, } | { "kind": "devices" } | { "kind": "terminals" };
+export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, } | { "kind": "devices" } | { "kind": "terminals" };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task",
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "task",
 /**
  * Complete and current. `task.chat` is the tail page only when `chatSync` is `full`;
  * otherwise it is an empty placeholder and the client keeps its own Chat.
@@ -1368,10 +1370,6 @@ export type TaskNavigationRefreshParams = Record<symbol, never>;
 
 export type TaskNavigationRefreshResult = { accepted: boolean, };
 
-export type TaskNavigationLoadMoreParams = { projectId: ProjectId, targetRowCount: number, };
-
-export type TaskNavigationLoadMoreResult = { accepted: boolean, };
-
 export type NativeSessionArchiveParams = { agentId: AgentId, nativeSessionId: string, };
 
 export type NativeSessionArchiveResult = { reference: NativeSessionReference, archived: boolean, };
@@ -1444,7 +1442,7 @@ subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCurso
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskUpdated", projectId: ProjectId, task: TaskSummary, } | { "kind": "projectEntriesReplaced", section: TaskNavigationSection, projectId: ProjectId, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore: boolean, loading: boolean, } | { "kind": "refreshStateChanged", refresh: TaskNavigationRefreshState, } | { "kind": "navigationReplaced", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "navigationFrame", frame: NavigationFrame, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
 /**
  * Outer option controls delta presence; inner option clears the Agent Plan.
  */
@@ -1486,7 +1484,7 @@ removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
-export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
+export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
 
 export type ServerSnapshot = { serverId: ServerId, protocolVersion: ProtocolVersion, capabilities?: ServerCapabilities, };
 
@@ -1577,23 +1575,79 @@ export type AgentAccountLimitWindowKind = "fiveHour" | "weekly" | "weeklyModel";
 
 export type AgentAccountLimitStatus = "ok" | "warning" | "reached";
 
-export type TaskNavigationSnapshot = {
-/**
- * Selects the primary Tasks surface or the secondary read-only Archive.
- */
-section: TaskNavigationSection,
-/**
- * Authoritative rows grouped and ordered by Project.
- */
-groups: Array<TaskNavigationGroup>, refresh: TaskNavigationRefreshState, };
+export type NavigationRowRef = { "kind": "task", taskId: TaskId, } | { "kind": "nativeSession", agentId: AgentId, sessionId: string, };
 
-export type TaskNavigationGroup = { projectId: ProjectId, projectLabel: string, taskCount: number, entries: Array<TaskNavigationEntry>, hasMore?: boolean,
-/**
- * True while App Server discovers the bounded initial row window for this Project.
- */
-loading?: boolean, };
+export type NavigationHistoryLimit = { projectId: ProjectId, historyLimit: number, };
 
-export type TaskNavigationRefreshState = { "state": "idle" } | { "state": "refreshing" } | { "state": "failed", message: string, };
+export type NavigationViewParams = { section: TaskNavigationSection,
+/**
+ * Limits the view to these Projects. Absent means every Project.
+ */
+projectIds?: Array<ProjectId>,
+/**
+ * How many non-live (history) rows each Project shows.
+ */
+historyLimit: number,
+/**
+ * Per-Project overrides of `historyLimit`.
+ */
+historyLimits: Array<NavigationHistoryLimit>,
+/**
+ * The open row, which stays in the window whatever the limit.
+ */
+openRow?: NavigationRowRef, };
+
+export type NavigationSubscribeResult = { cursor: EventCursor,
+/**
+ * The baseline: every group of the view as a frame.
+ */
+frame: NavigationFrame, };
+
+export type NavigationUpdateResult = Record<symbol, never>;
+
+export type NavigationUnsubscribeParams = { section: TaskNavigationSection, };
+
+export type NavigationUnsubscribeResult = Record<symbol, never>;
+
+export type NavigationDiscovery = "settled" | "loading" | "failed";
+
+export type NavigationRow = { live: boolean, entry: TaskNavigationEntry, };
+
+export type NavigationGroupFrame = { projectId: ProjectId, projectLabel: string,
+/**
+ * The complete window order, as row ids (`task:<id>` or `session:<agent>:<id>`).
+ */
+order: Array<string>,
+/**
+ * Bodies for rows that are new or changed since the last frame of this view.
+ */
+rows: { [key in string]: NavigationRow },
+/**
+ * Rows the Project has in this section that pass the membership filters.
+ */
+total: number,
+/**
+ * Rows that pass the filters but sit outside the window.
+ */
+hidden: number,
+/**
+ * True when more history may exist in an Agent that has not been fully read.
+ */
+undiscovered: boolean, discovery: NavigationDiscovery, };
+
+export type NavigationFrame = { section: TaskNavigationSection,
+/**
+ * The Project order, present when it changed (always in the baseline).
+ */
+groupOrder?: Array<ProjectId>,
+/**
+ * Groups removed from the view.
+ */
+removedGroups: Array<ProjectId>,
+/**
+ * Only the groups that changed.
+ */
+groups: Array<NavigationGroupFrame>, };
 
 export type TaskNavigationEntry = { "kind": "task", task: TaskSummary, } | { "kind": "nativeSession", session: NativeSessionSummary, };
 
@@ -1836,7 +1890,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof DEVICES_SET_RELAY | typeof DEVICES_RELAY_PEOPLE | typeof DEVICES_RELAY_ADD_PERSON | typeof DEVICES_RELAY_REVOKE_PERSON | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof NAVIGATION_SUBSCRIBE | typeof NAVIGATION_UPDATE | typeof NAVIGATION_UNSUBSCRIBE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof DEVICES_SET_RELAY | typeof DEVICES_RELAY_PEOPLE | typeof DEVICES_RELAY_ADD_PERSON | typeof DEVICES_RELAY_REVOKE_PERSON | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1957,7 +2011,9 @@ export type RequestParamsByMethod = {
   [TASK_COMPOSER_HISTORY]: ComposerHistoryParams;
   [TASK_LIST]: TaskListParams;
   [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshParams;
-  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;
+  [NAVIGATION_SUBSCRIBE]: NavigationViewParams;
+  [NAVIGATION_UPDATE]: NavigationViewParams;
+  [NAVIGATION_UNSUBSCRIBE]: NavigationUnsubscribeParams;
   [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveParams;
   [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleParams;
   [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedParams;
@@ -2090,7 +2146,9 @@ export type ResponseResultByMethod = {
   [TASK_COMPOSER_HISTORY]: ComposerHistoryResult;
   [TASK_LIST]: TaskListResult;
   [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshResult;
-  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;
+  [NAVIGATION_SUBSCRIBE]: NavigationSubscribeResult;
+  [NAVIGATION_UPDATE]: NavigationUpdateResult;
+  [NAVIGATION_UNSUBSCRIBE]: NavigationUnsubscribeResult;
   [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveResult;
   [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleResult;
   [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedResult;

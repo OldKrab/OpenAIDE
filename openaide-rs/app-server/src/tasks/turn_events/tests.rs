@@ -1797,8 +1797,7 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
                 TaskUpdateKind::HistorySync(_)
                 | TaskUpdateKind::SubagentCatalogChanged { .. }
                 | TaskUpdateKind::SubagentHistoryChanged { .. }
-                | TaskUpdateKind::NavigationProjectEntriesChanged { .. }
-                | TaskUpdateKind::NavigationRefreshStateChanged { .. } => None,
+                | TaskUpdateKind::NavigationDirty => None,
             }
         })
         .expect("Task change publication");

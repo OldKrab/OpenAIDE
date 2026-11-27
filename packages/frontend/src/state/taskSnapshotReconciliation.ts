@@ -16,21 +16,8 @@ export function reconcileBackgroundTaskSnapshot(
     confirmedPermissionPolicy,
   );
   if (reconciliation.state === state) return state;
-  const { snapshot: reconciled } = reconciliation;
-  // Navigation snapshots own membership. A late task/open or mutation response
-  // may refresh cached details, but it cannot resurrect or reclassify a Task.
-  const tasks = replaceTaskSummary(state.tasks, reconciled.task);
-  const openTasks = replaceTaskSummary(state.taskLists.open, reconciled.task);
-  const archivedTasks = replaceTaskSummary(state.taskLists.archived, reconciled.task);
-  return {
-    ...reconciliation.state,
-    tasks,
-    taskLists: {
-      ...state.taskLists,
-      ...(openTasks ? { open: openTasks } : {}),
-      ...(archivedTasks ? { archived: archivedTasks } : {}),
-    },
-  };
+  // The Navigation view owns every row; a Task snapshot never patches or reclassifies one.
+  return reconciliation.state;
 }
 
 /**
@@ -229,53 +216,4 @@ function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {
 
 function historySyncIsPending(sync: TaskSnapshot["history_sync"]) {
   return sync.state === "syncing";
-}
-
-export function upsertTaskSummary(tasks: TaskSummary[], task: TaskSummary) {
-  const index = tasks.findIndex((item) => item.task_id === task.task_id);
-  if (index === -1) return [task, ...tasks];
-  if (sameTaskNavigationSummary(tasks[index], task)) return tasks;
-  return [
-    ...tasks.slice(0, index),
-    task,
-    ...tasks.slice(index + 1),
-  ];
-}
-
-function sameTaskNavigationSummary(left: TaskSummary, right: TaskSummary) {
-  // Snapshot revision clocks belong to the focused Task replica; rebuilding
-  // navigation for those chat-only clocks needlessly re-sorts every sidebar row.
-  return left.task_id === right.task_id
-    && left.project_id === right.project_id
-    && left.project_label === right.project_label
-    && left.title === right.title
-    && left.status === right.status
-    && left.has_messages === right.has_messages
-    && left.unread === right.unread
-    && left.created_at === right.created_at
-    && left.updated_at === right.updated_at
-    && left.last_activity === right.last_activity
-    && left.agent_id === right.agent_id
-    && left.agent_name === right.agent_name
-    && left.isolation === right.isolation
-    && left.workspace_root === right.workspace_root;
-}
-
-export function replaceTaskSummary(tasks: TaskSummary[], task: TaskSummary): TaskSummary[];
-export function replaceTaskSummary(
-  tasks: TaskSummary[] | undefined,
-  task: TaskSummary,
-): TaskSummary[] | undefined;
-export function replaceTaskSummary(
-  tasks: TaskSummary[] | undefined,
-  task: TaskSummary,
-): TaskSummary[] | undefined {
-  if (!tasks) return undefined;
-  const index = tasks.findIndex((item) => item.task_id === task.task_id);
-  if (index === -1) return tasks;
-  return [
-    ...tasks.slice(0, index),
-    task,
-    ...tasks.slice(index + 1),
-  ];
 }

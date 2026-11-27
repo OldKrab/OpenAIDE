@@ -2,13 +2,16 @@ use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, TaskId, WorktreeId};
 use openaide_app_server_protocol::snapshot::{
     NativeSessionReference, NativeSessionSummary, TaskAttentionEvent, TaskAttentionReason,
-    TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot,
-    TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    TaskNavigationEntry, TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
 };
 use openaide_app_server_protocol::task::TaskNavigationSection;
 
+use std::collections::{HashMap, HashSet};
+
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::native_sessions::catalog::NativeSessionCatalog;
+use crate::native_sessions::discovery_state::ProjectDiscovery;
+use crate::navigation::{NavigationSource, SourceGroup};
 use crate::projects::{ConfiguredProjectRoots, ProjectIdentity};
 use crate::protocol::model::{TaskStatus, TaskSummary as LegacyTaskSummary};
 use crate::storage::records::{
@@ -17,14 +20,6 @@ use crate::storage::records::{
     TaskTitleSource as StoredTaskTitleSource,
 };
 use crate::storage::Store;
-
-pub trait TaskNavigationSnapshotSource: Send + Sync {
-    fn snapshot(
-        &self,
-        section: TaskNavigationSection,
-        project_ids: Option<&[ProjectId]>,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError>;
-}
 
 #[derive(Clone)]
 pub struct TaskNavigationStore {
@@ -80,12 +75,19 @@ impl TaskNavigationStore {
     }
 }
 
-impl TaskNavigationSnapshotSource for TaskNavigationStore {
-    fn snapshot(
+impl NavigationSource for TaskNavigationStore {
+    fn discovery(&self, project_id: &ProjectId) -> ProjectDiscovery {
+        self.native_sessions
+            .as_ref()
+            .map(|catalog| catalog.discovery().project(project_id.as_str()))
+            .unwrap_or_default()
+    }
+
+    fn groups(
         &self,
         section: TaskNavigationSection,
-        project_ids: Option<&[ProjectId]>,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        project_ids: Option<&HashSet<ProjectId>>,
+    ) -> Result<Vec<SourceGroup>, ProtocolError> {
         let records = match section {
             TaskNavigationSection::Tasks => self.store.list_tasks(),
             TaskNavigationSection::Archive => self.store.list_archived_tasks(),
@@ -96,7 +98,7 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                 .summaries()
                 .into_iter()
                 .map(|agent| agent.id)
-                .collect::<std::collections::HashSet<_>>()
+                .collect::<HashSet<_>>()
         });
         let tasks: Vec<_> = records
             .iter()
@@ -110,6 +112,8 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                 );
                 (project_task_summary(record), identity.label)
             })
+            // A Task nobody has written to is not history yet.
+            .filter(|(task, _)| task.has_messages)
             .filter(|(task, _)| {
                 enabled_agents
                     .as_ref()
@@ -131,8 +135,8 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     .agent_session_id
                     .map(|session_id| (record.agent_id, session_id))
             })
-            .collect::<std::collections::HashSet<_>>();
-        let mut groups = std::collections::HashMap::<ProjectId, TaskNavigationGroup>::new();
+            .collect::<HashSet<_>>();
+        let mut groups = HashMap::<ProjectId, SourceGroup>::new();
         for project in self.configured_projects.projects() {
             if project_selected(project_ids, &project.project_id) {
                 groups.insert(
@@ -142,13 +146,13 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
             }
         }
         for (task, project_label) in tasks {
-            let group = groups
+            groups
                 .entry(task.project_id.clone())
-                .or_insert_with(|| empty_group(task.project_id.clone(), project_label));
-            group.task_count += 1;
-            group.entries.push(TaskNavigationEntry::Task {
-                task: Box::new(task),
-            });
+                .or_insert_with(|| empty_group(task.project_id.clone(), project_label))
+                .entries
+                .push(TaskNavigationEntry::Task {
+                    task: Box::new(task),
+                });
         }
         if let Some(catalog) = &self.native_sessions {
             for entry in catalog
@@ -184,83 +188,28 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     });
             }
         }
-        let mut groups = groups.into_values().collect::<Vec<_>>();
-        for group in &mut groups {
-            if matches!(section, TaskNavigationSection::Tasks) {
-                group.has_more = self
-                    .native_sessions
-                    .as_ref()
-                    .is_some_and(|catalog| catalog.project_has_more(group.project_id.as_str()));
-            }
-            group.entries.sort_by(|left, right| {
-                navigation_pinned(right)
-                    .cmp(&navigation_pinned(left))
-                    .then_with(|| navigation_active(right).cmp(&navigation_active(left)))
-                    .then_with(|| navigation_activity(right).cmp(&navigation_activity(left)))
-                    .then_with(|| navigation_identity(left).cmp(&navigation_identity(right)))
-            });
-            group.loading = self
-                .native_sessions
-                .as_ref()
-                .is_some_and(|catalog| catalog.project_refreshing(group.project_id.as_str()));
-        }
-        if let Some(project_ids) = project_ids {
-            groups.sort_by_key(|group| {
-                project_ids
-                    .iter()
-                    .position(|candidate| candidate == &group.project_id)
-                    .unwrap_or(usize::MAX)
-            });
-        } else {
-            groups.sort_by(|left, right| {
-                left.project_label
-                    .cmp(&right.project_label)
-                    .then_with(|| left.project_id.cmp(&right.project_id))
-            });
-        }
-        Ok(TaskNavigationSnapshot {
-            section,
-            groups,
-            refresh: if matches!(section, TaskNavigationSection::Tasks) {
-                self.native_sessions
-                    .as_ref()
-                    .map(NativeSessionCatalog::refresh_state)
-                    .unwrap_or(TaskNavigationRefreshState::Idle)
-            } else {
-                TaskNavigationRefreshState::Idle
-            },
-        })
+        Ok(groups.into_values().collect())
     }
 }
 
-fn empty_group(project_id: ProjectId, project_label: String) -> TaskNavigationGroup {
-    TaskNavigationGroup {
+fn empty_group(project_id: ProjectId, label: String) -> SourceGroup {
+    SourceGroup {
         project_id,
-        project_label,
-        task_count: 0,
+        label,
         entries: Vec::new(),
-        has_more: false,
-        loading: false,
     }
 }
 
-fn project_selected(project_ids: Option<&[ProjectId]>, project_id: &ProjectId) -> bool {
+fn project_selected(project_ids: Option<&HashSet<ProjectId>>, project_id: &ProjectId) -> bool {
     project_ids.is_none_or(|project_ids| project_ids.contains(project_id))
 }
 
-fn project_selected_str(project_ids: Option<&[ProjectId]>, project_id: &str) -> bool {
+fn project_selected_str(project_ids: Option<&HashSet<ProjectId>>, project_id: &str) -> bool {
     project_ids.is_none_or(|project_ids| {
         project_ids
             .iter()
             .any(|candidate| candidate.as_str() == project_id)
     })
-}
-
-fn navigation_pinned(entry: &TaskNavigationEntry) -> bool {
-    match entry {
-        TaskNavigationEntry::Task { task } => task.pinned,
-        TaskNavigationEntry::NativeSession { session } => session.pinned,
-    }
 }
 
 pub(crate) fn native_session_summary(
@@ -281,39 +230,6 @@ pub(crate) fn native_session_summary(
             .or(entry.local_fallback_title),
         pinned: entry.pinned,
         last_activity: entry.observation.last_activity,
-    }
-}
-
-fn navigation_active(entry: &TaskNavigationEntry) -> bool {
-    matches!(
-        entry,
-        TaskNavigationEntry::Task { task } if matches!(
-            task.status,
-            ProtocolTaskStatus::Running | ProtocolTaskStatus::Background
-        )
-    )
-}
-
-fn navigation_activity(entry: &TaskNavigationEntry) -> Option<i128> {
-    match entry {
-        TaskNavigationEntry::Task { task } => crate::time::activity_millis(&task.last_activity),
-        TaskNavigationEntry::NativeSession { session } => session
-            .last_activity
-            .as_deref()
-            .and_then(crate::time::activity_millis),
-    }
-}
-
-fn navigation_identity(entry: &TaskNavigationEntry) -> (&str, &str, &str) {
-    match entry {
-        TaskNavigationEntry::Task { task } => {
-            ("task", task.agent_id.as_str(), task.task_id.as_str())
-        }
-        TaskNavigationEntry::NativeSession { session } => (
-            "nativeSession",
-            session.reference.agent_id.as_str(),
-            session.reference.session_id.as_str(),
-        ),
     }
 }
 

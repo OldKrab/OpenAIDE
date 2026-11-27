@@ -1183,7 +1183,7 @@ describe("app controller callbacks", () => {
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
-    }).navigation.loadNativeSessions();
+    }).navigation.refreshNavigation();
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith("taskNavigation/refresh", {});
@@ -1204,29 +1204,17 @@ describe("app controller callbacks", () => {
     expect(second).toBe(first);
   });
 
-  it("requests deeper Project discovery for the Load more target", async () => {
-    const request = vi.fn(async () => ({ accepted: true }));
+  it("sets and clears a Project's history limit as presentation state", () => {
+    const dispatch = vi.fn();
+    const navigation = callbacks({ dispatch }).navigation;
 
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-    }).navigation.loadNativeSessions(undefined, "project_1", 30);
-    await settlePromises();
+    navigation.setProjectHistoryLimit("project_1", 30);
+    navigation.setProjectHistoryLimit("project_1", undefined);
 
-    expect(request).toHaveBeenCalledWith("taskNavigation/loadMore", {
-      projectId: "project_1",
-      targetRowCount: 30,
-    });
-  });
-
-  it("routes legacy history-page requests through the Task Navigation coordinator", async () => {
-    const request = vi.fn(async () => ({ accepted: true }));
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-    }).navigation.loadNativeSessions("cursor_2");
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith("taskNavigation/refresh", {});
+    expect(dispatch.mock.calls).toEqual([
+      [{ type: "navigation:historyLimit", projectId: "project_1", historyLimit: 30 }],
+      [{ type: "navigation:historyLimit", projectId: "project_1", historyLimit: undefined }],
+    ]);
   });
 
   it("opens the prepared new Task while send capability is still preparing", async () => {

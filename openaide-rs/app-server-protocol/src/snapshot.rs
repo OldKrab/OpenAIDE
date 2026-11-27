@@ -32,8 +32,6 @@ pub struct ClientSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agents: Option<AgentCollectionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tasks: Option<TaskNavigationSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_task: Option<TaskSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<SettingsSnapshot>,

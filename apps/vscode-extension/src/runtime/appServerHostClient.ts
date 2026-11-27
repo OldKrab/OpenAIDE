@@ -27,6 +27,7 @@ import {
   type ServerRequestMethod,
   type ServerRequestResponseResultByMethod,
   type SubscriptionScope,
+  type NavigationViewParams,
 } from "@openaide/app-server-client";
 import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
 
@@ -100,10 +101,10 @@ export class AppServerHostClient {
   }
 
   /** Adds extension-host state consumers without creating another logical client. */
-  async subscribeState(scope: SubscriptionScope, observer: AppServerStateObserver) {
+  async subscribeState(scope: SubscriptionScope, observer: AppServerStateObserver, view?: NavigationViewParams) {
     await this.flushWorkspaceRoots();
     const connection = await this.ensureInitialized();
-    return connection.subscribeState(scope, observer);
+    return connection.subscribeState(scope, observer, view);
   }
 
   /** Registers one render surface behind the extension host's single logical client. */
@@ -207,7 +208,7 @@ export class AppServerHostClient {
               subscriptionId: message.subscriptionId,
               error: serializeBridgeError(error),
             }),
-          }),
+          }, message.view),
         );
         return true;
       }

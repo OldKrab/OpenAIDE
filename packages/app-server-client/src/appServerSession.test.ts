@@ -17,7 +17,15 @@ import type {
   ToolTerminalSync,
   WorktreeRepositoryId,
 } from "./index";
-import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CANCEL } from "./generated/protocol";
+import {
+  NAVIGATION_SUBSCRIBE,
+  NAVIGATION_UNSUBSCRIBE,
+  NAVIGATION_UPDATE,
+  STATE_SUBSCRIBE,
+  STATE_UNSUBSCRIBE,
+  TASK_CANCEL,
+} from "./generated/protocol";
+import type { NavigationViewParams } from "./generated/protocol";
 import { createAppServerSession } from "./appServerSession";
 
 describe("AppServerSession", () => {
@@ -923,6 +931,80 @@ describe("AppServerSession Tool detail and Subagent History resume", () => {
     }
 
     expect(params).toEqual([{ scope: scopeFor(0) }, { scope: scopeFor(8), knownVersion: 2 }]);
+    session.close();
+  });
+});
+
+describe("AppServerSession Navigation views", () => {
+  const view = (historyLimit: number): NavigationViewParams => ({
+    section: "tasks",
+    historyLimit,
+    historyLimits: [],
+  });
+  const reply = (cursor: string) => ({
+    cursor: cursor as EventCursor,
+    frame: { section: "tasks", groupOrder: [], removedGroups: [], groups: [] },
+  });
+
+  it("subscribes with the view parameters and unsubscribes by section", async () => {
+    const requests: Array<[string, unknown]> = [];
+    const raw = fakeConnection(async (method, params) => {
+      requests.push([method, params]);
+      if (method === NAVIGATION_SUBSCRIBE) return reply("cursor_1");
+      return {};
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const observer = vi.fn();
+    const stop = session.subscribeState({ kind: "taskNavigation", section: "tasks" }, { onSnapshot: observer }, view(7));
+    await vi.waitFor(() => expect(observer).toHaveBeenCalledOnce());
+    expect(requests).toEqual([[NAVIGATION_SUBSCRIBE, view(7)]]);
+    expect(observer.mock.calls[0]?.[0]).toMatchObject({ kind: "taskNavigation" });
+
+    stop();
+    await vi.waitFor(() => expect(requests.at(-1)).toEqual([NAVIGATION_UNSUBSCRIBE, { section: "tasks" }]));
+    session.close();
+  });
+
+  it("sends changed parameters once the baseline is ready and skips unchanged ones", async () => {
+    const requests: Array<[string, unknown]> = [];
+    const raw = fakeConnection(async (method, params) => {
+      requests.push([method, params]);
+      if (method === NAVIGATION_SUBSCRIBE) return reply("cursor_1");
+      return {};
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const observer = vi.fn();
+    session.subscribeState({ kind: "taskNavigation", section: "tasks" }, { onSnapshot: observer }, view(3));
+    await vi.waitFor(() => expect(observer).toHaveBeenCalledOnce());
+
+    await session.request(NAVIGATION_UPDATE, view(3));
+    expect(requests.map(([method]) => method)).toEqual([NAVIGATION_SUBSCRIBE]);
+    await session.request(NAVIGATION_UPDATE, view(10));
+    expect(requests.at(-1)).toEqual([NAVIGATION_UPDATE, view(10)]);
+    session.close();
+  });
+
+  it("resubscribes with the latest wanted parameters after a recovery", async () => {
+    const requests: Array<[string, unknown]> = [];
+    const raw = fakeConnection(async (method, params) => {
+      requests.push([method, params]);
+      if (method === NAVIGATION_SUBSCRIBE) return reply(`cursor_${requests.length}`);
+      return {};
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const observer = vi.fn();
+    session.subscribeState({ kind: "taskNavigation", section: "tasks" }, { onSnapshot: observer }, view(3));
+    await vi.waitFor(() => expect(observer).toHaveBeenCalledOnce());
+    await session.request(NAVIGATION_UPDATE, view(10));
+
+    raw.invalidate();
+    raw.recover();
+    await vi.waitFor(() => expect(
+      requests.filter(([method]) => method === NAVIGATION_SUBSCRIBE),
+    ).toEqual([[NAVIGATION_SUBSCRIBE, view(3)], [NAVIGATION_SUBSCRIBE, view(10)]]));
     session.close();
   });
 });

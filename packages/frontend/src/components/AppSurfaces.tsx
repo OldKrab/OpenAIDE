@@ -436,12 +436,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           activeTaskId={activeNavigationTaskId}
           agentIcons={agentIcons}
           installingAgentLabel={installingAgentLabel}
-          groupByProject={true}
           nativeSessions={navigation.nativeSessions}
           nativeSessionMutations={navigation.nativeSessionMutations}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
-          nativeSessionProjectId={navigation.newTaskSelection.projectId}
           forkableAgentIds={forkableAgentIds}
           deletableAgentIds={deletableAgentIds}
           onDeleteSession={callbacks.navigation.deleteSession}
@@ -452,7 +450,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onForkNativeSession={callbacks.navigation.forkNativeSession}
           onForkTask={callbacks.navigation.forkTask}
-          onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+          onRefreshNavigation={callbacks.navigation.refreshNavigation}
           onManageWorktrees={manageWorktrees}
           onRemoveProject={prepareProjectRemoval}
           onRenameProject={async (projectId, label) => { await controller.intents.projects.rename(projectId, label); }}
@@ -465,7 +463,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
           onOpenTask={callbacks.navigation.openTask}
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
-            ? callbacks.navigation.loadNativeSessions()
+            ? callbacks.navigation.refreshNavigation()
             : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
           onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
           onRestoreTask={callbacks.navigation.restoreTask}
@@ -487,7 +485,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           computerSwitch={switchComputer}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
-          tasks={visibleTasks}
+          historyLimit={navigation.historyLimit}
+          historyLimitOverrides={navigation.historyLimitOverrides}
+          onSetProjectHistoryLimit={callbacks.navigation.setProjectHistoryLimit}
         />
         {projectFolderDialog}
         {projectRemoveDialog}
@@ -595,7 +595,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         activeTaskId={sidebarActiveTaskId}
         agentIcons={agentIcons}
         installingAgentLabel={installingAgentLabel}
-        groupByProject={true}
         hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
         modal={mobileLayoutActive && mobileNavigation.active}
         loadingTasks={!backendReady}
@@ -603,7 +602,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         nativeSessionMutations={navigation.nativeSessionMutations}
         nativeSessionAgentId={navigation.newTaskSelection.agentId}
         nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
-        nativeSessionProjectId={navigation.newTaskSelection.projectId}
         forkableAgentIds={forkableAgentIds}
           deletableAgentIds={deletableAgentIds}
           onDeleteSession={callbacks.navigation.deleteSession}
@@ -614,7 +612,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onAddProject={addProject}
         onArchiveTask={callbacks.navigation.archiveTask}
         onArchiveOlderTasks={callbacks.navigation.archiveOlderTasks}
-        onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+        onRefreshNavigation={callbacks.navigation.refreshNavigation}
         onBrowseProjectFiles={browseProjectFiles && ((projectId) => { closeMobileNavigation({ restoreFocus: false }); terminalPage.closePage(); browseProjectFiles(projectId); })}
         onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
         onRemoveProject={(project) => { closeMobileNavigation({ restoreFocus: false }); prepareProjectRemoval(project); }}
@@ -623,7 +621,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
         onOpenTask={closeAfter(callbacks.navigation.openTask)}
         onRecoverNativeSessions={(kind) => kind === "launchFailed"
-          ? callbacks.navigation.loadNativeSessions()
+          ? callbacks.navigation.refreshNavigation()
           : callbacks.navigation.openSettings(navigation.nativeSessions.recoveryAgentId)}
         onDisableRecoveredAgent={callbacks.settings.disableRecoveredAgent}
         onRestoreTask={callbacks.navigation.restoreTask}
@@ -645,7 +643,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         computerSwitch={switchComputer}
         showArchived={navigation.showArchived}
         taskListError={connectionSurfaceTaskListError(appServerError, navigation.taskListError)}
-        tasks={visibleTasks}
+        historyLimit={navigation.historyLimit}
+        historyLimitOverrides={navigation.historyLimitOverrides}
+        onSetProjectHistoryLimit={callbacks.navigation.setProjectHistoryLimit}
       />
     );
     return (

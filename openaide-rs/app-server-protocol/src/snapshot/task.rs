@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{AgentId, ProjectId, TaskId, WorktreeId};
-use crate::task::TaskNavigationSection;
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
@@ -15,48 +14,6 @@ mod send;
 pub use agent::*;
 pub use preparation::*;
 pub use send::*;
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskNavigationSnapshot {
-    /// Selects the primary Tasks surface or the secondary read-only Archive.
-    pub section: TaskNavigationSection,
-    /// Authoritative rows grouped and ordered by Project.
-    #[serde(default)]
-    pub groups: Vec<TaskNavigationGroup>,
-    #[serde(default)]
-    pub refresh: TaskNavigationRefreshState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskNavigationGroup {
-    pub project_id: ProjectId,
-    pub project_label: String,
-    pub task_count: u64,
-    #[serde(default)]
-    pub entries: Vec<TaskNavigationEntry>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub has_more: bool,
-    /// True while App Server discovers the bounded initial row window for this Project.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub loading: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(
-    tag = "state",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum TaskNavigationRefreshState {
-    #[default]
-    Idle,
-    Refreshing,
-    Failed {
-        message: String,
-    },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(

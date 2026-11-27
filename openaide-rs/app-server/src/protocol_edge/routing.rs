@@ -17,15 +17,15 @@ use openaide_app_server_protocol::methods::{
     MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED,
     MCP_UPDATE_SERVER, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_DELETE, NATIVE_SESSION_FORK,
     NATIVE_SESSION_RESTORE, NATIVE_SESSION_SET_PINNED, NATIVE_SESSION_SET_TITLE,
-    PENDING_REQUEST_RESOLVE, PROJECT_ADD, PROJECT_REFRESH, PROJECT_REMOVE, PROJECT_RENAME,
-    SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_GET_SKILL_DETAILS,
-    SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE, TASK_ACQUIRE_IN_WORKTREE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_ARCHIVE_OLDER, TASK_ATTENTION_WAIT, TASK_CANCEL,
-    TASK_CHAT_PAGE, TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY, TASK_IMAGE, TASK_LIST, TASK_MARK_READ,
-    TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
+    NAVIGATION_SUBSCRIBE, NAVIGATION_UNSUBSCRIBE, NAVIGATION_UPDATE, PENDING_REQUEST_RESOLVE,
+    PROJECT_ADD, PROJECT_REFRESH, PROJECT_REMOVE, PROJECT_RENAME, SETTINGS_GET_AGENT_DETAILS,
+    SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_GET_SKILL_DETAILS, SETTINGS_RESET_TASK_HISTORY, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
+    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_ARCHIVE_OLDER,
+    TASK_ATTENTION_WAIT, TASK_CANCEL, TASK_CHAT_PAGE, TASK_CLOSE_PLAN, TASK_COMPOSER_HISTORY,
+    TASK_IMAGE, TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_QUEUE_APPEND,
     TASK_QUEUE_MOVE, TASK_QUEUE_REMOVE, TASK_QUEUE_TAKE, TASK_RELEASE, TASK_RELOAD_NATIVE_SESSION,
     TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PERMISSION_POLICY,
     TASK_SET_PINNED, TASK_SET_TITLE, TASK_TOOL_IMAGE_PREVIEW, WORKSPACE_CREATE_DIRECTORY,
@@ -222,27 +222,31 @@ impl RpcGateway {
             TASK_NAVIGATION_REFRESH => {
                 self.handle_task_navigation_refresh(connection_id, id, params, meta)
             }
-            TASK_NAVIGATION_LOAD_MORE => {
-                self.handle_task_navigation_load_more(connection_id, id, params, meta)
+            NAVIGATION_SUBSCRIBE => {
+                self.handle_navigation_subscribe(connection_id, id, params, meta, now)
+            }
+            NAVIGATION_UPDATE => {
+                self.handle_navigation_update(connection_id, id, params, meta, now)
+            }
+            NAVIGATION_UNSUBSCRIBE => {
+                self.handle_navigation_unsubscribe(connection_id, id, params, meta, now)
             }
             NATIVE_SESSION_ARCHIVE => {
-                self.handle_native_session_archive(connection_id, id, params, meta, now)
+                self.handle_native_session_archive(connection_id, id, params, meta)
             }
             NATIVE_SESSION_SET_TITLE => {
-                self.handle_native_session_set_title(connection_id, id, params, meta, now)
+                self.handle_native_session_set_title(connection_id, id, params, meta)
             }
             NATIVE_SESSION_SET_PINNED => {
-                self.handle_native_session_set_pinned(connection_id, id, params, meta, now)
+                self.handle_native_session_set_pinned(connection_id, id, params, meta)
             }
             NATIVE_SESSION_RESTORE => {
-                self.handle_native_session_restore(connection_id, id, params, meta, now)
+                self.handle_native_session_restore(connection_id, id, params, meta)
             }
             NATIVE_SESSION_DELETE => {
-                self.handle_native_session_delete(connection_id, id, params, meta, now)
+                self.handle_native_session_delete(connection_id, id, params, meta)
             }
-            NATIVE_SESSION_FORK => {
-                self.handle_native_session_fork(connection_id, id, params, meta, now)
-            }
+            NATIVE_SESSION_FORK => self.handle_native_session_fork(connection_id, id, params, meta),
             AGENT_CREATE_CUSTOM => {
                 self.handle_agent_create_custom(connection_id, id, params, meta, now)
             }
@@ -452,9 +456,7 @@ impl RpcGateway {
             FILE_VIEWER_RELEASE => self.handle_file_viewer_release(connection_id, id, params, meta),
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),
-            TASK_ARCHIVE_OLDER => {
-                self.handle_task_archive_older(connection_id, id, params, meta, now)
-            }
+            TASK_ARCHIVE_OLDER => self.handle_task_archive_older(connection_id, id, params, meta),
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
             TASK_ATTENTION_WAIT => self.handle_task_attention_wait(connection_id, id, params, meta),

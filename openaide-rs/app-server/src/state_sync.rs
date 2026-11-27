@@ -164,6 +164,25 @@ impl StateStream {
         ))
     }
 
+    /// Registers a view subscription at the current cursor. The caller computes the baseline
+    /// frame itself, because a view's content is not an entity snapshot.
+    pub(crate) fn register_view_subscription(
+        &mut self,
+        ctx: &ClientContext,
+        scope: SubscriptionScope,
+    ) -> EventCursor {
+        let cursor = self.cursors.read_token().cursor().clone();
+        self.upsert_subscription(ctx.client_instance_id.clone(), scope, cursor.clone());
+        cursor
+    }
+
+    pub(crate) fn is_subscribed(&self, ctx: &ClientContext, scope: &SubscriptionScope) -> bool {
+        self.subscriptions.iter().any(|subscription| {
+            subscription.client_instance_id == ctx.client_instance_id
+                && &subscription.scope == scope
+        })
+    }
+
     pub fn unsubscribe(
         &mut self,
         ctx: &ClientContext,
@@ -441,45 +460,10 @@ fn payload_matches_subscription(
             AppServerEventPayload::TerminalCollectionUpdated { .. }
                 | AppServerEventPayload::SnapshotReplaced { .. }
         ),
-        SubscriptionScope::TaskNavigation {
-            section,
-            project_ids,
-        } => {
-            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
-                || matches!(
-                    payload,
-                    AppServerEventPayload::NavigationReplaced { navigation }
-                        if navigation.section == *section
-                )
-                || matches!(
-                    payload, AppServerEventPayload::RefreshStateChanged { .. }
-                        if matches!(
-                            section,
-                            openaide_app_server_protocol::task::TaskNavigationSection::Tasks
-                        )
-                )
-                || matches!(
-                    payload,
-                    AppServerEventPayload::ProjectEntriesReplaced {
-                        section: changed_section,
-                        project_id,
-                        ..
-                    } if changed_section == section
-                        && project_ids
-                            .as_ref()
-                            .is_none_or(|project_ids| project_ids.contains(project_id))
-                )
-                || matches!(
-                    payload,
-                    AppServerEventPayload::TaskUpdated {
-                        project_id,
-                        task,
-                    } if project_ids
-                        .as_ref()
-                        .is_none_or(|project_ids| project_ids.contains(project_id))
-                        && task_lifecycle_matches_navigation_section(task.lifecycle, *section)
-                )
-        }
+        SubscriptionScope::TaskNavigation { section } => matches!(
+            payload,
+            AppServerEventPayload::NavigationFrame { frame } if frame.section == *section
+        ),
         SubscriptionScope::Task { .. } => matches!(
             payload,
             AppServerEventPayload::SnapshotReplaced { .. }
@@ -538,22 +522,6 @@ fn task_content_removed(payload: &AppServerEventPayload, task_id: &TaskId) -> bo
     matches!(
         payload,
         AppServerEventPayload::TaskContentRemoved { task_id: removed } if removed == task_id
-    )
-}
-
-fn task_lifecycle_matches_navigation_section(
-    lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle,
-    section: openaide_app_server_protocol::task::TaskNavigationSection,
-) -> bool {
-    matches!(
-        (lifecycle, section),
-        (
-            openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
-            openaide_app_server_protocol::task::TaskNavigationSection::Tasks
-        ) | (
-            openaide_app_server_protocol::snapshot::TaskLifecycle::Archived,
-            openaide_app_server_protocol::task::TaskNavigationSection::Archive
-        )
     )
 }
 

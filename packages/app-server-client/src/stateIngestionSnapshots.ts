@@ -4,11 +4,7 @@ import type {
   SubscriptionScope,
 } from "./generated/protocol.js";
 import type { ReplicaSnapshot } from "./backendConnection.js";
-import {
-  filterTaskNavigationForScope,
-  replaceNavigationProjectEntries,
-  updateExistingNavigationTask,
-} from "./stateIngestionTaskNavigation.js";
+import { applyNavigationFrame } from "./stateIngestionTaskNavigation.js";
 import { updateSubagentHistorySnapshot, updateToolDetailSnapshot } from "./stateIngestionEntities.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
@@ -43,7 +39,7 @@ export function updateSubscriptionSnapshot(
     case "settings":
       return unchanged(snapshot);
     case "taskNavigation":
-      return updateTaskNavigationSnapshot(scope, snapshot, payload);
+      return updateTaskNavigationSnapshot(snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
     case "subagentCatalog":
@@ -77,9 +73,8 @@ function updateFromClientSnapshot(
     case "settings":
       return clientSnapshot.settings ? changed({ kind: "settings", settings: clientSnapshot.settings }) : unchanged(snapshot);
     case "taskNavigation":
-      return clientSnapshot.tasks
-        ? changed({ kind: "taskNavigation", navigation: filterTaskNavigationForScope(clientSnapshot.tasks, scope) })
-        : unchanged(snapshot);
+      // A view is only ever built from its own frames.
+      return unchanged(snapshot);
     case "task":
       // A Client snapshot's active Task has no Chat version, so it cannot replace the replica;
       // the Task's own stream carries every change to it.
@@ -96,45 +91,11 @@ function updateFromClientSnapshot(
 }
 
 function updateTaskNavigationSnapshot(
-  scope: SubscriptionScope,
   snapshot: Extract<ReplicaSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
-  if (payload.kind === "navigationReplaced") {
-    return changed({
-      ...snapshot,
-      navigation: filterTaskNavigationForScope(payload.navigation, scope),
-    });
-  }
-  if (payload.kind === "refreshStateChanged") {
-    return changed({
-      ...snapshot,
-      navigation: {
-        ...snapshot.navigation,
-        refresh: payload.refresh,
-      },
-    });
-  }
-  if (payload.kind === "taskUpdated") {
-    const navigation = updateExistingNavigationTask(
-      snapshot.navigation,
-      payload.projectId,
-      payload.task,
-    );
-    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
-  }
-  if (payload.kind === "projectEntriesReplaced") {
-    if (payload.section !== snapshot.navigation.section) return unchanged(snapshot);
-    const navigation = replaceNavigationProjectEntries(
-      snapshot.navigation,
-      payload.projectId,
-      payload.taskCount,
-      payload.entries,
-      payload.hasMore,
-      payload.loading,
-    );
-    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
-  }
-
-  return unchanged(snapshot);
+  if (payload.kind !== "navigationFrame") return unchanged(snapshot);
+  const applied = applyNavigationFrame(snapshot.navigation, payload.frame);
+  if (applied.kind === "resyncRequired") return { kind: "resyncRequired", reason: applied.reason };
+  return changed({ kind: "taskNavigation", navigation: applied.navigation });
 }

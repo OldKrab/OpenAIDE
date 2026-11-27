@@ -7,7 +7,8 @@ import {
   type SubscriptionIngestionContext,
   type SubscriptionScope,
   type ReplicaSnapshot,
-  type TaskNavigationSnapshot,
+  type NavigationReplica,
+  type NavigationViewParams,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
@@ -26,7 +27,7 @@ type StateSubscriptionConnection = Pick<AppServerSession, "subscribeState">;
 export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
-  taskNavigations?: Partial<Record<"tasks" | "archive", TaskNavigationSnapshot>>;
+  taskNavigations?: Partial<Record<"tasks" | "archive", NavigationReplica>>;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
@@ -50,6 +51,7 @@ export function startAppServerStateSubscription({
   onTaskRemoved,
   setAgents,
   scope,
+  view,
 }: {
   backendConnection: StateSubscriptionConnection;
   context: StateSubscriptionMappingContext;
@@ -61,9 +63,11 @@ export function startAppServerStateSubscription({
   onTaskRemoved?: (taskId: string) => void;
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
+  /** The parameters of a Navigation view; required when `scope` is a `taskNavigation` scope. */
+  view?: NavigationViewParams;
 }) {
   const mapTaskSnapshot = createProtocolTaskSnapshotMapper();
-  return backendConnection.subscribeState(scope, {
+  const observer: Parameters<StateSubscriptionConnection["subscribeState"]>[1] = {
     onBaselineError,
     onBaselineLost,
     onBaselineReady,
@@ -105,7 +109,10 @@ export function startAppServerStateSubscription({
         }
       }
     },
-  });
+  };
+  return view
+    ? backendConnection.subscribeState(scope, observer, view)
+    : backendConnection.subscribeState(scope, observer);
 }
 
 function liveTextPresentationAction(
@@ -228,8 +235,7 @@ function remappedTaskNavigationActions(context: StateSubscriptionMappingContext)
       archived: section === "archive",
       tasks: mapped.tasks,
       sessions: mapped.sessions,
-      hasMoreProjectIds: mapped.hasMoreProjectIds,
-      loadingProjectIds: mapped.loadingProjectIds,
+      groups: mapped.groups,
       refreshing: mapped.refreshing,
       refreshError: mapped.refreshError,
       recoveryKind: mapped.recoveryKind,

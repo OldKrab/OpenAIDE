@@ -8,11 +8,11 @@ use crate::snapshot::{
     AgentCollectionSnapshot, AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot,
     ClientSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot,
-    TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot, TaskNavigationSnapshot,
-    TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
+    TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot, TaskPermissionPolicy,
+    TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
-use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
+use crate::task::ToolDetailSnapshot;
 use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -68,28 +68,9 @@ pub enum AppServerEventPayload {
         task_id: TaskId,
         history_sync: TaskHistorySyncSnapshot,
     },
-    /// Updates row-visible fields for one Task already present in Navigation.
-    ///
-    /// Consumers must never treat this as an insertion or lifecycle move.
-    TaskUpdated {
-        project_id: crate::ids::ProjectId,
-        task: Box<crate::snapshot::TaskSummary>,
-    },
-    /// Replaces the bounded authoritative row window for one Project.
-    ProjectEntriesReplaced {
-        section: TaskNavigationSection,
-        project_id: crate::ids::ProjectId,
-        task_count: u64,
-        entries: Vec<crate::snapshot::TaskNavigationEntry>,
-        has_more: bool,
-        loading: bool,
-    },
-    RefreshStateChanged {
-        refresh: crate::snapshot::TaskNavigationRefreshState,
-    },
-    /// Recovers Navigation after initialization, reconnect, or cursor loss.
-    NavigationReplaced {
-        navigation: TaskNavigationSnapshot,
+    /// One Navigation view changed (design 2.2). Frames also carry the subscribe baseline.
+    NavigationFrame {
+        frame: crate::navigation::NavigationFrame,
     },
     ProjectCollectionUpdated {
         projects: ProjectCollectionSnapshot,

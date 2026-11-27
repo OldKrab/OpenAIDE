@@ -32,7 +32,7 @@ impl RpcGateway {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let mut events = removed_tasks
+        let events = removed_tasks
             .into_iter()
             .flat_map(|task| {
                 self.publish_task_payload(
@@ -49,7 +49,7 @@ impl RpcGateway {
                 )
             })
             .collect::<Vec<_>>();
-        events.extend(self.publish_navigation_replacement(now));
+        self.navigation.mark_all();
         responses::result_with_events(
             connection_id,
             id,

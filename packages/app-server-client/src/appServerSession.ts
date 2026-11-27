@@ -1,15 +1,21 @@
 import {
   applySubscriptionEvent,
+  installNavigationSubscribeReply,
   installSubscriptionReply,
   type SubscriptionIngestionState,
 } from "./stateIngestion.js";
 import { entityVersion } from "./stateIngestionEntities.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
 import {
+  NAVIGATION_SUBSCRIBE,
+  NAVIGATION_UNSUBSCRIBE,
+  NAVIGATION_UPDATE,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AppServerEvent,
   type InitializeResult,
+  type NavigationViewParams,
+  type NavigationUpdateResult,
   type StateSubscribeResult,
   type SubscriptionScope,
 } from "./generated/protocol.js";
@@ -48,6 +54,8 @@ type ScopeReplica = {
    * continuation runs.
    */
   pendingEvents: AppServerEvent[];
+  /** A Navigation view's parameters: the latest wanted, and the ones App Server holds. */
+  navigation?: { wanted: NavigationViewParams; sent?: NavigationViewParams; pushing: boolean };
   refreshing: boolean;
   refreshGeneration?: number;
   refreshPromise?: Promise<void>;
@@ -147,6 +155,11 @@ export function createAppServerSession(
           duration_ms: Date.now() - startedAt,
         });
       }
+      if (method === NAVIGATION_UPDATE) {
+        // The session remembers what a view wants, so recovery resubscribes with it.
+        const handled = await updateNavigationView(params as NavigationViewParams);
+        if (handled) return {} as never;
+      }
       return meta === undefined
         ? connection.request(method, params)
         : connection.request(method, params, meta);
@@ -169,13 +182,17 @@ export function createAppServerSession(
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
-    subscribeState(scope, observer) {
+    subscribeState(scope, observer, view) {
       const key = scopeKey(scope);
       let replica = replicas.get(key);
+      if (scope.kind === "taskNavigation" && !view) {
+        throw new Error("A Navigation subscription needs its view parameters");
+      }
       if (!replica) {
         replica = {
           scope,
           observers: new Set(),
+          ...(view ? { navigation: { wanted: view, pushing: false } } : {}),
           pendingEvents: [],
           refreshing: true,
           retryDelay: SUBSCRIPTION_RETRY_MS,
@@ -187,6 +204,11 @@ export function createAppServerSession(
         });
       }
       replica.observers.add(observer);
+      if (view && replica.navigation) {
+        // A returning observer brings its own parameters; the view follows the latest.
+        replica.navigation.wanted = view;
+        void pushNavigationParams(replica);
+      }
       if (replica.state && !replica.refreshing) {
         notifyObserver(observer, "onSnapshot", logger, replica.state.snapshot);
         notifyObserver(observer, "onBaselineReady", logger);
@@ -359,19 +381,27 @@ export function createAppServerSession(
           attempt,
           known_version_offered: knownVersion !== undefined,
         });
-        const result = await connection.request(
-          STATE_SUBSCRIBE,
-          knownVersion === undefined ? { scope: replica.scope } : { scope: replica.scope, knownVersion },
-        );
+        const navigation = replica.navigation;
+        const sentParams = navigation?.wanted;
+        const result = navigation && sentParams
+          ? await connection.request(NAVIGATION_SUBSCRIBE, sentParams)
+          : await connection.request(
+            STATE_SUBSCRIBE,
+            knownVersion === undefined ? { scope: replica.scope } : { scope: replica.scope, knownVersion },
+          );
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
         const snapshot = initialization?.snapshot;
         if (!snapshot) throw new Error("App Server session is not initialized");
         const offered = retained;
         retained = undefined;
-        const state = installSubscriptionReply(result, {
+        const context = {
           stateRootId: snapshot.stateRoot.stateRootId,
           clientInstanceId: snapshot.client.clientInstanceId,
-        }, offered);
+        };
+        const state = "frame" in result
+          ? installNavigationSubscribeReply(result, replica.scope, context)
+          : installSubscriptionReply(result, context, offered);
+        if (navigation && state) navigation.sent = sentParams;
         if (!state) {
           logger.warn("app_server_state_resume_rejected", {
             ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
@@ -390,12 +420,14 @@ export function createAppServerSession(
         // promise. Keep that owner running until the buffered stream is coherent.
         if (replica.refreshing) continue;
         notifyReplica(replica, "onBaselineReady", logger);
+        // Parameters that changed while the baseline was in flight go out now.
+        void pushNavigationParams(replica);
         logger.info("app_server_state_baseline_ready", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
-          reply_kind: result.snapshot.kind,
-          ...replySyncDiagnosticFields(result.snapshot),
+          reply_kind: "frame" in result ? "navigationFrame" : result.snapshot.kind,
+          ...("frame" in result ? {} : replySyncDiagnosticFields(result.snapshot)),
           dropped_pending_event_count: droppedPendingCount,
           duration_ms: Date.now() - startedAt,
         });
@@ -513,7 +545,71 @@ export function createAppServerSession(
       ...scopeDiagnosticFields(replica.scope, key),
       generation,
     });
-    void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
+    const released = replica.scope.kind === "taskNavigation"
+      ? connection.request(NAVIGATION_UNSUBSCRIBE, { section: replica.scope.section })
+      : connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope });
+    void released.catch(() => undefined);
+  }
+
+  /**
+   * Remembers the parameters a Navigation view now wants and returns whether this session owns
+   * that view (so the request is answered here, not sent as-is).
+   */
+  async function updateNavigationView(params: NavigationViewParams) {
+    const replica = replicas.get(scopeKey({ kind: "taskNavigation", section: params.section }));
+    if (!replica?.navigation) return false;
+    replica.navigation.wanted = params;
+    await pushNavigationParams(replica);
+    return true;
+  }
+
+  /**
+   * Sends the wanted parameters when App Server holds others. One push runs at a time and
+   * re-reads the wanted parameters when it finishes, so a burst of changes costs few requests.
+   * A view that is not ready sends nothing: its next baseline carries the latest parameters.
+   */
+  async function pushNavigationParams(replica: ScopeReplica) {
+    const navigation = replica.navigation;
+    if (!navigation || navigation.pushing) return;
+    navigation.pushing = true;
+    const startedAt = Date.now();
+    let attempts = 0;
+    try {
+      while (
+        !closed
+        && replica.state
+        && !replica.refreshing
+        && JSON.stringify(navigation.sent) !== JSON.stringify(navigation.wanted)
+      ) {
+        const params = navigation.wanted;
+        attempts += 1;
+        await connection.request(NAVIGATION_UPDATE, params) satisfies NavigationUpdateResult;
+        navigation.sent = params;
+      }
+      if (attempts > 0) {
+        logger.info("app_server_navigation_update_completed", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation,
+          attempt: attempts,
+          duration_ms: Date.now() - startedAt,
+        });
+      }
+    } catch (error) {
+      logger.warn("app_server_navigation_update_failed", {
+        ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+        generation,
+        attempt: attempts,
+        duration_ms: Date.now() - startedAt,
+        ...diagnosticErrorFields(error),
+      });
+      // The view's state on App Server is unknown now; a fresh baseline settles it.
+      if (!closed && replicas.get(scopeKey(replica.scope)) === replica) {
+        invalidateReplica(replica);
+        void refreshReplica(replica, generation);
+      }
+    } finally {
+      navigation.pushing = false;
+    }
   }
 
   function retainCopy(key: string, replica: ScopeReplica) {
@@ -599,7 +695,7 @@ function scopeKey(scope: SubscriptionScope) {
     case "settings":
       return `settings:${scope.section ?? ""}`;
     case "taskNavigation":
-      return `taskNavigation:${scope.section}:${scope.projectIds?.join(",") ?? "*"}`;
+      return `taskNavigation:${scope.section}`;
     case "task":
       return `task:${scope.taskId}`;
     case "subagentCatalog":

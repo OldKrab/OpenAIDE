@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClientInstanceId } from "@openaide/app-server-client";
-import { forgetClientInstanceId, getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "./backendInitialization";
+import { forgetClientInstanceId, getClientInstanceId, initializeParamsForBootstrap, taskNavigationScope } from "./backendInitialization";
 
 const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
 const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
@@ -95,23 +95,9 @@ describe("backend initialization", () => {
     expect(initialized.capabilities?.shell ?? []).not.toContain("writeSecret");
   });
 
-  it("scopes VS Code Navigation to its workspace Projects", () => {
-    expect(taskNavigationScopeForBootstrap({
-      surface: "navigation",
-      shell: VSCODE_SHELL,
-      projectId: "project-1",
-      appServerConnection: { kind: "webProxy", endpointUrl: "/transport-does-not-control-scope" },
-    })).toEqual({
-      kind: "taskNavigation",
-      section: "tasks",
-      projectIds: ["project-1"],
-    });
-    expect(taskNavigationScopeForBootstrap({
-      surface: "task",
-      shell: WEB_SHELL,
-      projectId: "project-1",
-      appServerConnection: { kind: "webProxy", endpointUrl: "/probe" },
-    })).toEqual({ kind: "taskNavigation", section: "tasks" });
+  it("scopes a Navigation subscription by section only", () => {
+    expect(taskNavigationScope()).toEqual({ kind: "taskNavigation", section: "tasks" });
+    expect(taskNavigationScope("archive")).toEqual({ kind: "taskNavigation", section: "archive" });
   });
 
   it("uses session storage for stable tab identity", () => {

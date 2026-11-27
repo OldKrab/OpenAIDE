@@ -68,16 +68,16 @@ describe("deriveAppControllerState", () => {
     expect(cleared.activeNavigationTaskId).toBeUndefined();
   });
 
-  it("keeps message-bearing tasks and hides empty placeholder tasks when the search query is blank", () => {
+  it("leaves membership to App Server: every loaded task shows when the search query is blank", () => {
     const tasks = [
       task({ task_id: "task_1", has_messages: true }),
       task({ task_id: "task_2", has_messages: false }),
     ];
 
-    expect(visibleTasks(tasks, "   ").map((visible) => visible.task_id)).toEqual(["task_1"]);
+    expect(visibleTasks(tasks, "   ").map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
   });
 
-  it("keeps a private empty New Task out of navigation while first Send is in flight", () => {
+  it("does not filter by message count while first Send is in flight", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.newTask.submitting = true;
@@ -97,10 +97,10 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
   });
 
-  it("keeps a private empty New Task out of navigation after switching tasks", () => {
+  it("does not filter by message count after switching tasks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.tasks = [
@@ -115,7 +115,7 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
   });
 
   it("does not invent a sidebar row while the New Task remains private", () => {
@@ -178,7 +178,8 @@ describe("deriveAppControllerState", () => {
 
     expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual(["Previous task"]);
     expect(afterCreate.activeNavigationTaskId).toBeUndefined();
-    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
+    // A private empty Task never reaches the view: App Server's membership filter keeps it out.
+    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_new", "task_1"]);
   });
 
   it("matches visible tasks by title, agent name, and status", () => {

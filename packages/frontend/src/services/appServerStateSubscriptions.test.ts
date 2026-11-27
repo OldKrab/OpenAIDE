@@ -132,6 +132,7 @@ describe("startAppServerStateSubscription", () => {
       context,
       dispatch,
       scope: { kind: "taskNavigation", section: "tasks" },
+      view: viewParams("tasks"),
     });
     startAppServerStateSubscription({
       backendConnection: projects.connection,
@@ -142,10 +143,7 @@ describe("startAppServerStateSubscription", () => {
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
-      navigation: {
-        section: "tasks",
-        refresh: { state: "idle" },
-        groups: [{ projectId: "project_1", projectLabel: "OpenAIDE", taskCount: 1, entries: [{ kind: "task", task: {
+      navigation: replica("tasks", [row("task:task_1", { live: false, entry: { kind: "task", task: {
         taskId: "task_1",
         projectId: "project_1",
         agentId: "codex",
@@ -155,8 +153,7 @@ describe("startAppServerStateSubscription", () => {
         lastActivity: "2026-07-18T00:00:00.000Z",
         unread: false,
         hasMessages: true,
-        } }] }],
-      },
+      } } })]),
     } as never);
     projects.observer().onSnapshot({
       kind: "projects",
@@ -166,17 +163,44 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskNavigation",
       archived: false,
-      hasMoreProjectIds: [],
-      loadingProjectIds: [],
+      groups: [expect.objectContaining({
+        projectId: "project_1",
+        label: "OpenAIDE",
+        total: 1,
+        rows: [expect.objectContaining({
+          kind: "task",
+          live: false,
+          task: expect.objectContaining({
+            task_id: "task_1",
+            project_label: "OpenAIDE",
+            title: "Recovered Task",
+          }),
+        })],
+      })],
       refreshError: undefined,
       refreshing: false,
       sessions: [],
-      tasks: [expect.objectContaining({
-        task_id: "task_1",
-        project_label: "OpenAIDE",
-        title: "Recovered Task",
-      })],
+      tasks: [expect.objectContaining({ task_id: "task_1", project_label: "OpenAIDE" })],
     });
+  });
+
+  it("passes the Navigation view parameters to the subscription", () => {
+    const navigation = fakeSubscription();
+    const view = viewParams("tasks");
+
+    startAppServerStateSubscription({
+      backendConnection: navigation.connection,
+      context: { stateRootId: "root_1" as StateRootId },
+      dispatch: vi.fn(),
+      scope: { kind: "taskNavigation", section: "tasks" },
+      view,
+    });
+
+    expect(navigation.connection.subscribeState).toHaveBeenCalledWith(
+      { kind: "taskNavigation", section: "tasks" },
+      expect.anything(),
+      view,
+    );
   });
 
   it("maps persisted unadopted sessions from Task Navigation into the shared sidebar state", () => {
@@ -191,18 +215,14 @@ describe("startAppServerStateSubscription", () => {
       },
       dispatch,
       scope: { kind: "taskNavigation", section: "tasks" },
+      view: viewParams("tasks"),
     });
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
-      navigation: {
-        section: "tasks",
-        refresh: { state: "refreshing" },
-        groups: [{
-          projectId: "project_1",
-          projectLabel: "OpenAIDE",
-          taskCount: 0,
-          entries: [{
+      navigation: replica("tasks", [row("session:codex:session_1", {
+        live: false,
+        entry: {
           kind: "nativeSession",
           session: {
             reference: { agentId: "codex", sessionId: "session_1" },
@@ -211,16 +231,14 @@ describe("startAppServerStateSubscription", () => {
             title: "Persisted session",
             lastActivity: "2026-07-21T00:00:00Z",
           },
-          }],
-        }],
-      },
+        },
+      })], { discovery: "loading" }),
     } as never);
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskNavigation",
       archived: false,
-      hasMoreProjectIds: [],
-      loadingProjectIds: [],
+      groups: [expect.objectContaining({ discovery: "loading", rows: [expect.objectContaining({ kind: "session" })] })],
       refreshError: undefined,
       refreshing: true,
       sessions: [{
@@ -247,36 +265,30 @@ describe("startAppServerStateSubscription", () => {
       },
       dispatch,
       scope: { kind: "taskNavigation", section: "archive" },
+      view: viewParams("archive"),
     });
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
-      navigation: {
-        section: "archive",
-        refresh: { state: "idle" },
-        groups: [{
-          projectId: "project_1",
-          projectLabel: "OpenAIDE",
-          taskCount: 0,
-          entries: [{
-            kind: "nativeSession",
-            session: {
-              reference: { agentId: "codex", sessionId: "session_1" },
-              projectId: "project_1",
-              workspaceRoot: "/workspace/OpenAIDE",
-              title: "Archived session",
-              lastActivity: null,
-            },
-          }],
-        }],
-      },
+      navigation: replica("archive", [row("session:codex:session_1", {
+        live: false,
+        entry: {
+          kind: "nativeSession",
+          session: {
+            reference: { agentId: "codex", sessionId: "session_1" },
+            projectId: "project_1",
+            workspaceRoot: "/workspace/OpenAIDE",
+            title: "Archived session",
+            lastActivity: null,
+          },
+        },
+      })]),
     } as never);
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskNavigation",
       archived: true,
-      hasMoreProjectIds: [],
-      loadingProjectIds: [],
+      groups: [expect.objectContaining({ rows: [expect.objectContaining({ kind: "session" })] })],
       refreshError: undefined,
       refreshing: false,
       sessions: [expect.objectContaining({
@@ -386,5 +398,35 @@ function fakeSubscription() {
       return currentObserver;
     },
     stop,
+  };
+}
+
+function viewParams(section: "tasks" | "archive") {
+  return { section, historyLimit: 20, historyLimits: [] };
+}
+
+function row(id: string, body: unknown): [string, unknown] {
+  return [id, body];
+}
+
+/** A Navigation replica holding one Project group whose rows are the given `[id, body]` pairs. */
+function replica(
+  section: "tasks" | "archive",
+  rows: Array<[string, unknown]>,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    section,
+    groups: [{
+      projectId: "project_1",
+      projectLabel: "OpenAIDE",
+      order: rows.map(([id]) => id),
+      rowsById: Object.fromEntries(rows),
+      total: rows.length,
+      hidden: 0,
+      undiscovered: false,
+      discovery: "settled",
+      ...overrides,
+    }],
   };
 }

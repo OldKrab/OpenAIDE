@@ -1,6 +1,7 @@
 import type {
   AppServerEvent,
   EventCursor,
+  NavigationSubscribeResult,
   StateSubscribeResult,
   SubscriptionScope,
 } from "./generated/protocol.js";
@@ -8,6 +9,7 @@ import type { ReplicaSnapshot } from "./backendConnection.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
 import { installSubagentHistoryReply, installToolDetailReply } from "./stateIngestionEntities.js";
 import { installTaskReply } from "./stateIngestionTask.js";
+import { installNavigationReply } from "./stateIngestionTaskNavigation.js";
 import { matchSubscriptionEvent } from "./subscriptionScope.js";
 import type { SubscriptionIngestionContext } from "./subscriptionScope.js";
 export type { SubscriptionIngestionContext } from "./subscriptionScope.js";
@@ -35,7 +37,7 @@ export type SubscriptionEventApplyResult =
   | {
       kind: "resyncRequired";
       state: SubscriptionIngestionState;
-      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap";
+      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap" | "missingNavigationRow" | "missingNavigationGroup";
       event: AppServerEvent;
     };
 
@@ -50,6 +52,20 @@ export function createSubscriptionIngestionState(
     cursor: result.cursor,
     snapshot: result.snapshot,
   };
+}
+
+/** Installs a `navigation/subscribe` reply: its frame is the view's complete baseline. */
+export function installNavigationSubscribeReply(
+  result: NavigationSubscribeResult,
+  scope: SubscriptionScope,
+  context: SubscriptionIngestionContext,
+): SubscriptionIngestionState | undefined {
+  const navigation = installNavigationReply(result);
+  if (!navigation) return undefined;
+  return createSubscriptionIngestionState(
+    { scope, cursor: result.cursor, snapshot: { kind: "taskNavigation", navigation } },
+    context,
+  );
 }
 
 /**

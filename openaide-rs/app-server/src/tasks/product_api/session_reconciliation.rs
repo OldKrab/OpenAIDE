@@ -140,7 +140,7 @@ impl TaskProductApi {
         }
         if removed_count > 0 {
             self.task_notifier
-                .navigation_project_entries_changed(project_id.to_string());
+                .navigation_project_changed(project_id.to_string());
             crate::logging::info(
                 "native_session_history_reconciled",
                 serde_json::json!({
@@ -201,7 +201,7 @@ impl TaskProductApi {
                 ) {
                     Ok(true) => {
                         self.release_removed_session(&reference);
-                        self.task_notifier.navigation_project_entries_changed(
+                        self.task_notifier.navigation_project_changed(
                             crate::projects::project_id_for_workspace(
                                 task.project_root.as_deref().unwrap_or(&task.workspace_root),
                             )

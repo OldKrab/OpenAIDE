@@ -32,10 +32,9 @@ import { reduceSettingsState, type SettingsAgentCollectionEntry } from "./settin
 import {
   reconcileBackgroundTaskSnapshot,
   reconcileTaskSnapshotDependents,
-  replaceTaskSummary,
 } from "./taskSnapshotReconciliation";
 import { reduceTaskInteractionState } from "./taskInteractionReducer";
-import type { AppState, NativeSessionsState, TaskChatScrollState, TaskOpenError } from "./store";
+import type { AppState, NativeSessionsState, NavigationGroupState, TaskChatScrollState, TaskOpenError } from "./store";
 
 export type SnapshotIntent = "open" | "refresh";
 
@@ -49,8 +48,7 @@ type AppActionPayload =
       archived: boolean;
       tasks: TaskSummary[];
       sessions: AgentListedSession[];
-      hasMoreProjectIds: string[];
-      loadingProjectIds?: string[];
+      groups: NavigationGroupState[];
       refreshing: boolean;
       refreshError?: string;
       recoveryKind?: NativeSessionsState["recoveryKind"];
@@ -183,6 +181,7 @@ type AppActionPayload =
   | { type: "question:responding"; requestId: string }
   | { type: "question:error"; requestId: string; message: string }
   | { type: "search:set"; query: string }
+  | { type: "navigation:historyLimit"; projectId: string; historyLimit: number | undefined }
   | { type: "archive:set"; showArchived: boolean }
   | { type: "selection:set"; taskId: string }
   | { type: "selection:clear" }
@@ -246,6 +245,7 @@ type GlobalAction = Extract<
   | { type: "terminals" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
+  | { type: "navigation:historyLimit" }
   | { type: "archive:set" }
   | { type: "selection:set" }
   | { type: "selection:clear" }
@@ -302,6 +302,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "terminals":
     case "workspace:roots":
     case "search:set":
+    case "navigation:historyLimit":
     case "archive:set":
     case "selection:set":
     case "selection:clear":
@@ -349,8 +350,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       const nextSessions = {
         ...(action.archived ? state.archivedNativeSessions : state.newTask.nativeSessions),
         items: action.sessions,
-        hasMoreProjectIds: action.hasMoreProjectIds,
-        loadingProjectIds: action.loadingProjectIds ?? [],
+        groups: action.groups,
         loaded: true,
         loading: action.refreshing,
         nextCursor: undefined,
@@ -469,16 +469,8 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         });
       }
       const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
-      const reconciled = reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
-      const tasks = replaceTaskSummary(reconciled.tasks, action.snapshot.task) ?? reconciled.tasks;
-      return {
-        ...reconciled,
-        tasks,
-        taskLists: {
-          ...reconciled.taskLists,
-          [taskListKey(reconciled.showArchived)]: tasks,
-        },
-      };
+      // The Navigation view owns the row; the promoted Task's own subscription owns its snapshot.
+      return reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
     }
     case "snapshot": {
       // New Task state belongs to the client-private New Task controller. It must not
@@ -512,17 +504,11 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           : nextState;
       }
       const { snapshot } = reconciliation;
-      const tasks = replaceTaskSummary(state.tasks, snapshot.task) ?? state.tasks;
       const nextState = {
         ...reconciliation.state,
         snapshot,
         showArchived: state.showArchived,
         searchQuery: action.intent === "open" ? "" : state.searchQuery,
-        tasks,
-        taskLists: {
-          ...state.taskLists,
-          [taskListKey(state.showArchived)]: tasks,
-        },
         activeTaskId: snapshot.task.task_id,
         taskOpenError: undefined,
         newTask: {
@@ -610,6 +596,15 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     }
     case "search:set":
       return { ...state, searchQuery: action.query };
+    case "navigation:historyLimit": {
+      const { [action.projectId]: _previous, ...rest } = state.navigationHistoryLimits;
+      return {
+        ...state,
+        navigationHistoryLimits: action.historyLimit === undefined
+          ? rest
+          : { ...rest, [action.projectId]: action.historyLimit },
+      };
+    }
     case "archive:set":
       return {
         ...state,

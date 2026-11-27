@@ -1,7 +1,7 @@
 import type {
   AgentSummary,
   ProjectSummary,
-  TaskNavigationSnapshot as ProtocolTaskNavigationSnapshot,
+  NavigationReplica,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskStatus as ProtocolTaskStatus,
   TaskSummary as ProtocolTaskSummary,
@@ -14,6 +14,8 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
+import { navigationGroupRows } from "@openaide/app-server-client";
+import type { NavigationGroupState, NavigationRowState } from "./store";
 import {
   mapProtocolChatItem,
   pendingRequestItems,
@@ -38,16 +40,17 @@ export type ProtocolMappingWarning =
   | { kind: "agentLabelMissing"; agentId: string };
 
 export type ProtocolTaskNavigationMapping = {
+  /** One group per Project, in the server's order, each with its rows in the server's order. */
+  groups: NavigationGroupState[];
+  /** Every row's Task in view order, for the lookups that are not per Project. */
   tasks: TaskSummary[];
+  /** Every row's Native Session in view order. */
   sessions: AgentListedSession[];
-  hasMoreProjectIds: string[];
-  loadingProjectIds: string[];
   refreshing: boolean;
   refreshError?: string;
   recoveryKind?: "nodeJsRequired" | "authRequired" | "setupRequired" | "launchFailed";
   recoveryAgentId?: string;
   recoveryAgentLabel?: string;
-  activeTaskId?: string;
   warnings: ProtocolMappingWarning[];
   requiresNativeSurface: boolean;
 };
@@ -80,54 +83,65 @@ export function createProtocolTaskSnapshotMapper() {
   ) => mapProtocolTaskSnapshotWithCache(snapshot, context, chatItems);
 }
 
+/**
+ * Maps a Navigation view replica for presentation. App Server owns the order, window and counts,
+ * so this only translates each row and never sorts, filters or limits.
+ */
 export function mapProtocolTaskNavigation(
-  snapshot: ProtocolTaskNavigationSnapshot,
+  navigation: NavigationReplica,
   context: ProtocolMappingContext = {},
 ): ProtocolTaskNavigationMapping {
-  if (!Array.isArray(snapshot?.groups)) {
+  if (!Array.isArray(navigation?.groups)) {
     throw new AppServerCompatibilityError(
       "OpenAIDE received an incompatible App Server response. Reload the VS Code window.",
     );
   }
-  const entries = snapshot.groups.flatMap((group) => group.entries);
-  const taskEntries = entries
-    .filter((entry) => entry.kind === "task")
-    .map((entry) => entry.task);
-  const mapped = taskEntries
-    .map((task) => mapProtocolTaskSummaryWithWarnings(task, 0, context));
-  const sessions = entries.flatMap((entry): AgentListedSession[] => {
-    if (entry.kind !== "nativeSession") return [];
-    return [{
-      agent_id: entry.session.reference.agentId,
-      agent_name: context.agents?.find((agent) => agent.agentId === entry.session.reference.agentId)?.label
-        ?? entry.session.reference.agentId,
-      session_id: entry.session.reference.sessionId,
-      project_id: entry.session.projectId,
-      cwd: entry.session.workspaceRoot,
-      title: entry.session.title ?? undefined,
-      pinned: entry.session.pinned,
-      last_activity: entry.session.lastActivity ?? undefined,
-    }];
-  });
+  const warnings: ProtocolMappingWarning[] = [];
+  const groups = navigation.groups.map((group): NavigationGroupState => ({
+    projectId: group.projectId,
+    label: group.projectLabel,
+    rows: navigationGroupRows(group).map((row): NavigationRowState => {
+      const { entry } = row;
+      if (entry.kind === "task") {
+        const mapped = mapProtocolTaskSummaryWithWarnings(entry.task, 0, context);
+        warnings.push(...mapped.warnings);
+        return { kind: "task", task: mapped.task, live: row.live };
+      }
+      return {
+        kind: "session",
+        live: row.live,
+        session: {
+          agent_id: entry.session.reference.agentId,
+          agent_name: context.agents?.find((agent) => agent.agentId === entry.session.reference.agentId)?.label
+            ?? entry.session.reference.agentId,
+          session_id: entry.session.reference.sessionId,
+          project_id: entry.session.projectId,
+          cwd: entry.session.workspaceRoot,
+          title: entry.session.title ?? undefined,
+          pinned: entry.session.pinned,
+          last_activity: entry.session.lastActivity ?? undefined,
+        },
+      };
+    }),
+    total: group.total,
+    hidden: group.hidden,
+    undiscovered: group.undiscovered,
+    discovery: group.discovery,
+  }));
+  const rows = groups.flatMap((group) => group.rows);
   return {
-    tasks: mapped.map((item) => item.task),
-    sessions,
-    hasMoreProjectIds: snapshot.groups
-      .filter((group) => group.hasMore)
-      .map((group) => group.projectId),
-    loadingProjectIds: snapshot.groups
-      .filter((group) => group.loading === true)
-      .map((group) => group.projectId),
-    refreshing: snapshot.refresh.state === "refreshing",
-    ...navigationRecovery(snapshot, context),
-    activeTaskId: undefined,
-    warnings: mapped.flatMap((item) => item.warnings),
+    groups,
+    tasks: rows.flatMap((row) => row.kind === "task" ? [row.task] : []),
+    sessions: rows.flatMap((row) => row.kind === "session" ? [row.session] : []),
+    refreshing: groups.some((group) => group.discovery === "loading"),
+    ...navigationRecovery(groups, context),
+    warnings,
     requiresNativeSurface: false,
   };
 }
 
 function navigationRecovery(
-  snapshot: ProtocolTaskNavigationSnapshot,
+  groups: NavigationGroupState[],
   context: ProtocolMappingContext,
 ) {
   const blocked = context.agents?.find((agent) => (
@@ -154,11 +168,9 @@ function navigationRecovery(
       recoveryAgentLabel: blocked.label,
     };
   }
-  if (blocked?.status === "failed" || snapshot.refresh.state === "failed") {
+  if (blocked?.status === "failed" || groups.some((group) => group.discovery === "failed")) {
     return {
-      refreshError: snapshot.refresh.state === "failed"
-        ? namedRefreshError(blocked?.label, snapshot.refresh.message)
-        : `${blocked?.label ?? "Agent"} history unavailable`,
+      refreshError: `${blocked?.label ?? "Agent"} history unavailable`,
       recoveryKind: "launchFailed" as const,
       recoveryAgentId: blocked?.agentId,
       recoveryAgentLabel: blocked?.label,
@@ -170,11 +182,6 @@ function navigationRecovery(
     recoveryAgentId: undefined,
     recoveryAgentLabel: undefined,
   };
-}
-
-/** A failed refresh's message, led by the Agent it concerns when the message does not name it. */
-function namedRefreshError(label: string | undefined, message: string) {
-  return label && !message.includes(label) ? `${label} history unavailable: ${message}` : message;
 }
 
 export function mapProtocolTaskSnapshot(

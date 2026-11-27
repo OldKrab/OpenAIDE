@@ -33,7 +33,6 @@ import {
   PROJECT_REFRESH,
   PROJECT_REMOVE,
   PROJECT_RENAME,
-  TASK_NAVIGATION_LOAD_MORE,
   TASK_LIST,
   type BackendConnection,
   type ProjectId,
@@ -63,7 +62,7 @@ import { createTerminalIntents, type TerminalIntents } from "../intents/terminal
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
 import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
 import { useRestoredDrafts } from "./useRestoredDrafts";
-import { initialTaskNavigationRowsPerProject } from "../state/taskNavigationPolicy";
+import { navigationViewParams } from "../state/navigationViewParams";
 import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 
 /** Internal workflow assembly exposed only to the controller lifecycle tests. */
@@ -91,6 +90,9 @@ export type AppControllerView = {
   appServerProblem?: AppState["appServerProblem"];
   navigation: {
     nativeSessions: AppState["newTask"]["nativeSessions"];
+    /** History rows each Project shows unless `historyLimitOverrides` names it. */
+    historyLimit: number;
+    historyLimitOverrides: AppState["navigationHistoryLimits"];
     nativeSessionMutations: AppState["nativeSessionMutations"];
     newTaskSelection: AppState["newTask"]["selection"];
     projects: AppState["projects"];
@@ -560,20 +562,8 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         add: async (workspaceRoot) => {
           if (!request) throw new Error("App Server connection unavailable.");
           const project = (await request(PROJECT_ADD, { workspaceRoot })).project;
-          const nextProjectCount = state.projects.some((candidate) => candidate.projectId === project.projectId)
-            ? state.projects.length
-            : state.projects.length + 1;
-          // Project creation should finish as soon as the Project exists. Discovery continues
-          // in the background so the sidebar can render the Project-level loading state.
-          void request(TASK_NAVIGATION_LOAD_MORE, {
-            projectId: project.projectId,
-            targetRowCount: initialTaskNavigationRowsPerProject(nextProjectCount),
-          }).catch((error: unknown) => {
-            console.warn("[OpenAIDE] Initial Project task discovery failed", {
-              error_kind: error instanceof Error && error.name ? error.name : typeof error,
-              projectId: project.projectId,
-            });
-          });
+          // The Navigation view shows the new Project as soon as it exists; App Server reads its
+          // sessions in the background and reports progress in the group.
           return project;
         },
         rename: async (projectId, label) => {
@@ -625,6 +615,8 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         nativeSessions: state.showArchived
           ? state.archivedNativeSessions
           : state.newTask.nativeSessions,
+        historyLimit: navigationViewParams(state, renderState.bootstrap, state.showArchived ? "archive" : "tasks").historyLimit,
+        historyLimitOverrides: state.navigationHistoryLimits,
         nativeSessionMutations: state.nativeSessionMutations,
         newTaskSelection: state.newTask.selection,
         projects: state.projects,

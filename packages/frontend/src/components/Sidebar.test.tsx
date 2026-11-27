@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { NativeSessionsState } from "../state/store";
+import { navigationGroup, navigationState, sessionRow, taskRow } from "./navigationTestFixtures";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
@@ -15,50 +16,54 @@ beforeEach(() => {
 });
 
 describe("sidebarViewModel", () => {
-  it("filters native sessions by title and agent metadata outside archive mode", () => {
+  it("filters loaded rows by title and agent metadata outside archive mode", () => {
+    const group = navigationGroup("project_1", "Project", [
+      taskRow(task({ task_id: "task_1", title: "Refactor plan" })),
+      sessionRow(nativeSession({ session_id: "session_1", title: "Release notes" })),
+    ]);
     const model = sidebarViewModel({
+      groups: [group],
+      loading: false,
       nativeSessionAgentName: "Codex",
-      nativeSessions: nativeSessions({
-        items: [
-          nativeSession({ session_id: "session_1", title: "Refactor plan" }),
-          nativeSession({ session_id: "session_2", title: "Release notes" }),
-        ],
-      }),
-      searchQuery: "  codex  ",
+      searchQuery: "  release  ",
       showArchived: false,
-      taskCount: 1,
     });
 
-    expect(model.visibleNativeSessions.map((session) => session.session_id)).toEqual(["session_1", "session_2"]);
-    expect(model.visibleCount).toBe(3);
+    expect(model.visibleGroups.map((entry) => entry.rows.map((row) => row.kind))).toEqual([["session"]]);
+    expect(model.visibleCount).toBe(1);
   });
 
-  it("includes archived native sessions in the archive count", () => {
+  it("keeps every row, in server order, without a search", () => {
+    const group = navigationGroup("project_1", "Project", [
+      taskRow(task({ task_id: "task_b", title: "B" })),
+      taskRow(task({ task_id: "task_a", title: "A" })),
+    ]);
     const model = sidebarViewModel({
+      groups: [group],
+      loading: false,
       nativeSessionAgentName: "Codex",
-      nativeSessions: nativeSessions({ items: [nativeSession({ session_id: "session_1" })] }),
       searchQuery: "",
-      showArchived: true,
-      taskCount: 0,
+      showArchived: false,
     });
 
-    expect(model.visibleCount).toBe(1);
+    expect(model.visibleGroups[0]?.rows.map((row) => row.kind === "task" && row.task.task_id)).toEqual(["task_b", "task_a"]);
+    expect(model.visibleCount).toBe(2);
   });
 
   it("keeps loading and search empty states distinct", () => {
     const loading = sidebarViewModel({
+      groups: [],
+      loading: true,
       nativeSessionAgentName: "Codex",
-      nativeSessions: nativeSessions({ loading: true }),
       searchQuery: "",
       showArchived: false,
-      taskCount: 0,
     });
     const searching = sidebarViewModel({
+      groups: [],
+      loading: false,
       nativeSessionAgentName: "Codex",
-      nativeSessions: nativeSessions(),
       searchQuery: "missing",
       showArchived: false,
-      taskCount: 0,
     });
 
     expect(loading.emptyMessage).toBe("Loading tasks.");
@@ -1011,7 +1016,7 @@ describe("Sidebar", () => {
   it("offers a clear action and identifies filtered task results", () => {
     const onSearchChange = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         onSearchChange={onSearchChange}
@@ -1031,7 +1036,7 @@ describe("Sidebar", () => {
 
   it("hides the clear action and restores the task-list label without a query", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1047,7 +1052,7 @@ describe("Sidebar", () => {
   it("identifies and clears filtered archive results", () => {
     const onSearchChange = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         onSearchChange={onSearchChange}
@@ -1067,7 +1072,7 @@ describe("Sidebar", () => {
   it("exposes when scrolled task content continues above the visible list", () => {
     const taskList = { clientHeight: 120, scrollHeight: 360, scrollTop: 0 };
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1092,10 +1097,8 @@ describe("Sidebar", () => {
 
   it("does not render a phantom project group from a removed project selection", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject
-        nativeSessionProjectId="project_removed"
         nativeSessions={nativeSessions()}
         projects={[{ projectId: "project_openaide", label: "OpenAIDE" }]}
         showArchived={false}
@@ -1114,10 +1117,8 @@ describe("Sidebar", () => {
   it("replaces the ordinary empty state with an actionable folder setup state", () => {
     const onOpenWorkspaceFolder = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject
-        nativeSessionProjectId="project_stale"
         nativeSessions={nativeSessions({ loading: true })}
         onOpenWorkspaceFolder={onOpenWorkspaceFolder}
         projects={[{ projectId: "project_stale", label: "Current workspace" }]}
@@ -1137,7 +1138,7 @@ describe("Sidebar", () => {
 
   it("marks hidden navigation inert and outside the accessibility tree", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         hiddenFromAccessibility
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1153,7 +1154,7 @@ describe("Sidebar", () => {
 
   it("can expose the task navigation as a modal drawer", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         modal
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1173,7 +1174,7 @@ describe("Sidebar", () => {
     const onRestoreNativeSession = vi.fn();
     const session = nativeSession({ agent_id: "codex", session_id: "session_1", title: "Existing" });
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions({ items: [session] })}
         onOpenNativeSession={onOpenNativeSession}
@@ -1190,25 +1191,25 @@ describe("Sidebar", () => {
     expect(onOpenNativeSession).not.toHaveBeenCalled();
   });
 
-  it("does not expose Tasks pagination in Archive", () => {
+  it("pages Archive only by its hidden rows, since Archive never waits for discovery", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject
-        nativeSessions={nativeSessions({ hasMoreProjectIds: ["project_1"] })}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        nativeSessions={navigationState([
+          navigationGroup("project_1", "OpenAIDE", [], { hidden: 3 }),
+        ])}
         showArchived
         tasks={[]}
       />,
     );
 
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(1);
   });
 
   it("renders native-session errors without hiding valid rows", () => {
     const onRecoverNativeSessions = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         nativeSessions={nativeSessions({
           error: "OpenCode needs Node.js. Its sessions show here once it is set up.",
           recoveryKind: "nodeJsRequired",
@@ -1234,7 +1235,7 @@ describe("Sidebar", () => {
     const onRecoverNativeSessions = vi.fn();
     const onDisableRecoveredAgent = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         nativeSessions={nativeSessions({
           error: "Codex needs sign-in. Sign in or disable Codex to continue.",
           recoveryKind: "authRequired",
@@ -1262,7 +1263,7 @@ describe("Sidebar", () => {
     const onDisableRecoveredAgent = vi.fn(async (_agentId: string, accepted?: boolean) =>
       accepted ? { kind: "applied" as const } : { kind: "confirmation-required" as const, runningTaskCount: 2 });
     const tree = render(
-      <Sidebar
+      <TestSidebar
         nativeSessions={nativeSessions({
           error: "Codex needs sign-in. Sign in or disable Codex to continue.",
           recoveryKind: "authRequired",
@@ -1299,7 +1300,7 @@ describe("Sidebar", () => {
 
   it("keeps saved rows visible while the Codex integration installs", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         installingAgentLabel="Codex"
         nativeSessions={nativeSessions({
           items: [nativeSession({ session_id: "session_1", title: "Existing" })],
@@ -1319,7 +1320,7 @@ describe("Sidebar", () => {
 
   it("names the Agent whose integration installs", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         installingAgentLabel="Claude Code"
         nativeSessions={nativeSessions({ items: [] })}
         showArchived={false}
@@ -1332,12 +1333,12 @@ describe("Sidebar", () => {
   });
 
   it("refreshes external sessions from the sidebar header", () => {
-    const onLoadNativeSessions = vi.fn();
+    const onRefreshNavigation = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
-        onLoadNativeSessions={onLoadNativeSessions}
+        onRefreshNavigation={onRefreshNavigation}
         showArchived={false}
         tasks={[]}
       />,
@@ -1345,12 +1346,12 @@ describe("Sidebar", () => {
 
     act(() => tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.onClick());
 
-    expect(onLoadNativeSessions).toHaveBeenCalledWith();
+    expect(onRefreshNavigation).toHaveBeenCalledWith();
   });
 
   it("keeps the native-session refresh action adjacent to the Tasks title", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1369,7 +1370,7 @@ describe("Sidebar", () => {
 
   it("marks Settings as the sole current navigation destination", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         activeTaskId="task_1"
         nativeSessions={nativeSessions()}
@@ -1385,7 +1386,7 @@ describe("Sidebar", () => {
 
   it("keeps an available Desktop update discoverable beside Settings", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         settingsStatus="Update available"
@@ -1400,7 +1401,7 @@ describe("Sidebar", () => {
 
   it("describes background refresh in the control tooltip without extra status text", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions({ loading: true })}
         showArchived={false}
@@ -1415,7 +1416,7 @@ describe("Sidebar", () => {
 
   it("hides the external-session refresh control in archive mode", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={true}
@@ -1429,7 +1430,7 @@ describe("Sidebar", () => {
   it("opens Archive as a secondary destination instead of an equal tab", () => {
     const onToggleArchived = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         onToggleArchived={onToggleArchived}
@@ -1449,7 +1450,7 @@ describe("Sidebar", () => {
   it("renders Archive as a visibly read-only secondary destination", () => {
     const onToggleArchived = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         onToggleArchived={onToggleArchived}
@@ -1467,7 +1468,7 @@ describe("Sidebar", () => {
 
   it("uses compact agent icons without repeating agent names", () => {
     const sameAgent = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1479,7 +1480,7 @@ describe("Sidebar", () => {
     expect(sameAgent.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(2);
 
     const mixedAgent = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         nativeSessions={nativeSessions()}
         showArchived={false}
@@ -1494,7 +1495,7 @@ describe("Sidebar", () => {
 
   it("renders task-list errors instead of empty copy", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         nativeSessions={nativeSessions()}
         showArchived={false}
         taskListError="Unable to load tasks from App Server"
@@ -1508,27 +1509,9 @@ describe("Sidebar", () => {
     ]);
   });
 
-  it("loads the next task-history page with the current cursor", () => {
-    const onLoadNativeSessions = vi.fn();
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({ nextCursor: "cursor_2" })}
-        onLoadNativeSessions={onLoadNativeSessions}
-        showArchived={false}
-        tasks={[]}
-      />,
-    );
-
-    act(() => tree.root.findByProps({ className: "session-more" }).props.onClick());
-
-    expect(tree.root.findByProps({ className: "session-more" }).children.join("")).toBe("Load more tasks");
-    expect(onLoadNativeSessions).toHaveBeenCalledWith("cursor_2");
-  });
-
   it("shows task loading instead of a false empty state before navigation arrives", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         loadingTasks
         nativeSessions={nativeSessions()}
@@ -1542,7 +1525,7 @@ describe("Sidebar", () => {
 
   it("keeps an existing Task list free of loading copy while another Task opens", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
         loadingTasks
         nativeSessions={nativeSessions()}
@@ -1555,347 +1538,10 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByType(SidebarTaskRow)).toHaveLength(1);
   });
 
-  it("labels task-history pagination as search-specific while filtering", () => {
+  it("renders the groups App Server sends in its order, including empty Projects", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({ nextCursor: "cursor_2" })}
-        searchQuery="missing task"
-        showArchived={false}
-        tasks={[]}
-      />,
-    );
-
-    expect(tree.root.findByProps({ className: "session-more" }).children.join("")).toBe("Search more tasks");
-  });
-
-  it("sorts flat task and native-session rows together by last activity", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_recent",
-              title: "Recent session",
-              last_activity: "2026-05-22T00:03:00.000Z",
-              updated_at: "2026-05-22T00:03:00.000Z",
-            }),
-            nativeSession({
-              session_id: "session_old",
-              title: "Old session",
-              last_activity: "2026-05-22T00:01:00.000Z",
-              updated_at: "2026-05-22T00:01:00.000Z",
-            }),
-          ],
-        })}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_middle",
-            title: "Middle task",
-            last_activity: "2026-05-22T00:02:00.000Z",
-          }),
-          task({
-            task_id: "task_newest",
-            title: "Newest task",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Newest task", "Recent session", "Middle task", "Old session"]);
-  });
-
-  it("puts in-progress flat task rows before newer idle rows and native sessions", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_recent",
-              title: "Recent session",
-              last_activity: "2026-05-22T00:05:00.000Z",
-              updated_at: "2026-05-22T00:05:00.000Z",
-            }),
-          ],
-        })}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_idle_recent",
-            title: "Recent idle task",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-          task({
-            task_id: "task_active_old",
-            status: "active",
-            title: "Older active task",
-            last_activity: "2026-05-22T00:01:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Older active task", "Recent session", "Recent idle task"]);
-  });
-
-  it("sorts a task held by background work with in-progress rows", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({ items: [] })}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_idle_recent",
-            title: "Recent idle task",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-          task({
-            task_id: "task_background_old",
-            status: "background",
-            title: "Older background task",
-            last_activity: "2026-05-22T00:01:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Older background task", "Recent idle task"]);
-  });
-
-  it("puts pinned flat rows before live unpinned tasks and native sessions", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_newest",
-              title: "Newest session",
-              last_activity: "2026-05-22T00:05:00.000Z",
-            }),
-          ],
-        })}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_pinned_idle",
-            pinned: true,
-            title: "Pinned idle",
-            last_activity: "2026-05-22T00:02:00.000Z",
-          }),
-          task({
-            task_id: "task_pinned_active",
-            pinned: true,
-            status: "active",
-            title: "Pinned active",
-            last_activity: "2026-05-22T00:01:00.000Z",
-          }),
-          task({
-            task_id: "task_unpinned_active",
-            status: "active",
-            title: "Unpinned active",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual([
-      "Pinned active",
-      "Pinned idle",
-      "Unpinned active",
-      "Newest session",
-    ]);
-  });
-
-  it("sorts rows by parsed activity time when timestamp formats differ", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_old_iso",
-              title: "Old ISO session",
-              last_activity: "2026-06-30T00:00:00.000Z",
-              updated_at: "2026-06-30T00:00:00.000Z",
-            }),
-          ],
-        })}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_recent_epoch",
-            title: "Recent epoch task",
-            last_activity: "1782781200000",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Recent epoch task", "Old ISO session"]);
-  });
-
-  it("does not treat Task record update time as Task activity", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_missing_activity",
-            title: "Missing activity",
-            last_activity: undefined as never,
-            updated_at: "2026-05-22T00:05:00.000Z",
-          }),
-          task({
-            task_id: "task_old",
-            title: "Old task",
-            last_activity: "2026-05-22T00:01:00.000Z",
-            updated_at: "2026-05-22T00:01:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Old task", "Missing activity"]);
-  });
-
-  it("disables load-more while native sessions are loading or adopting", () => {
-    const loadingTree = render(
-      <Sidebar
-        nativeSessions={nativeSessions({ loading: true, nextCursor: "cursor_2" })}
-        showArchived={false}
-        tasks={[]}
-        {...sidebarCallbacks()}
-      />,
-    );
-    const adoptingTree = render(
-      <Sidebar
-        nativeSessions={nativeSessions({ adoptingSessionId: "session_1", nextCursor: "cursor_2" })}
-        showArchived={false}
-        tasks={[]}
-        {...sidebarCallbacks()}
-      />,
-    );
-
-    expect(loadingTree.root.findByProps({ className: "session-more" }).props.disabled).toBe(true);
-    expect(adoptingTree.root.findByProps({ className: "session-more" }).props.disabled).toBe(true);
-  });
-
-  it("keeps project groups expanded by default, resets on re-expand, and reveals ten more rows", () => {
-    const tasks = Array.from({ length: 32 }, (_, index) =>
-      task({
-        task_id: `task_${index + 1}`,
-        project_id: "project_1",
-        project_label: "OpenAIDE",
-        title: `Task ${index + 1}`,
-      }),
-    );
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={tasks}
-      />,
-    );
-
-    expect(taskRows(tree)).toHaveLength(20);
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(true);
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props).toMatchObject({
-      "aria-hidden": true,
-      inert: true,
-    });
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(taskRows(tree)).toHaveLength(20);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Show 10 more");
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-
-    expect(taskRows(tree)).toHaveLength(30);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Show 2 more");
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-
-    expect(taskRows(tree)).toHaveLength(32);
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(taskRows(tree)).toHaveLength(20);
-  });
-
-  it("hides idle history when its project group is collapsed", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        activeTaskId="task_6"
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={Array.from({ length: 6 }, (_, index) =>
-          task({
-            task_id: `task_${index + 1}`,
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: `Task ${index + 1}`,
-            last_activity: `2026-05-22T00:0${index}:00.000Z`,
-          }),
-        )}
-      />,
-    );
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props).toMatchObject({
-      "aria-hidden": true,
-      inert: true,
-    });
-  });
-
-  it("uses project pagination instead of global native-session pagination in grouped mode", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={15}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({
-          items: [nativeSession({ session_id: "session_1", title: "Existing native session" })],
-          nextCursor: "cursor_2",
-        })}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[]}
-      />,
-    );
-
-    expect(tree.root.findAllByProps({ className: "session-more" })).toHaveLength(0);
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-
-    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
-    expect(tree.root.findAllByProps({ className: "session-more" })).toHaveLength(0);
-  });
-
-  it("renders backend-known projects even when they do not have tasks yet", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         projects={[
           { projectId: "project_1", label: "OpenAIDE" },
@@ -1909,55 +1555,14 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "empty-list" })).toHaveLength(0);
     expect(
       tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
-    ).toEqual(["No tasks yet", "OpenAIDE"]);
+    ).toEqual(["OpenAIDE", "No tasks yet"]);
     expect(tree.root.findAllByProps({ className: "project-task-group-new" })).toHaveLength(0);
-  });
-
-  it("shows every project group without a separate project limit", () => {
-    const projects = Array.from({ length: 7 }, (_, index) => ({
-      projectId: `project_${index + 1}`,
-      label: `Project ${index + 1}`,
-    }));
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={projects}
-        showArchived={false}
-        tasks={[]}
-      />,
-    );
-
-    expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(7);
-    expect(tree.root.findAll((node) => node.type === "button" && node.children.join("").includes("more projects")))
-      .toHaveLength(0);
-  });
-
-  it("presents further pages of an unfinished project search as more searching", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={{ ...nativeSessions(), hasMoreProjectIds: ["project_1"] }}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        searchQuery="smoke"
-        showArchived={false}
-        tasks={[
-          task({ task_id: "task_1", project_id: "project_1", project_label: "OpenAIDE", title: "QA smoke test" }),
-        ]}
-      />,
-    );
-
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Search more tasks");
-    expect(tree.root.findByProps({ className: "project-task-group-counts" }).children.join("")).toBe("1 found so far");
   });
 
   it("filters empty project groups by project label while searching", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         projects={[
           { projectId: "project_1", label: "OpenAIDE" },
@@ -1977,9 +1582,8 @@ describe("Sidebar", () => {
 
   it("shows matching task rows while a project group is collapsed during search", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         showArchived={false}
@@ -1999,9 +1603,8 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
 
     act(() => tree.update(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         searchQuery="qa smoke"
@@ -2023,9 +1626,8 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(true);
 
     act(() => tree.update(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         showArchived={false}
@@ -2046,11 +1648,8 @@ describe("Sidebar", () => {
 
   it("renders native sessions inside the selected project group in grouped mode", () => {
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={15}
-        nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({
           items: [nativeSession({ session_id: "session_1", title: "Current session" })],
         })}
@@ -2073,374 +1672,11 @@ describe("Sidebar", () => {
     expect(group.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
   });
 
-  it("keeps older loaded native sessions reachable when recent local tasks fill a project group", () => {
-    const tasks = Array.from({ length: 16 }, (_, index) =>
-      task({
-        task_id: `task_${index + 1}`,
-        project_id: "project_1",
-        project_label: "OpenAIDE",
-        title: `Task ${index + 1}`,
-        last_activity: `2026-06-30T00:${String(index).padStart(2, "0")}:00.000Z`,
-      }),
-    );
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={15}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_1",
-              title: "Existing native session",
-              updated_at: "2026-06-29T00:00:00.000Z",
-            }),
-          ],
-        })}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={tasks}
-      />,
-    );
-
-    expect(localTaskRows(tree)).toHaveLength(15);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Show 2 more");
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
-
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
-    expect(localTaskRows(tree)).toHaveLength(16);
-  });
-
-  it("orders project groups by the newest task or native-session activity", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_newest",
-              title: "Newest session",
-              last_activity: "2026-05-22T00:05:00.000Z",
-              updated_at: "2026-05-22T00:05:00.000Z",
-            }),
-          ],
-        })}
-        projects={[
-          { projectId: "project_1", label: "OpenAIDE" },
-          { projectId: "project_2", label: "Other" },
-        ]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_other",
-            project_id: "project_2",
-            project_label: "Other",
-            title: "Other task",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(
-      tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
-    ).toEqual(["OpenAIDE", "Other"]);
-  });
-
-  it("does not let listed native-session activity reorder in-progress project groups", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({
-          items: [
-            nativeSession({
-              session_id: "session_heartbeat",
-              project_id: "project_1",
-              title: "Listed heartbeat",
-              last_activity: "2026-05-22T00:10:00.000Z",
-              updated_at: "2026-05-22T00:10:00.000Z",
-            }),
-          ],
-        })}
-        projects={[
-          { projectId: "project_1", label: "Older live" },
-          { projectId: "project_2", label: "Newer live" },
-        ]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_older_live",
-            project_id: "project_1",
-            project_label: "Older live",
-            status: "active",
-            title: "Older live task",
-            last_activity: "2026-05-22T00:01:00.000Z",
-          }),
-          task({
-            task_id: "task_newer_live",
-            project_id: "project_2",
-            project_label: "Newer live",
-            status: "active",
-            title: "Newer live task",
-            last_activity: "2026-05-22T00:04:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(
-      tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
-    ).toEqual(["Newer live", "Older live"]);
-  });
-
-  it("puts project groups with in-progress tasks before newer idle groups", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[
-          { projectId: "project_1", label: "OpenAIDE" },
-          { projectId: "project_2", label: "Other" },
-        ]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_active_old",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            status: "active",
-            title: "Older active task",
-            last_activity: "2026-05-22T00:01:00.000Z",
-          }),
-          task({
-            task_id: "task_idle_recent",
-            project_id: "project_2",
-            project_label: "Other",
-            title: "Recent idle task",
-            last_activity: "2026-05-22T00:05:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(
-      tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
-    ).toEqual(["OpenAIDE", "Other"]);
-  });
-
-  it("sorts active task rows by last activity instead of creation time", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_earlier",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            status: "active",
-            title: "Earlier active",
-            created_at: "2026-07-02T10:00:00.000Z",
-            last_activity: "2026-07-02T10:10:00.000Z",
-          }),
-          task({
-            task_id: "task_later",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            status: "active",
-            title: "Later active",
-            created_at: "2026-07-02T10:05:00.000Z",
-            last_activity: "2026-07-02T10:05:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Earlier active", "Later active"]);
-  });
-
-  it("keeps pinned rows and the selected task beyond the per-Project limit", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        activeTaskId="task_selected"
-        groupByProject={true}
-        maxTasksPerProject={2}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_pinned_new",
-            pinned: true,
-            project_id: "project_1",
-            title: "Pinned new",
-            last_activity: "2026-07-02T10:10:00.000Z",
-          }),
-          task({
-            task_id: "task_pinned_old",
-            pinned: true,
-            project_id: "project_1",
-            title: "Pinned old",
-            last_activity: "2026-07-02T10:05:00.000Z",
-          }),
-          task({
-            task_id: "task_selected",
-            project_id: "project_1",
-            status: "active",
-            title: "Selected unpinned",
-            last_activity: "2026-07-02T10:15:00.000Z",
-          }),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Pinned new", "Pinned old", "Selected unpinned"]);
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
-  });
-
-  it("does not let live rows use up a Project's history limit", () => {
-    const onLoadNativeSessions = vi.fn();
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={2}
-        nativeSessions={nativeSessions()}
-        onLoadNativeSessions={onLoadNativeSessions}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({ task_id: "running", project_id: "project_1", status: "active", title: "Running", last_activity: "2026-07-02T10:00:00.000Z" }),
-          task({ task_id: "waiting", project_id: "project_1", status: "waiting", title: "Waiting", last_activity: "2026-07-02T09:59:00.000Z" }),
-          task({ task_id: "unread", project_id: "project_1", unread: true, title: "Unread", last_activity: "2026-07-02T09:58:00.000Z" }),
-          ...[1, 2, 3, 4].map((index) => task({
-            task_id: `idle_${index}`,
-            project_id: "project_1",
-            title: `Idle ${index}`,
-            last_activity: `2026-07-02T09:0${index}:00.000Z`,
-          })),
-        ]}
-      />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Running", "Waiting", "Unread", "Idle 4", "Idle 3"]);
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-    expect(rowTitles(tree)).toEqual(["Running", "Waiting", "Unread", "Idle 4", "Idle 3", "Idle 2", "Idle 1"]);
-    // App Server demand counts every row the group now shows.
-    expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 7);
-  });
-
-  it("shows live rows plus three history rows per Project and keeps other Projects stable on collapse", () => {
-    const projectTasks = (projectId: string, label: string) => [
-      task({ task_id: `${projectId}_running`, project_id: projectId, status: "active", title: `${label} running` }),
-      ...[1, 2, 3, 4, 5].map((index) => task({
-        task_id: `${projectId}_idle_${index}`,
-        project_id: projectId,
-        title: `${label} idle ${index}`,
-        last_activity: `2026-07-02T09:0${index}:00.000Z`,
-      })),
-    ];
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[
-          { projectId: "project_a", label: "A" },
-          { projectId: "project_b", label: "B" },
-          { projectId: "project_c", label: "C" },
-        ]}
-        showArchived={false}
-        tasks={[...projectTasks("project_a", "A"), ...projectTasks("project_b", "B"), ...projectTasks("project_c", "C")]}
-      />,
-    );
-    const groupTitles = (label: string) => tree.root.findByProps({ "aria-label": label, className: "project-task-group" })
-      .findAll((node) => node.props.className === "task-title")
-      .map((node) => node.children.join(""));
-
-    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
-    act(() => tree.root.findByProps({ "aria-label": "A", className: "project-task-group" })
-      .findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(groupTitles("B")).toEqual(["B running", "B idle 5", "B idle 4", "B idle 3"]);
-    expect(groupTitles("C")).toEqual(["C running", "C idle 5", "C idle 4", "C idle 3"]);
-  });
-
-  it("keeps a Project the same size when an idle visible task opens", () => {
-    const tasks = [1, 2, 3, 4, 5].map((index) => task({
-      task_id: `idle_${index}`,
-      project_id: "project_1",
-      title: `Idle ${index}`,
-      last_activity: `2026-07-02T09:0${index}:00.000Z`,
-    }));
-    const sidebar = (activeTaskId?: string) => (
-      <Sidebar
-        {...sidebarCallbacks()}
-        activeTaskId={activeTaskId}
-        groupByProject={true}
-        maxTasksPerProject={3}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={tasks}
-      />
-    );
-    const tree = render(sidebar());
-    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3"]);
-
-    act(() => tree.update(sidebar("idle_4")));
-    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3"]);
-
-    // A task opened from outside the window, e.g. from search, is added rather than hidden.
-    act(() => tree.update(sidebar("idle_1")));
-    expect(rowTitles(tree)).toEqual(["Idle 5", "Idle 4", "Idle 3", "Idle 1"]);
-  });
-
-  it("keeps live rows visible while their Project group is collapsed", () => {
-    const tree = render(
-      <Sidebar
-        {...sidebarCallbacks()}
-        activeTaskId="selected"
-        groupByProject={true}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({ task_id: "running", project_id: "project_1", status: "active", title: "Running" }),
-          task({ task_id: "selected", project_id: "project_1", title: "Selected" }),
-          task({ task_id: "idle", project_id: "project_1", title: "Idle" }),
-        ]}
-      />,
-    );
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-
-    const live = tree.root.findByProps({ className: "project-task-group-live" });
-    expect(live.findAll((node) => node.props.className === "task-title").map((node) => node.children.join("")))
-      .toEqual(["Running", "Selected"]);
-    const collapsed = tree.root.findByProps({ className: "project-task-group-rows collapsed" });
-    expect(collapsed.props["aria-hidden"]).toBe(true);
-    expect(collapsed.findAll((node) => node.props.className === "task-title").map((node) => node.children.join("")))
-      .toEqual(["Idle"]);
-  });
-
   it("uses the primary new task action instead of per-project create controls", () => {
     const onNewTask = vi.fn();
     const tree = render(
-      <Sidebar
+      <TestSidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
         nativeSessions={nativeSessions()}
         onNewTask={onNewTask}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
@@ -2460,134 +1696,190 @@ describe("Sidebar", () => {
 
     expect(onNewTask).toHaveBeenCalledWith();
   });
+});
 
-  it("limits loaded project task and native-session rows together", () => {
-    const onLoadNativeSessions = vi.fn();
-    const sessions = Array.from({ length: 16 }, (_, index) =>
-      nativeSession({
-        session_id: `session_${index + 1}`,
-        title: `Session ${index + 1}`,
-        updated_at: `2026-05-22T00:${String(index).padStart(2, "0")}:00.000Z`,
-      }),
-    );
+describe("Sidebar Navigation view", () => {
+  const rows = (count: number, prefix = "task") =>
+    Array.from({ length: count }, (_, index) => taskRow(task({
+      task_id: `${prefix}_${index}`,
+      title: `${prefix} ${index}`,
+      project_id: "project_1",
+    })));
+
+  it("renders rows in the order App Server sent them, without sorting", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", [
+      taskRow(task({ task_id: "task_old", title: "Old", last_activity: "2020-01-01T00:00:00.000Z" })),
+      taskRow(task({ task_id: "task_new", title: "New", last_activity: "2026-01-01T00:00:00.000Z" })),
+    ]);
+    const tree = render(<Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} showArchived={false} />);
+
+    expect(rowTitles(tree)).toEqual(["Old", "New"]);
+  });
+
+  it("raises the Project's history limit by one page from Show more and shows the hidden count", () => {
+    const onSetProjectHistoryLimit = vi.fn();
+    const group = navigationGroup("project_1", "OpenAIDE", rows(3), { total: 12, hidden: 9 });
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={15}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({
-          items: sessions,
-          hasMoreProjectIds: ["project_1"],
-        })}
-        onLoadNativeSessions={onLoadNativeSessions}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        historyLimit={3}
+        nativeSessions={navigationState([group])}
+        onSetProjectHistoryLimit={onSetProjectHistoryLimit}
         showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "Recent task",
-            last_activity: "2026-05-22T00:06:00.000Z",
-          }),
-        ]}
       />,
     );
 
-    expect(localTaskRows(tree)).toHaveLength(1);
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(14);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Show 2 more");
-    expect(taskRows(tree)).toHaveLength(15);
+    expect(rowTitles(tree)).toHaveLength(3);
+    const more = tree.root.findByProps({ className: "project-task-more" });
+    expect(textContent(tree)).toMatch(/Show .*more/);
+    act(() => more.props.onClick());
 
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-
-    expect(localTaskRows(tree)).toHaveLength(1);
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(16);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Show more");
-    expect(taskRows(tree)).toHaveLength(17);
-    expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 17);
+    expect(onSetProjectHistoryLimit).toHaveBeenCalledTimes(1);
+    const [projectId, limit] = onSetProjectHistoryLimit.mock.calls[0]!;
+    expect(projectId).toBe("project_1");
+    expect(limit).toBeGreaterThan(3);
   });
 
-  it("keeps Show more stable during discovery and removes it when the Project is exhausted", () => {
-    const sidebar = (state: NativeSessionsState) => (
-      <Sidebar
-        {...sidebarCallbacks()}
-        groupByProject={true}
-        nativeSessions={state}
-        projects={[
-          { projectId: "project_1", label: "Ready" },
-          { projectId: "project_2", label: "Added" },
-        ]}
-        showArchived={false}
-        tasks={[]}
-      />
-    );
-    const tree = render(sidebar(nativeSessions({
-      hasMoreProjectIds: ["project_2"],
-      loadingProjectIds: ["project_2"],
-    })));
+  it("offers Show more while discovery has not covered the Project even with nothing hidden", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", rows(2), { undiscovered: true });
+    const tree = render(<Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} showArchived={false} />);
 
-    const ready = tree.root.findByProps({ "aria-label": "Ready" });
-    const added = tree.root.findByProps({ "aria-label": "Added" });
-    expect(ready.findAllByProps({ className: "project-task-group-counts" })).toHaveLength(0);
-    expect(added.findByProps({ className: "project-task-group-counts" }).children.join(""))
-      .toBe("Loading…");
-    const loadMore = added.findByProps({ className: "project-task-more" });
-    expect(loadMore.children.join("")).toBe("Show more");
-    expect(loadMore.props.disabled).toBe(true);
-
-    act(() => tree.update(sidebar(nativeSessions())));
-
-    expect(tree.root.findByProps({ "aria-label": "Added" })
-      .findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(1);
   });
 
-  it("reveals exactly the numeric task count when a prefetched page arrives", () => {
-    const onLoadNativeSessions = vi.fn();
-    const sessions = Array.from({ length: 31 }, (_, index) =>
-      nativeSession({
-        session_id: `session_${index + 1}`,
-        title: `Session ${index + 1}`,
-        updated_at: `2026-05-22T00:${String(index).padStart(2, "0")}:00.000Z`,
-      }),
-    );
-    const sidebar = (items: AgentListedSession[], nextCursor: string) => (
+  it("offers no Show more once everything is shown and discovered", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", rows(2));
+    const tree = render(<Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} showArchived={false} />);
+
+    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+  });
+
+  it("collapses a Project by sending history limit 0 and expands it by clearing the override", () => {
+    const onSetProjectHistoryLimit = vi.fn();
+    const group = navigationGroup("project_1", "OpenAIDE", rows(2));
+    const render1 = (overrides: Record<string, number>) => (
       <Sidebar
         {...sidebarCallbacks()}
-        groupByProject={true}
-        maxTasksPerProject={15}
-        nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({ items, nextCursor })}
-        onLoadNativeSessions={onLoadNativeSessions}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        historyLimitOverrides={overrides}
+        nativeSessions={navigationState([group])}
+        onSetProjectHistoryLimit={onSetProjectHistoryLimit}
         showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "Recent task",
-            last_activity: "2026-05-22T00:40:00.000Z",
-          }),
-        ]}
       />
     );
-    const tree = render(sidebar(sessions.slice(0, 16), "cursor_2"));
+    const tree = render(render1({}));
+    const toggle = () => tree.root.findAllByType("button").find((button) =>
+      typeof button.props["aria-expanded"] === "boolean")!;
 
-    expect(taskRows(tree)).toHaveLength(15);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Show 2 more");
+    act(() => toggle().props.onClick());
+    expect(onSetProjectHistoryLimit).toHaveBeenLastCalledWith("project_1", 0);
 
-    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
-    act(() => tree.update(sidebar(sessions, "cursor_3")));
+    act(() => tree.update(render1({ project_1: 0 })));
+    act(() => toggle().props.onClick());
+    expect(onSetProjectHistoryLimit).toHaveBeenLastCalledWith("project_1", undefined);
+  });
 
-    expect(taskRows(tree)).toHaveLength(17);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Show 10 more");
+  it("keeps live rows visible while their Project is collapsed and hides idle rows", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", [
+      taskRow(task({ task_id: "task_live", title: "Live", status: "active" }), true),
+      taskRow(task({ task_id: "task_idle", title: "Idle" })),
+    ]);
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={navigationState([group])}
+        showArchived={false}
+      />,
+    );
+    expect(rowTitles(tree)).toEqual(["Live", "Idle"]);
+
+    act(() => tree.root.findAllByType("button").find((button) =>
+      typeof button.props["aria-expanded"] === "boolean")!.props.onClick());
+
+    const collapsed = tree.root.findByProps({ className: "project-task-group-rows collapsed" });
+    expect(collapsed.props.inert).toBe(true);
+    expect(collapsed.findAll((node) => node.props.className === "task-title").map((node) => node.children.join("")))
+      .toEqual(["Idle"]);
+  });
+
+  it("shows the idle open Task even when it is past the limit", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", [
+      taskRow(task({ task_id: "task_open", title: "Open" })),
+    ], { hidden: 5, total: 6 });
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        activeTaskId="task_open"
+        nativeSessions={navigationState([group])}
+        showArchived={false}
+      />,
+    );
+
+    expect(rowTitles(tree)).toEqual(["Open"]);
+  });
+
+  it("filters only the loaded rows while searching", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", [
+      taskRow(task({ task_id: "task_a", title: "Release plan" })),
+      taskRow(task({ task_id: "task_b", title: "Other" })),
+    ], { hidden: 4, total: 6 });
+    const tree = render(
+      <Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} searchQuery="release" showArchived={false} />,
+    );
+
+    expect(rowTitles(tree)).toEqual(["Release plan"]);
+  });
+
+  it("shows a refreshing state for a group still being discovered", () => {
+    const group = navigationGroup("project_1", "OpenAIDE", [], { undiscovered: true, discovery: "loading" });
+    const tree = render(<Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} showArchived={false} />);
+
+    expect(rowTitles(tree)).toEqual([]);
+    expect(tree.root.findAllByProps({ className: "project-task-group" })).toHaveLength(1);
   });
 });
+
+type TestSidebarProps = Omit<React.ComponentProps<typeof Sidebar>, "historyLimit" | "historyLimitOverrides" | "onSetProjectHistoryLimit" | "onRefreshNavigation" | "nativeSessions"> & {
+  tasks?: TaskSummary[];
+  nativeSessions: NativeSessionsState;
+  historyLimit?: number;
+  historyLimitOverrides?: Record<string, number>;
+  onSetProjectHistoryLimit?: (projectId: string, limit: number | undefined) => void;
+  onRefreshNavigation?: () => void;
+};
+
+/**
+ * Renders the Sidebar from the rows a test lists, in the order given: App Server owns ordering
+ * and limiting, so the Sidebar must show them unchanged. Tasks and Native Sessions go to the
+ * group of their Project; a Task that is not inactive is a live row.
+ */
+function TestSidebar({ tasks = [], nativeSessions: sessions, projects = [], ...props }: TestSidebarProps) {
+  const groups = new Map<string, ReturnType<typeof navigationGroup>>();
+  const groupFor = (projectId: string, label: string) => {
+    let group = groups.get(projectId);
+    if (!group) {
+      group = navigationGroup(projectId, label, []);
+      groups.set(projectId, group);
+    }
+    return group;
+  };
+  for (const project of projects) groupFor(project.projectId, project.label);
+  for (const item of tasks) {
+    groupFor(item.project_id ?? "project_1", item.project_label ?? "Project").rows.push(taskRow(item, item.status !== "inactive"));
+  }
+  for (const session of sessions.items) groupFor(session.project_id ?? "project_1", "Project").rows.push(sessionRow(session));
+  const all = [...groups.values()].map((group) => ({ ...group, total: group.rows.length }));
+  return (
+    <Sidebar
+      historyLimit={20}
+      historyLimitOverrides={{}}
+      onRefreshNavigation={() => undefined}
+      onSetProjectHistoryLimit={() => undefined}
+      projects={projects}
+      {...props}
+      nativeSessions={{ ...sessions, groups: sessions.groups.length > 0 ? sessions.groups : all }}
+    />
+  );
+}
 
 function taskRows(tree: ReturnType<typeof render>) {
   return tree.root.findAll((node) =>
@@ -2636,7 +1928,10 @@ function sidebarCallbacks() {
     nativeSessionAgentName: "Codex",
     onArchiveTask: vi.fn(),
     onArchiveNativeSession: vi.fn(),
-    onLoadNativeSessions: vi.fn(),
+    onRefreshNavigation: vi.fn(),
+    historyLimit: 20,
+    historyLimitOverrides: {},
+    onSetProjectHistoryLimit: vi.fn(),
     onNewTask: vi.fn(),
     onOpenNativeSession: vi.fn(),
     onOpenTask: vi.fn(),
@@ -2660,6 +1955,7 @@ function nativeSessionRowCallbacks() {
 function nativeSessions(overrides: Partial<NativeSessionsState> = {}): NativeSessionsState {
   return {
     items: [],
+    groups: [],
     loaded: true,
     loading: false,
     ...overrides,

@@ -3,10 +3,10 @@ use ts_rs::TS;
 
 use crate::client::SettingsSection;
 use crate::events::TaskChatChange;
-use crate::ids::{EventCursor, ProjectId, SubagentId, TaskId, WorktreeRepositoryId};
+use crate::ids::{EventCursor, SubagentId, TaskId, WorktreeRepositoryId};
 use crate::snapshot::{
     AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, SubagentCatalogSnapshot,
-    SubagentHistorySnapshot, TaskNavigationSnapshot, TaskSnapshot,
+    SubagentHistorySnapshot, TaskSnapshot,
 };
 use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
@@ -62,8 +62,6 @@ pub enum SubscriptionScope {
     TaskNavigation {
         #[serde(default)]
         section: TaskNavigationSection,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        project_ids: Option<Vec<ProjectId>>,
     },
     Task {
         task_id: TaskId,
@@ -106,9 +104,6 @@ pub enum SubscriptionSnapshot {
     },
     Settings {
         settings: SettingsSnapshot,
-    },
-    TaskNavigation {
-        navigation: TaskNavigationSnapshot,
     },
     /// Every current Task field, with the Chat as `chatSync` says.
     Task {

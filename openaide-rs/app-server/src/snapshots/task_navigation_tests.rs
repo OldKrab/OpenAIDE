@@ -3,6 +3,7 @@ use openaide_app_server_protocol::ids::ProjectId;
 use crate::native_sessions::catalog::{
     NativeSessionCatalog, NativeSessionObservation, NativeSessionRef,
 };
+use crate::navigation::{NavigationSource, SourceGroup};
 use crate::projects::project_id_for_workspace;
 use crate::protocol::model::{IsolationKind, TaskStatus};
 use crate::storage::records::{
@@ -89,7 +90,7 @@ fn projects_durable_task_attention_into_navigation() {
 }
 
 #[test]
-fn projects_visible_task_records_into_navigation_snapshot() {
+fn projects_visible_task_records_into_navigation_groups() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -111,22 +112,19 @@ fn projects_visible_task_records_into_navigation_snapshot() {
         .snapshot(TaskNavigationSection::Tasks, None)
         .unwrap();
 
-    assert_eq!(task_entries(&snapshot).len(), 2);
-    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-newer");
+    let tasks = task_entries(&snapshot);
+    assert_eq!(tasks.len(), 2);
+    let newer = tasks
+        .iter()
+        .find(|task| task.task_id.as_str() == "task-newer")
+        .expect("the newer Task is a member");
     assert_eq!(
-        task_entries(&snapshot)[0]
-            .title
-            .as_ref()
-            .map(|title| title.value.as_str()),
+        newer.title.as_ref().map(|title| title.value.as_str()),
         Some("New")
     );
-    assert_eq!(task_entries(&snapshot)[0].status, ProtocolTaskStatus::Idle);
-    assert_eq!(task_entries(&snapshot)[0].agent_id.as_str(), "agent-a");
-    assert!(!task_entries(&snapshot)[0].has_messages);
-    assert!(task_entries(&snapshot)[0]
-        .project_id
-        .as_str()
-        .starts_with("project-"));
+    assert_eq!(newer.status, ProtocolTaskStatus::Idle);
+    assert_eq!(newer.agent_id.as_str(), "agent-a");
+    assert!(newer.project_id.as_str().starts_with("project-"));
 }
 
 #[test]
@@ -153,68 +151,17 @@ fn navigation_combines_durable_tasks_and_persisted_unadopted_sessions() {
         .snapshot(TaskNavigationSection::Tasks, None)
         .unwrap();
 
+    // Row order belongs to the Navigation owner's one comparator, not to the source.
     assert_eq!(snapshot.groups[0].entries.len(), 2);
-    assert!(matches!(
-        &snapshot.groups[0].entries[0],
+    assert!(snapshot.groups[0].entries.iter().any(|entry| matches!(
+        entry,
         TaskNavigationEntry::NativeSession { session }
             if session.reference.session_id == "native-new" && session.title.as_deref() == Some("Unadopted")
-    ));
-    assert!(matches!(
-        &snapshot.groups[0].entries[1],
+    )));
+    assert!(snapshot.groups[0].entries.iter().any(|entry| matches!(
+        entry,
         TaskNavigationEntry::Task { task } if task.task_id.as_str() == "task-owned"
-    ));
-}
-
-#[test]
-fn navigation_orders_pins_before_live_tasks_and_native_sessions() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut pinned_idle = task_record("pinned-idle", "Pinned idle", "2026-01-02T00:00:00Z");
-    pinned_idle.pinned = true;
-    let mut pinned_active = task_record("pinned-active", "Pinned active", "2026-01-01T00:00:00Z");
-    pinned_active.pinned = true;
-    pinned_active.status = TaskStatus::Active;
-    let mut unpinned_active =
-        task_record("unpinned-active", "Unpinned active", "2026-01-04T00:00:00Z");
-    unpinned_active.status = TaskStatus::Active;
-    let project_id = project_id_for_workspace(&pinned_idle.workspace_root);
-    store.write_task(&pinned_idle).unwrap();
-    store.write_task(&pinned_active).unwrap();
-    store.write_task(&unpinned_active).unwrap();
-    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
-    catalog
-        .record_page(
-            project_id.as_str(),
-            &pinned_idle.workspace_root,
-            vec![NativeSessionObservation {
-                reference: NativeSessionRef::new("agent-a", "native-newest"),
-                title: Some("Newest Native Session".to_string()),
-                last_activity: Some("2026-01-05T00:00:00Z".to_string()),
-            }],
-        )
-        .unwrap();
-
-    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
-        .snapshot(TaskNavigationSection::Tasks, None)
-        .unwrap();
-    let identities = snapshot.groups[0]
-        .entries
-        .iter()
-        .map(|entry| match entry {
-            TaskNavigationEntry::Task { task } => task.task_id.as_str(),
-            TaskNavigationEntry::NativeSession { session } => session.reference.session_id.as_str(),
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        identities,
-        vec![
-            "pinned-active",
-            "pinned-idle",
-            "unpinned-active",
-            "native-newest"
-        ]
-    );
+    )));
 }
 
 #[test]
@@ -273,6 +220,30 @@ fn navigation_uses_task_record_message_version_without_reading_chat_files() {
 
     assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
     assert!(task_entries(&snapshot)[0].has_messages);
+}
+
+#[test]
+fn a_task_nobody_has_written_to_is_not_a_member() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut empty = task_record("task-empty", "Empty", "2026-01-01T00:00:00.000Z");
+    empty.message_history_version = 0;
+    store.write_task(&empty).unwrap();
+    store
+        .write_task(&task_record(
+            "task-written",
+            "Written",
+            "2026-01-02T00:00:00.000Z",
+        ))
+        .unwrap();
+
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
+
+    let tasks = task_entries(&snapshot);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].task_id.as_str(), "task-written");
 }
 
 #[test]
@@ -440,7 +411,33 @@ fn storage_read_failure_is_isolated_from_navigation() {
     assert!(task_entries(&snapshot).is_empty());
 }
 
-fn task_entries(snapshot: &TaskNavigationSnapshot) -> Vec<&TaskSummary> {
+/// The source's groups, shaped like the old snapshot so the assertions read the same.
+struct NavigationGroups {
+    groups: Vec<SourceGroup>,
+}
+
+trait GroupsForTest {
+    fn snapshot(
+        &self,
+        section: TaskNavigationSection,
+        projects: Option<&[ProjectId]>,
+    ) -> Result<NavigationGroups, ProtocolError>;
+}
+
+impl GroupsForTest for TaskNavigationStore {
+    fn snapshot(
+        &self,
+        section: TaskNavigationSection,
+        projects: Option<&[ProjectId]>,
+    ) -> Result<NavigationGroups, ProtocolError> {
+        let projects = projects.map(|projects| projects.iter().cloned().collect::<HashSet<_>>());
+        Ok(NavigationGroups {
+            groups: self.groups(section, projects.as_ref())?,
+        })
+    }
+}
+
+fn task_entries(snapshot: &NavigationGroups) -> Vec<&TaskSummary> {
     snapshot
         .groups
         .iter()
@@ -477,7 +474,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         ),
         status: TaskStatus::Inactive,
         task_version: 1,
-        message_history_version: 0,
+        message_history_version: 1,
         unread: false,
         pinned: false,
         attention: None,

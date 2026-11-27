@@ -300,7 +300,7 @@ fn app_server_handoff_registers_vscode_workspace_project_without_task_history() 
         auth_token,
         "vscode-empty-workspace-client",
     );
-    assert!(navigation["groups"][0]["entries"]
+    assert!(navigation["groups"][0]["order"]
         .as_array()
         .expect("task navigation")
         .is_empty());
@@ -447,8 +447,8 @@ fn app_server_handoff_reinitialize_home_lists_the_current_task_after_send() {
         .expect("task navigation");
     let listed = tasks
         .iter()
-        .flat_map(|group| group["entries"].as_array().into_iter().flatten())
-        .filter_map(|entry| entry.get("task"))
+        .flat_map(|group| group["rows"].as_object().into_iter().flatten())
+        .filter_map(|(_, row)| row["entry"].get("task"))
         .find(|task| task["taskId"] == task_id)
         .expect("created task is listed after reload");
     assert_eq!(listed["projectId"], project_id);
@@ -654,27 +654,30 @@ fn post_local_http_initialize(endpoint_url: &str, auth_token: &str, client_id: &
     initialized
 }
 
+/// Subscribes the Tasks view and returns its baseline frame. A frame for the subscription's own
+/// discovery may precede the reply, so the reply is found by its id.
 fn subscribe_task_navigation(
     endpoint_url: &str,
     auth_token: &str,
     client_id: &str,
 ) -> Value {
-    post_local_http_json(
+    let messages = post_local_http_json(
         endpoint_url,
         auth_token,
         client_id,
         json!({
             "jsonrpc": "2.0",
             "id": "subscribe-task-navigation",
-            "method": "state/subscribe",
-            "params": {
-                "scope": {
-                    "kind": "taskNavigation",
-                    "section": "tasks"
-                }
-            }
+            "method": "navigation/subscribe",
+            "params": { "section": "tasks", "historyLimit": 20 }
         }),
-    )[0]["result"]["result"]["snapshot"]["navigation"]
+    );
+    messages
+        .as_array()
+        .expect("response batch")
+        .iter()
+        .find(|message| message["id"] == "subscribe-task-navigation")
+        .expect("navigation/subscribe reply")["result"]["result"]["frame"]
         .clone()
 }
 

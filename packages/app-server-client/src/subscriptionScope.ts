@@ -27,9 +27,7 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
     case "settings":
       return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
     case "taskNavigation":
-      return right.kind === "taskNavigation"
-        && left.section === right.section
-        && normalizedProjectIds(left.projectIds) === normalizedProjectIds(right.projectIds);
+      return right.kind === "taskNavigation" && left.section === right.section;
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
     case "subagentCatalog":
@@ -106,18 +104,7 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
     case "settings":
       return payload.kind === "snapshotReplaced";
     case "taskNavigation":
-      if (payload.kind === "snapshotReplaced") return true;
-      if (payload.kind === "refreshStateChanged") return scope.section === "tasks";
-      if (payload.kind === "navigationReplaced") return payload.navigation.section === scope.section;
-      if (payload.kind === "projectEntriesReplaced") {
-        return payload.section === scope.section && projectSelected(scope.projectIds, payload.projectId);
-      }
-      return payload.kind === "taskUpdated"
-        && projectSelected(scope.projectIds, payload.projectId)
-        && (
-          (scope.section === "tasks" && payload.task.lifecycle === "open")
-          || (scope.section === "archive" && payload.task.lifecycle === "archived")
-        );
+      return payload.kind === "navigationFrame" && payload.frame.section === scope.section;
     case "task":
       return (
         payload.kind === "snapshotReplaced" ||
@@ -153,15 +140,4 @@ function taskContentRemoved(payload: AppServerEventPayload, taskId: string): boo
 
 function normalizeOptional(value: string | null | undefined): string | undefined {
   return value ?? undefined;
-}
-
-function normalizedProjectIds(value: string[] | null | undefined): string {
-  return value?.join("\u0000") ?? "*";
-}
-
-function projectSelected(
-  selected: string[] | null | undefined,
-  projectId: string,
-): boolean {
-  return selected === null || selected === undefined || selected.includes(projectId);
 }

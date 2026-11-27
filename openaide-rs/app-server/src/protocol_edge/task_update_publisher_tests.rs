@@ -2,8 +2,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange};
-use openaide_app_server_protocol::ids::{MessageId, ProjectId};
-use openaide_app_server_protocol::snapshot::TaskNavigationRefreshState;
+use openaide_app_server_protocol::ids::MessageId;
 use serde_json::{json, Value};
 
 use super::*;
@@ -15,28 +14,13 @@ const NEVER_SLOW: Duration = Duration::MAX;
 const ALWAYS_SLOW: Duration = Duration::ZERO;
 
 #[test]
-fn queued_navigation_invalidations_publish_once_per_target_at_their_last_position() {
+fn queued_navigation_wakes_publish_once_since_one_flush_covers_every_mark() {
     let run = run_queued(
-        vec![
-            entries("project-1"),
-            chat("task-1", "first"),
-            entries("project-2"),
-            entries("project-1"),
-            refresh(TaskNavigationRefreshState::Refreshing),
-            refresh(TaskNavigationRefreshState::Idle),
-        ],
+        vec![wake(), chat("task-1", "first"), wake(), wake()],
         NEVER_SLOW,
     );
 
-    assert_eq!(
-        run.published,
-        vec![
-            chat("task-1", "first"),
-            entries("project-2"),
-            entries("project-1"),
-            refresh(TaskNavigationRefreshState::Idle),
-        ]
-    );
+    assert_eq!(run.published, vec![wake(), chat("task-1", "first")]);
 }
 
 #[test]
@@ -53,41 +37,8 @@ fn ordered_deltas_are_published_in_order_without_reducing_them_to_task_ids() {
 }
 
 #[test]
-fn committed_project_reprojection_satisfies_earlier_invalidations_of_that_project() {
-    let reprojection = TaskUpdate {
-        task_id: "task-1".to_string(),
-        revision: 3,
-        kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
-            changes: TaskChanges::default(),
-            tool_details: Vec::new(),
-            navigation: Some(CommittedNavigationChange::ProjectEntriesChanged {
-                project_id: ProjectId::from("project-1"),
-            }),
-        })),
-    };
-
-    let run = run_queued(
-        vec![
-            entries("project-1"),
-            entries("project-2"),
-            reprojection.clone(),
-        ],
-        NEVER_SLOW,
-    );
-
-    assert_eq!(run.published, vec![entries("project-2"), reprojection]);
-}
-
-#[test]
 fn coalesced_batch_reports_counts_and_protocol_lock_timing() {
-    let run = run_queued(
-        vec![
-            entries("project-1"),
-            chat("task-1", "chunk"),
-            entries("project-1"),
-        ],
-        NEVER_SLOW,
-    );
+    let run = run_queued(vec![wake(), chat("task-1", "chunk"), wake()], NEVER_SLOW);
 
     let batch = only_event(&run.logs, "task_update_batch_published");
     assert_eq!(batch["operation"], json!("task_update_publication"));
@@ -95,13 +46,10 @@ fn coalesced_batch_reports_counts_and_protocol_lock_timing() {
     assert_eq!(batch["count"], json!(3));
     assert_eq!(batch["published_count"], json!(2));
     assert_eq!(batch["coalesced_count"], json!(1));
-    // The fake gateway waits 5 ms per publication and holds Navigation longest.
+    // The fake gateway waits 5 ms per publication and holds the wake longest.
     assert_eq!(batch["wait_ms"], json!(10));
     assert_eq!(batch["max_hold_ms"], json!(40));
-    assert_eq!(
-        batch["update_kind"],
-        json!("navigation_project_entries_changed")
-    );
+    assert_eq!(batch["update_kind"], json!("navigation_dirty"));
     let stopped = only_event(&run.logs, "task_update_publisher_stopped");
     assert_eq!(stopped["outcome"], json!("closed"));
     assert_eq!(stopped["count"], json!(3));
@@ -161,13 +109,12 @@ fn run_queued(updates: Vec<TaskUpdate>, slow_batch: Duration) -> Run {
 fn fake_lock_timing(kind: &TaskUpdateKind) -> TaskUpdatePublication {
     // timing: data — reported lock timing values, never waited on.
     let held_ms = match kind {
-        TaskUpdateKind::NavigationProjectEntriesChanged { .. } => 40,
+        TaskUpdateKind::NavigationDirty => 40,
         _ => 2,
     };
     TaskUpdatePublication {
         lock_wait: Duration::from_millis(5),       // timing: data
         lock_held: Duration::from_millis(held_ms), // timing: data
-        projection: Duration::ZERO,
     }
 }
 
@@ -186,21 +133,11 @@ fn only_event<'a>(logs: &'a [(String, Value)], event: &str) -> &'a Value {
     }
 }
 
-fn entries(project_id: &str) -> TaskUpdate {
+fn wake() -> TaskUpdate {
     TaskUpdate {
         task_id: String::new(),
         revision: 0,
-        kind: TaskUpdateKind::NavigationProjectEntriesChanged {
-            project_id: ProjectId::from(project_id),
-        },
-    }
-}
-
-fn refresh(refresh: TaskNavigationRefreshState) -> TaskUpdate {
-    TaskUpdate {
-        task_id: String::new(),
-        revision: 0,
-        kind: TaskUpdateKind::NavigationRefreshStateChanged { refresh },
+        kind: TaskUpdateKind::NavigationDirty,
     }
 }
 

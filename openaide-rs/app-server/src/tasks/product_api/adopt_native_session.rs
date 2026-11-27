@@ -126,7 +126,7 @@ impl TaskProductApi {
                 );
                 if self.native_catalog.remove(&reference).unwrap_or(false) {
                     self.task_notifier
-                        .navigation_project_entries_changed(catalog_entry.project_id.clone());
+                        .navigation_project_changed(catalog_entry.project_id.clone());
                 }
                 return Err(protocol_error_from_runtime(error));
             }

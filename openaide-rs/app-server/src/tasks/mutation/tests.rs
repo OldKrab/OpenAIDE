@@ -6,9 +6,7 @@ use crate::protocol::model::{
 };
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
-use crate::task_events::{
-    CommittedNavigationChange, TaskUpdateKind, TaskUpdateNotifier, TaskUpdateReceiver,
-};
+use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::mutation::{
     TaskCommitOptions, TaskCommitOutcome, TaskCommitRejection, TaskMutationResult, TaskMutations,
 };
@@ -45,7 +43,7 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
-fn navigation_event_kind_follows_row_vs_collection_ownership() {
+fn a_row_changing_commit_names_its_project_for_the_navigation_owner() {
     let (_dir, store, mutations, notifications) = test_mutations(0);
     store.write_task(&task_record("task_navigation")).unwrap();
 
@@ -58,12 +56,14 @@ fn navigation_event_kind_follows_row_vs_collection_ownership() {
     let row_update = notifications.try_recv().unwrap();
     assert!(matches!(
         row_update.kind,
-        TaskUpdateKind::Changed(change)
-            if matches!(
-                change.navigation,
-                Some(CommittedNavigationChange::TaskUpdated(_))
-            )
+        TaskUpdateKind::Changed(change) if change.navigation.is_some()
     ));
+}
+
+#[test]
+fn a_lifecycle_change_also_names_its_project_for_the_navigation_owner() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_navigation")).unwrap();
 
     mutations
         .commit_existing_task("task_navigation", TaskCommitOptions::metadata(), |ctx| {
@@ -71,14 +71,10 @@ fn navigation_event_kind_follows_row_vs_collection_ownership() {
             Ok(TaskMutationResult::Changed)
         })
         .unwrap();
-    let collection_update = notifications.try_recv().unwrap();
+    let update = notifications.try_recv().unwrap();
     assert!(matches!(
-        collection_update.kind,
-        TaskUpdateKind::Changed(change)
-            if matches!(
-                change.navigation,
-                Some(CommittedNavigationChange::ProjectEntriesChanged { .. })
-            )
+        update.kind,
+        TaskUpdateKind::Changed(change) if change.navigation.is_some()
     ));
 }
 

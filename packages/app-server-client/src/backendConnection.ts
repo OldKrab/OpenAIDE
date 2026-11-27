@@ -1,8 +1,10 @@
+import type { NavigationReplica } from "./stateIngestionTaskNavigation.js";
 import type {
   AppServerEvent,
   ClientProbeResult,
   InitializeParams,
   InitializeResult,
+  NavigationViewParams,
   ProtocolMethod,
   RequestId,
   RequestMeta,
@@ -67,10 +69,13 @@ export type EntityReplicaSnapshot =
   | TaskReplicaSnapshot
   | ToolDetailReplicaSnapshot
   | SubagentHistoryReplicaSnapshot;
+/** A Navigation view's installed state: groups and rows exactly as App Server computed them. */
+export type NavigationReplicaSnapshot = { kind: "taskNavigation"; navigation: NavigationReplica };
 /** A scope replica's installed state. */
 export type ReplicaSnapshot =
   | Exclude<SubscriptionSnapshot, { kind: "task" | "toolDetail" | "subagentHistory" }>
-  | EntityReplicaSnapshot;
+  | EntityReplicaSnapshot
+  | NavigationReplicaSnapshot;
 export type AppServerStateObserver = {
   onSnapshot(snapshot: ReplicaSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
   onBaselineLost?(): void;
@@ -134,8 +139,16 @@ export interface BackendConnection {
 
 /** One logical initialized client session across replaceable physical transports. */
 export interface AppServerSession extends BackendConnection {
-  /** Owns one scope replica, including cursor-gap and transport-generation recovery. */
-  subscribeState(scope: SubscriptionScope, observer: AppServerStateObserver): BackendUnsubscribe;
+  /**
+   * Owns one scope replica, including cursor-gap and transport-generation recovery. A
+   * `taskNavigation` scope needs `view`, the parameters of its Navigation view; later changes go
+   * through `request(NAVIGATION_UPDATE, ...)`, which the session also remembers for recovery.
+   */
+  subscribeState(
+    scope: SubscriptionScope,
+    observer: AppServerStateObserver,
+    view?: NavigationViewParams,
+  ): BackendUnsubscribe;
   /** Reports the single request-readiness state for the logical session. */
   handleSessionStatus(handler: (status: AppServerSessionStatus) => void): BackendUnsubscribe;
 }

@@ -16,6 +16,9 @@ import {
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
   SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+  NAVIGATION_SUBSCRIBE,
+  NAVIGATION_UNSUBSCRIBE,
+  NAVIGATION_UPDATE,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   TASK_ACQUIRE,
@@ -23,7 +26,6 @@ import {
   TASK_COMPOSER_HISTORY,
   TASK_RELEASE,
   TASK_LIST,
-  TASK_NAVIGATION_LOAD_MORE,
   TASK_MARK_READ,
   TASK_OPEN,
   TASK_SEND,
@@ -72,7 +74,8 @@ vi.mock("../services/hostBridge", () => ({
       : ((method, params, meta) => {
           // Most controller fixtures predate state subscriptions and keep their
           // background scopes inert so behavior-specific request spies stay focused.
-          if (method === STATE_SUBSCRIBE) return new Promise(() => undefined);
+          if (method === NAVIGATION_SUBSCRIBE || method === STATE_SUBSCRIBE) return new Promise(() => undefined);
+          if (isNavigationMethod(method)) return Promise.resolve({});
           if (method === STATE_UNSUBSCRIBE) {
             return Promise.resolve({ scope: (params as { scope: unknown }).scope });
           }
@@ -293,6 +296,7 @@ describe("app controller mounted lifecycle", () => {
   it("adopts a direct Native Session route as soon as initialization completes", async () => {
     bootstrap = nativeSessionBootstrap("codex", "session_1");
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method === TASK_ADOPT_NATIVE_SESSION) {
@@ -327,6 +331,7 @@ describe("app controller mounted lifecycle", () => {
   it("keeps a direct Native Session route error after initialization advances the replica", async () => {
     bootstrap = nativeSessionBootstrap("codex", "missing_session");
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method === TASK_ADOPT_NATIVE_SESSION) {
@@ -361,6 +366,7 @@ describe("app controller mounted lifecycle", () => {
     bootstrap = nativeSessionBootstrap("codex", "busy_session");
     let adoptionAttempts = 0;
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       if (method === TASK_ADOPT_NATIVE_SESSION) {
@@ -410,7 +416,8 @@ describe("app controller mounted lifecycle", () => {
 
   it("opens a task without coupling navigation to Native Session listing", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, params?: unknown) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params as never);
       if (method === TASK_OPEN) return {};
       throw new Error(method);
     });
@@ -822,6 +829,7 @@ describe("app controller mounted lifecycle", () => {
       method: string,
       params?: { taskId?: string; scope?: { kind: string; taskId?: string; section?: "tasks" | "archive" } },
     ) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         if (params?.scope?.kind === "task") {
           return {
@@ -838,7 +846,7 @@ describe("app controller mounted lifecycle", () => {
     });
     backendConnection = {
       initialize: vi.fn(async () => ({
-        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+        snapshot: clientSnapshot({ includeActiveTask: false }),
       })),
       request: request as unknown as BackendConnection["request"],
       handleNotification: defaultHandleNotification,
@@ -848,33 +856,33 @@ describe("app controller mounted lifecycle", () => {
     let mounted!: ReturnType<typeof create>;
     try {
       await act(async () => { mounted = create(<ControllerProbe />); });
-      const navigationRequests = () => request.mock.calls.filter(([, params]) => params?.scope?.kind === "taskNavigation");
-      expect(navigationRequests()).toEqual([
-        [STATE_SUBSCRIBE, { scope: { kind: "taskNavigation", section: "tasks" } }],
-      ]);
+      const navigationRequests = () => request.mock.calls.filter(([method]) => isNavigationMethod(method));
+      expect(navigationRequests().filter(([method]) => method === NAVIGATION_SUBSCRIBE)).toHaveLength(1);
 
       await act(async () => { webRouteListeners[0]?.(taskBootstrapForShell("task_2")); });
       expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_2" });
-      expect(navigationRequests()).toEqual([
-        [STATE_SUBSCRIBE, { scope: { kind: "taskNavigation", section: "tasks" } }],
-      ]);
+      // The open Task changes the view's open row, which is an update of the same view: the
+      // Navigation subscription is retained and never starts over.
+      expect(navigationRequests().map(([method]) => method)).not.toContain(NAVIGATION_UNSUBSCRIBE);
+      expect(navigationRequests().filter(([method]) => method === NAVIGATION_SUBSCRIBE)).toHaveLength(1);
     } finally {
       await act(async () => { mounted?.unmount(); });
     }
   });
 
-  it("updates Task Navigation only when the fixed Project scope changes", async () => {
+  it("subscribes to Task Navigation again only when the fixed Project scope changes", async () => {
     const request = vi.fn(async (
       method: string,
       params?: { scope?: { kind: string; section?: "tasks" | "archive" } },
     ) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({
-        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+        snapshot: clientSnapshot({ includeActiveTask: false }),
       })),
       request: request as unknown as BackendConnection["request"],
       handleNotification: defaultHandleNotification,
@@ -884,18 +892,23 @@ describe("app controller mounted lifecycle", () => {
     let mounted!: ReturnType<typeof create>;
     try {
       await act(async () => { mounted = create(<ControllerProbe />); });
-      const navigationRequests = () => request.mock.calls.filter(([, params]) => params?.scope?.kind === "taskNavigation");
-      const firstScope = { kind: "taskNavigation", section: "tasks", projectIds: ["project_1"] };
-      expect(navigationRequests()).toEqual([[STATE_SUBSCRIBE, { scope: firstScope }]]);
+      const navigationRequests = () => request.mock.calls.filter(([method]) => isNavigationMethod(method));
+      const firstView = {
+        section: "tasks",
+        projectIds: ["project_1"],
+        historyLimit: 20,
+        historyLimits: [],
+      };
+      expect(navigationRequests()).toEqual([[NAVIGATION_SUBSCRIBE, firstView]]);
 
       await act(async () => { webRouteListeners[0]?.(navigationBootstrap({ projectId: "project_1" })); });
-      expect(navigationRequests()).toEqual([[STATE_SUBSCRIBE, { scope: firstScope }]]);
+      expect(navigationRequests()).toEqual([[NAVIGATION_SUBSCRIBE, firstView]]);
 
       await act(async () => { webRouteListeners[0]?.(navigationBootstrap({ projectId: "project_2" })); });
       expect(navigationRequests()).toEqual([
-        [STATE_SUBSCRIBE, { scope: firstScope }],
-        [STATE_UNSUBSCRIBE, { scope: firstScope }],
-        [STATE_SUBSCRIBE, { scope: { ...firstScope, projectIds: ["project_2"] } }],
+        [NAVIGATION_SUBSCRIBE, firstView],
+        [NAVIGATION_UNSUBSCRIBE, { section: "tasks" }],
+        [NAVIGATION_SUBSCRIBE, { ...firstView, projectIds: ["project_2"] }],
       ]);
     } finally {
       await act(async () => { mounted?.unmount(); });
@@ -989,6 +1002,7 @@ describe("app controller mounted lifecycle", () => {
       method: string,
       params?: { projectId?: string; scope?: { kind: string } },
     ) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         const baseline = nonTaskSubscriptionSnapshot(params?.scope);
         if (params?.scope?.kind !== "projects") return baseline;
@@ -1090,7 +1104,7 @@ describe("app controller mounted lifecycle", () => {
     expect(request.mock.calls.filter(([method]) => method === SETTINGS_UPDATE_NEW_TASK_DEFAULTS)).toEqual([]);
   });
 
-  it("loads only the initial visible rows after adding a Project", async () => {
+  it("adds a Project without a separate discovery request", async () => {
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.projects = {
       projects: [{
@@ -1100,7 +1114,6 @@ describe("app controller mounted lifecycle", () => {
         available: true,
       }],
     };
-    const discovery = deferredValue<{ accepted: true }>();
     const request = vi.fn(async (method: string) => {
       if (method === PROJECT_ADD) {
         return {
@@ -1112,7 +1125,6 @@ describe("app controller mounted lifecycle", () => {
           },
         };
       }
-      if (method === TASK_NAVIGATION_LOAD_MORE) return discovery.promise;
       throw new Error(method);
     });
     backendConnection = {
@@ -1136,12 +1148,8 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(addedProject?.projectId).toBe("project_2");
-    expect(request).toHaveBeenCalledWith(PROJECT_ADD, { workspaceRoot: "/workspace/added" });
-    expect(request).toHaveBeenCalledWith(TASK_NAVIGATION_LOAD_MORE, {
-      projectId: "project_2",
-      targetRowCount: 7,
-    });
-    discovery.resolve({ accepted: true });
+    // App Server's Navigation view shows the new Project and discovers its sessions on its own.
+    expect(request.mock.calls.map(([method]) => method).filter((method) => method !== "settings/getAgentDetails")).toEqual([PROJECT_ADD]);
   });
 
   it("does not overwrite a user-selected Agent when initialize resolves late", async () => {
@@ -1254,7 +1262,7 @@ describe("app controller mounted lifecycle", () => {
       tasks: [protocolTaskSummary("task_2", "Typed List")],
     }));
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
       close: vi.fn(),
     };
@@ -1277,7 +1285,7 @@ describe("app controller mounted lifecycle", () => {
     }));
     bootstrap = navigationBootstrap({ archived: true });
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
       close: vi.fn(),
     };
@@ -1298,13 +1306,14 @@ describe("app controller mounted lifecycle", () => {
       method: string,
       params?: { scope?: { kind: string; section?: "tasks" | "archive" } },
     ) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
       throw new Error(method);
     });
     backendConnection = {
       initialize: vi.fn(async () => ({
-        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+        snapshot: clientSnapshot({ includeActiveTask: false }),
       })),
       request: request as unknown as BackendConnection["request"],
       handleNotification: defaultHandleNotification,
@@ -1318,8 +1327,8 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     const subscribedSections = () => request.mock.calls
-      .filter(([method]) => method === STATE_SUBSCRIBE)
-      .map(([, params]) => params?.scope?.section);
+      .filter(([method]) => method === STATE_SUBSCRIBE || method === NAVIGATION_SUBSCRIBE)
+      .map(([, params]) => params?.scope?.section ?? (params as { section?: string } | undefined)?.section);
     expect(subscribedSections()).toContain("tasks");
     expect(subscribedSections()).not.toContain("archive");
 
@@ -1334,9 +1343,7 @@ describe("app controller mounted lifecycle", () => {
       latestController?.callbacks.navigation.toggleArchived();
       await Promise.resolve();
     });
-    expect(request).toHaveBeenCalledWith(STATE_UNSUBSCRIBE, {
-      scope: expect.objectContaining({ kind: "taskNavigation", section: "archive" }),
-    });
+    expect(request).toHaveBeenCalledWith(NAVIGATION_UNSUBSCRIBE, { section: "archive" });
   });
 
   it("does not issue a one-shot task-list request that can fail during startup", async () => {
@@ -1344,7 +1351,7 @@ describe("app controller mounted lifecycle", () => {
       throw new Error("Backend unavailable");
     });
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: request as unknown as BackendConnection["request"],
       close: vi.fn(),
     };
@@ -1405,6 +1412,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         return params?.scope?.kind === "task"
           ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Typed Open"))
@@ -1436,6 +1444,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
         ? taskSubscriptionSnapshot("cursor-1")
         : nonTaskSubscriptionSnapshot(params?.scope, "cursor-1");
@@ -1476,6 +1485,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return opened.promise;
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         if (params?.scope?.kind === "task") {
           return Promise.resolve(taskSubscriptionSnapshot("cursor-1", initial.activeTask!));
@@ -1548,6 +1558,7 @@ describe("app controller mounted lifecycle", () => {
     let openAttempts = 0;
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
         ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Recovered Task"))
         : nonTaskSubscriptionSnapshot(params?.scope, "cursor-1");
@@ -1599,6 +1610,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) return params?.scope?.kind === "task"
         ? taskSubscriptionSnapshot("cursor_2")
         : nonTaskSubscriptionSnapshot(params?.scope, "cursor_2");
@@ -1657,6 +1669,7 @@ describe("app controller mounted lifecycle", () => {
       request: vi.fn(async (method: string, params?: { scope?: unknown }) => {
         if (linkDown) throw new TransportLinkError("interrupted", "socket closed (1006)");
         if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+        if (isNavigationMethod(method)) return navigationMethodReply(method, params);
         if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope as never, "cursor_1");
         return new Promise(() => undefined);
       }) as unknown as BackendConnection["request"],
@@ -1743,12 +1756,15 @@ describe("app controller mounted lifecycle", () => {
         return new Promise(() => undefined);
       }
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) {
+        return navigationMethodReply(method, params, "cursor_navigation", [protocolTaskSummary("task_other", "Other Task")]);
+      }
       if (method === STATE_SUBSCRIBE) {
         if (params?.scope?.kind === "task") {
           if (missingAt === "baseline") throw missing;
           return taskSubscriptionSnapshot("cursor_task");
         }
-        return nonTaskSubscriptionSnapshot(params?.scope, "cursor_navigation", [protocolTaskSummary("task_other", "Other Task")]);
+        return nonTaskSubscriptionSnapshot(params?.scope);
       }
       throw new Error(method);
     });
@@ -1789,6 +1805,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         return params?.scope?.kind === "task"
           ? baseline.promise
@@ -1837,6 +1854,7 @@ describe("app controller mounted lifecycle", () => {
     ) => {
       if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method !== STATE_SUBSCRIBE) throw new Error(method);
       if (params?.scope?.kind !== "task") {
         return nonTaskSubscriptionSnapshot(params?.scope, "cursor_1");
@@ -1909,6 +1927,7 @@ describe("app controller mounted lifecycle", () => {
     ) => {
       if (method === TASK_OPEN) return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method !== STATE_SUBSCRIBE) throw new Error(method);
       if (params?.scope?.kind === "task") {
         return Promise.resolve(taskSubscriptionSnapshot("cursor_task"));
@@ -1975,6 +1994,7 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         return params?.scope?.kind === "task"
           ? taskSubscriptionSnapshot("cursor-1", protocolTaskSnapshot("task_1", "Opened Task"))
@@ -2216,6 +2236,7 @@ describe("app controller mounted lifecycle", () => {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
       if (method === TASK_ACQUIRE) return { task: loadingTask };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         const scope = params?.scope;
         if (scope?.kind === "projects") {
@@ -2392,6 +2413,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === TASK_ACQUIRE) return { task: preparedTask };
       if (method === TASK_OPEN && params?.taskId === "task_existing") return {};
       if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE) {
         if (params?.scope?.kind !== "task") return nonTaskSubscriptionSnapshot(params?.scope);
         return taskSubscriptionSnapshot(
@@ -2466,6 +2488,7 @@ describe("app controller mounted lifecycle", () => {
     let publishInvalidation: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
     let acquireCount = 0;
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE && params?.scope) {
         if (params.scope.kind === "task" && params.scope.taskId) {
           return taskSubscriptionSnapshot(
@@ -2542,6 +2565,7 @@ describe("app controller mounted lifecycle", () => {
     const missingSession = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
     let acquireCount = 0;
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE && params?.scope) {
         if (params.scope.kind === "task" && params.scope.taskId === "task_stale") {
           return missingSession.promise;
@@ -2633,6 +2657,7 @@ describe("app controller mounted lifecycle", () => {
       return task;
     };
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (isNavigationMethod(method)) return navigationMethodReply(method, params);
       if (method === STATE_SUBSCRIBE && params?.scope) {
         if (params.scope.kind === "task" && params.scope.taskId) {
           return taskSubscriptionSnapshot(
@@ -3597,6 +3622,7 @@ describe("app controller mounted lifecycle", () => {
       }
       if (method === TASK_OPEN && params?.taskId === "task_1") return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         if (params?.scope?.kind !== "task") {
           return Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope));
@@ -3674,6 +3700,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === TASK_ACQUIRE) return created.promise;
       if (method === TASK_OPEN && params?.taskId === "task_1") return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         return Promise.resolve(subscriptionReply(params, {
           task_1: protocolTaskSnapshot("task_1", "Destination task"),
@@ -4027,6 +4054,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === TASK_OPEN && params.taskId === "task_1") return task1.promise;
       if (method === TASK_OPEN && params.taskId === "task_2") return task2.promise;
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         return Promise.resolve(subscriptionReply(params, {
           task_1: protocolTaskSnapshot("task_1", "First task"),
@@ -4085,6 +4113,7 @@ describe("app controller mounted lifecycle", () => {
     ) => {
       if (method === TASK_OPEN) return Promise.resolve({});
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         return Promise.resolve(subscriptionReply(params, {
           task_1: protocolTaskSnapshot("task_1", "First task"),
@@ -4156,6 +4185,7 @@ describe("app controller mounted lifecycle", () => {
       }
       if (method === TASK_OPEN && params.taskId === "task_2") return new Promise(() => undefined);
       if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params.scope });
+      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
       if (method === STATE_SUBSCRIBE) {
         if (params.scope?.kind === "task" && params.scope.taskId === "task_2") {
           return new Promise(() => undefined);
@@ -4239,7 +4269,7 @@ describe("app controller mounted lifecycle", () => {
 
   it("does not reroute a pending no-message web task back to new task", async () => {
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: vi.fn(),
       close: vi.fn(),
     };
@@ -4272,7 +4302,7 @@ describe("app controller mounted lifecycle", () => {
 
   it("keeps an active no-message web task route after reload", async () => {
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
       request: vi.fn(),
       close: vi.fn(),
     };
@@ -4344,34 +4374,6 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.markRead" }));
-  });
-
-  it("ignores delayed typed startup list after archive generation changes", async () => {
-    const taskList = deferredValue<{ revision: number; tasks: ReturnType<typeof protocolTaskSummary>[] }>();
-    const archiveList = deferredValue<{ revision: number; tasks: ReturnType<typeof protocolTaskSummary>[] }>();
-    const request = vi.fn()
-      .mockImplementationOnce(() => taskList.promise)
-      .mockImplementationOnce(() => archiveList.promise);
-    backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }) })),
-      request: request as unknown as BackendConnection["request"],
-      close: vi.fn(),
-    };
-
-    await act(async () => {
-      create(<ControllerProbe />);
-      await Promise.resolve();
-    });
-    act(() => {
-      latestController?.callbacks.navigation.toggleArchived();
-    });
-    await act(async () => {
-      taskList.resolve({ revision: 4, tasks: [protocolTaskSummary("task_2", "Typed List")] });
-      await taskList.promise;
-    });
-
-    expect(latestController?.state.showArchived).toBe(true);
-    expect(latestController?.state.tasks).toEqual([]);
   });
 
   it("ignores initialize task navigation after archive generation changes", async () => {
@@ -4636,16 +4638,6 @@ function clientSnapshot(
       preferences: options.appPreferences ?? null,
       runtime: options.runtimeSettings ?? null,
     },
-    tasks: includeTasks ? {
-      section: "tasks" as const,
-      refresh: { state: "idle" as const },
-      groups: [{
-        projectId: "project_1" as never,
-        projectLabel: "Project",
-        taskCount: 1,
-        entries: [{ kind: "task" as const, task: protocolTaskSummary("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus) }],
-      }],
-    } : null,
     activeTask: includeActiveTask
       ? protocolTaskSnapshot("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus)
       : null,
@@ -4749,7 +4741,6 @@ function subscriptionReply(
 function nonTaskSubscriptionSnapshot(
   scope: { kind: string; taskId?: string; section?: "tasks" | "archive" } | undefined,
   cursor = "cursor_navigation",
-  taskNavigationTasks: ReturnType<typeof protocolTaskSummary>[] = [],
 ) {
   if (scope?.kind === "projects") {
     return {
@@ -4776,30 +4767,6 @@ function nonTaskSubscriptionSnapshot(
         kind: "agents" as const,
         agents: {
           agents: [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" as const }],
-        },
-      },
-    };
-  }
-  if (scope?.kind === "taskNavigation") {
-    return {
-      cursor: cursor as never,
-      scope,
-      snapshot: {
-        kind: "taskNavigation" as const,
-        navigation: {
-          section: scope.section ?? "tasks",
-          groups: taskNavigationTasks.length === 0
-            ? []
-            : [{
-                projectId: "project_1" as never,
-                projectLabel: "Project",
-                taskCount: taskNavigationTasks.length,
-                entries: taskNavigationTasks.map((task) => ({
-                  kind: "task" as const,
-                  task,
-                })),
-              }],
-          refresh: { state: "idle" as const },
         },
       },
     };
@@ -4859,5 +4826,44 @@ function memoryStorage(): Storage {
     key: (index) => Array.from(items.keys())[index] ?? null,
     removeItem: (key) => items.delete(key),
     setItem: (key, value) => items.set(key, value),
+  };
+}
+
+function isNavigationMethod(method: string) {
+  return method === NAVIGATION_SUBSCRIBE || method === NAVIGATION_UPDATE || method === NAVIGATION_UNSUBSCRIBE;
+}
+
+/** Answers the Navigation view methods: a baseline with one Project group, or an empty ack. */
+function navigationMethodReply(
+  method: string,
+  params: unknown,
+  cursor = "cursor_navigation",
+  tasks: ReturnType<typeof protocolTaskSummary>[] = [],
+) {
+  if (method !== NAVIGATION_SUBSCRIBE) return {};
+  const section = (params as { section?: "tasks" | "archive" } | undefined)?.section ?? "tasks";
+  const rows = Object.fromEntries(tasks.map((task) => [
+    `task:${task.taskId}`,
+    { live: false, entry: { kind: "task" as const, task } },
+  ]));
+  return {
+    cursor: cursor as never,
+    frame: {
+      section,
+      groupOrder: tasks.length === 0 ? [] : ["project_1" as never],
+      removedGroups: [],
+      groups: tasks.length === 0
+        ? []
+        : [{
+            projectId: "project_1" as never,
+            projectLabel: "Project",
+            order: Object.keys(rows),
+            rows,
+            total: tasks.length,
+            hidden: 0,
+            undiscovered: false,
+            discovery: "settled" as const,
+          }],
+    },
   };
 }

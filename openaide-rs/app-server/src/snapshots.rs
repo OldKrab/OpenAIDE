@@ -7,9 +7,9 @@ use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ServerCapabilities,
     ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState,
-    TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
+    TaskLifecycle, TaskPreparationAction, TaskPreparationSnapshot, TaskSendBlocker,
+    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
+    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -25,10 +25,10 @@ mod worktree_repository;
 
 pub use agent_collection::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionStore};
+pub use task_navigation::TaskNavigationStore;
 pub(crate) use task_navigation::{
     native_session_summary, project_task_lifecycle, project_task_summary,
 };
-pub use task_navigation::{TaskNavigationSnapshotSource, TaskNavigationStore};
 pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore};
 pub use worktree_repository::WorktreeRepositorySnapshotSource;
 
@@ -92,7 +92,6 @@ pub struct SnapshotBuilder {
     projects: Arc<dyn ProjectCollectionSnapshotSource>,
     worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
     settings: Arc<dyn SettingsSnapshotSource>,
-    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
     devices: Arc<dyn crate::remote_devices::RemoteDevicesWorkflow>,
     terminals: crate::terminals::Terminals,
@@ -105,7 +104,6 @@ pub struct SnapshotSources {
     projects: Arc<dyn ProjectCollectionSnapshotSource>,
     worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
     settings: Arc<dyn SettingsSnapshotSource>,
-    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
 }
 
@@ -116,7 +114,6 @@ impl SnapshotSources {
         projects: Arc<dyn ProjectCollectionSnapshotSource>,
         worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
         settings: Arc<dyn SettingsSnapshotSource>,
-        task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
         task_snapshots: Arc<dyn TaskSnapshotSource>,
     ) -> Self {
         Self {
@@ -125,7 +122,6 @@ impl SnapshotSources {
             projects,
             worktrees,
             settings,
-            task_navigation,
             task_snapshots,
         }
     }
@@ -133,7 +129,18 @@ impl SnapshotSources {
 
 impl SnapshotBuilder {
     pub fn new(server_id: ServerId, state_root_id: StateRootId) -> Self {
-        Self::with_task_navigation(server_id, state_root_id, Arc::new(EmptyTaskNavigation))
+        Self::with_sources(
+            server_id,
+            state_root_id,
+            SnapshotSources::new(
+                Arc::new(EmptyNewTaskDefaults),
+                Arc::new(EmptyAgentCollection),
+                Arc::new(EmptyProjectCollection),
+                Arc::new(EmptyWorktreeRepositories),
+                Arc::new(SettingsCatalog::default()),
+                Arc::new(EmptyTaskSnapshots),
+            ),
+        )
     }
 
     #[cfg(test)]
@@ -151,28 +158,7 @@ impl SnapshotBuilder {
                 Arc::new(EmptyProjectCollection),
                 Arc::new(EmptyWorktreeRepositories),
                 Arc::new(SettingsCatalog::default()),
-                Arc::new(EmptyTaskNavigation),
                 task_snapshots,
-            ),
-        )
-    }
-
-    pub fn with_task_navigation(
-        server_id: ServerId,
-        state_root_id: StateRootId,
-        task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
-    ) -> Self {
-        Self::with_sources(
-            server_id,
-            state_root_id,
-            SnapshotSources::new(
-                Arc::new(EmptyNewTaskDefaults),
-                Arc::new(EmptyAgentCollection),
-                Arc::new(EmptyProjectCollection),
-                Arc::new(EmptyWorktreeRepositories),
-                Arc::new(SettingsCatalog::default()),
-                task_navigation,
-                Arc::new(EmptyTaskSnapshots),
             ),
         )
     }
@@ -190,7 +176,6 @@ impl SnapshotBuilder {
             projects: sources.projects,
             worktrees: sources.worktrees,
             settings: sources.settings,
-            task_navigation: sources.task_navigation,
             task_snapshots: sources.task_snapshots,
             devices: Arc::new(crate::remote_devices::NoRemoteDevices),
             terminals: crate::terminals::Terminals::default(),
@@ -255,9 +240,6 @@ impl SnapshotBuilder {
             new_task_defaults: self.new_task_defaults.snapshot()?,
             projects: Some(self.projects.snapshot()?),
             agents: Some(self.agents.snapshot()?),
-            // Navigation has an independently ordered subscription stream.
-            // Initialization must not create a second baseline or cache.
-            tasks: None,
             active_task,
             settings: Some(self.settings.snapshot(None)?),
             pending_requests: Vec::new(),
@@ -274,18 +256,6 @@ impl SnapshotBuilder {
         &self,
     ) -> Result<AgentCollectionSnapshot, ProtocolError> {
         self.agents.snapshot()
-    }
-
-    pub(crate) fn task_navigation_source(&self) -> Arc<dyn TaskNavigationSnapshotSource> {
-        self.task_navigation.clone()
-    }
-
-    pub(crate) fn task_navigation_snapshot(
-        &self,
-        section: openaide_app_server_protocol::task::TaskNavigationSection,
-        project_ids: Option<&[ProjectId]>,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.task_navigation.snapshot(section, project_ids)
     }
 }
 
@@ -316,14 +286,15 @@ impl SnapshotProvider for SnapshotBuilder {
                     _ => None,
                 })?,
             },
-            SubscriptionScope::TaskNavigation {
-                section,
-                project_ids,
-            } => SubscriptionSnapshot::TaskNavigation {
-                navigation: self
-                    .task_navigation
-                    .snapshot(*section, project_ids.as_deref())?,
-            },
+            // Navigation is a view subscription (`navigation/subscribe`), not an entity snapshot.
+            SubscriptionScope::TaskNavigation { .. } => {
+                return Err(ProtocolError {
+                    code: openaide_app_server_protocol::errors::ProtocolErrorCode::InvalidRequest,
+                    message: "Task navigation is subscribed with navigation/subscribe".to_string(),
+                    recoverable: false,
+                    target: None,
+                })
+            }
             SubscriptionScope::Task { task_id } => {
                 let subscription = self.task_snapshots.subscription_for_client(
                     &ctx.client_instance_id,
@@ -427,23 +398,6 @@ impl WorktreeRepositorySnapshotSource for EmptyWorktreeRepositories {
             message: "Worktree Repository is unavailable".to_string(),
             recoverable: true,
             target: None,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct EmptyTaskNavigation;
-
-impl TaskNavigationSnapshotSource for EmptyTaskNavigation {
-    fn snapshot(
-        &self,
-        section: openaide_app_server_protocol::task::TaskNavigationSection,
-        _project_ids: Option<&[ProjectId]>,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        Ok(TaskNavigationSnapshot {
-            section,
-            groups: Vec::new(),
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
         })
     }
 }

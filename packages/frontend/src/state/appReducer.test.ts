@@ -712,7 +712,7 @@ describe("app reducer composer state", () => {
       archived: false,
       tasks: [],
       sessions: [active],
-      hasMoreProjectIds: [],
+      groups: [],
       refreshing: false,
     });
     state = appReducer(state, {
@@ -720,7 +720,7 @@ describe("app reducer composer state", () => {
       archived: true,
       tasks: [],
       sessions: [archived],
-      hasMoreProjectIds: [],
+      groups: [],
       refreshing: false,
     });
 
@@ -845,7 +845,7 @@ describe("app reducer composer state", () => {
       archived: false,
       tasks: [],
       sessions: [],
-      hasMoreProjectIds: [],
+      groups: [],
       refreshing: false,
     });
 
@@ -867,7 +867,7 @@ describe("app reducer composer state", () => {
       archived: false,
       tasks: [taskSummary("stale_task")],
       sessions: [],
-      hasMoreProjectIds: [],
+      groups: [],
       refreshing: false,
     });
 
@@ -935,21 +935,31 @@ describe("app reducer composer state", () => {
     expect(state.newTask.nativeSessions.adoptingSessionId).toBe("session_1");
   });
 
-  it("clears previous native sessions when the agent selector changes", () => {
+  it("keeps the Navigation view's rows when the agent selector changes", () => {
     let state = createInitialState();
+    const session = { session_id: "session_1", cwd: "/workspace/app", title: "Existing" };
     state = appReducer(state, {
-      type: "newTask:nativeSessions:result",
-      append: false,
-      result: {
-        agent_id: "codex",
-        sessions: [{ session_id: "session_1", cwd: "/workspace/app", title: "Existing" }],
-      },
+      type: "taskNavigation",
+      archived: false,
+      tasks: [],
+      sessions: [session],
+      groups: [{
+        projectId: "project_1",
+        label: "App",
+        rows: [{ kind: "session", session, live: false }],
+        total: 1,
+        hidden: 0,
+        undiscovered: false,
+        discovery: "settled",
+      }],
+      refreshing: false,
     });
 
     state = appReducer(state, { type: "newTask:agent", agentId: "mock" });
 
-    expect(state.newTask.nativeSessions.items).toEqual([]);
-    expect(state.newTask.nativeSessions.loaded).toBe(false);
+    // The rows belong to the Navigation subscription, which sends a frame only when they change.
+    expect(state.newTask.nativeSessions.items).toEqual([session]);
+    expect(state.newTask.nativeSessions.groups).toHaveLength(1);
     expect(state.newTask.nativeSessions.loading).toBe(false);
   });
 
@@ -1608,7 +1618,7 @@ describe("app reducer composer state", () => {
     expect(state.taskSnapshots.task_new).toBeUndefined();
   });
 
-  it("updates an existing task list row from task snapshots without reordering it", () => {
+  it("leaves a task list row to the Navigation view when a Task snapshot arrives", () => {
     let state = createInitialState();
     state = {
       ...state,
@@ -1625,7 +1635,8 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1", "task_2"]);
-    expect(state.tasks[0].title).toBe("New title");
+    expect(state.tasks[0].title).toBe("Old title");
+    expect(state.snapshot?.task.title).toBe("New title");
   });
 
   it("does not rebuild task navigation for a chat-only snapshot revision", () => {
@@ -1692,7 +1703,7 @@ describe("app reducer composer state", () => {
     expect(state.taskSnapshots.task_removed?.task.title).toBe("Late refresh");
   });
 
-  it("updates an active cache row without inserting it into the visible Archived slice", () => {
+  it("does not patch cached rows from a background Task snapshot", () => {
     let state = createInitialState();
     const archivedTask = taskSummary("task_archived");
     state = {
@@ -1717,7 +1728,8 @@ describe("app reducer composer state", () => {
 
     expect(state.tasks).toEqual([archivedTask]);
     expect(state.taskLists.archived).toEqual([archivedTask]);
-    expect(state.taskLists.open?.[0].title).toBe("Updated active");
+    expect(state.taskLists.open?.[0].title).toBe("Task");
+    expect(state.taskSnapshots.task_active?.task.title).toBe("Updated active");
   });
 
   it("keeps active subscription updates out of the visible Archived slice", () => {
@@ -2215,6 +2227,7 @@ describe("app reducer composer state", () => {
       },
       nativeSessions: {
         items: [{ session_id: "old_session", cwd: "/workspace" }],
+        groups: [],
         loading: false,
         loaded: true,
       },

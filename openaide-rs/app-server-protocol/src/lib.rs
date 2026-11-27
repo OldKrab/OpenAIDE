@@ -11,6 +11,7 @@ pub mod events;
 pub mod file_viewer;
 pub mod ids;
 pub mod methods;
+pub mod navigation;
 pub mod project;
 pub mod server_requests;
 pub mod settings;

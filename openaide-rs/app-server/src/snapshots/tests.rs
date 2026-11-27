@@ -13,8 +13,8 @@ use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapsho
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::{
-    AgentRegistrySnapshotSource, EmptyTaskNavigation, ProjectCollectionSnapshotSource,
-    SnapshotBuilder, SnapshotProvider, SnapshotSources, TaskListSnapshot, TaskSnapshotSource,
+    AgentRegistrySnapshotSource, ProjectCollectionSnapshotSource, SnapshotBuilder,
+    SnapshotProvider, SnapshotSources, TaskListSnapshot, TaskSnapshotSource,
     WorktreeRepositorySnapshotSource,
 };
 use crate::agent::registry::{AgentRegistry, CODEX_AGENT_ID};
@@ -255,7 +255,6 @@ fn builder() -> SnapshotBuilder {
             Arc::new(StaticProjectCollection),
             Arc::new(StaticWorktreeRepositories),
             Arc::new(SettingsCatalog::default()),
-            Arc::new(EmptyTaskNavigation),
             Arc::new(StaticTaskSnapshots),
         ),
     )

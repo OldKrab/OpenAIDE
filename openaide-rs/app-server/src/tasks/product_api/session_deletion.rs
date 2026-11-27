@@ -232,7 +232,7 @@ impl TaskProductApi {
         self.remove_local_native_session(&target.reference, target.task.as_ref())
             .map_err(protocol_error_from_runtime)?;
         self.task_notifier
-            .navigation_project_entries_changed(target.project_id.as_str().to_string());
+            .navigation_project_changed(target.project_id.as_str().to_string());
         Ok(NativeSessionDeleteResult::Deleted {
             reference: NativeSessionReference {
                 agent_id: AgentId::from(target.reference.agent_id),

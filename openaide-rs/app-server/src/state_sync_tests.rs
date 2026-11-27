@@ -16,19 +16,14 @@ use super::*;
 #[test]
 fn subscribe_returns_scope_baseline_and_registers_subscription() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let result = stream
-        .subscribe(
-            &ctx("client-1", "conn-1"),
-            SubscriptionScope::TaskNavigation {
-                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                project_ids: None,
-            },
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
+    let cursor = stream.register_view_subscription(
+        &ctx("client-1", "conn-1"),
+        SubscriptionScope::TaskNavigation {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+        },
+    );
 
-    assert_eq!(result.cursor.as_str(), "cursor-0");
+    assert_eq!(cursor.as_str(), "cursor-0");
     assert_eq!(stream.subscription_count(), 1);
 }
 
@@ -274,12 +269,14 @@ fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
 fn project_updates_do_not_leak_into_navigation_or_task_subscriptions() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
     let context = ctx("client-1", "conn-1");
-    for scope in [
-        SubscriptionScope::Projects,
+    stream.register_view_subscription(
+        &context,
         SubscriptionScope::TaskNavigation {
             section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-            project_ids: None,
         },
+    );
+    for scope in [
+        SubscriptionScope::Projects,
         SubscriptionScope::Task {
             task_id: TaskId::from("task-1"),
         },
@@ -337,24 +334,27 @@ fn history_sync_uses_the_matching_task_stream() {
 }
 
 #[test]
-fn navigation_change_is_delivered_only_to_navigation_scope() {
+fn navigation_frame_is_delivered_only_to_its_navigation_scope() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
-    stream
-        .subscribe(
-            &ctx("client-1", "conn-1"),
-            SubscriptionScope::TaskNavigation {
-                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                project_ids: None,
-            },
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
+    stream.register_view_subscription(
+        &ctx("client-1", "conn-1"),
+        SubscriptionScope::TaskNavigation {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+        },
+    );
 
     let publish = stream.publish_committed(
-        state_root_scope(),
-        AppServerEventPayload::RefreshStateChanged {
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
+        EventScope::Client {
+            state_root_id: StateRootId::from("root-1"),
+            client_instance_id: ClientInstanceId::from("client-1"),
+        },
+        AppServerEventPayload::NavigationFrame {
+            frame: openaide_app_server_protocol::navigation::NavigationFrame {
+                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                group_order: None,
+                removed_groups: Vec::new(),
+                groups: Default::default(),
+            },
         },
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),

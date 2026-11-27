@@ -15,6 +15,7 @@ mod diagnostics_handlers;
 mod file_viewer_handlers;
 pub mod local_http;
 mod messages;
+mod navigation_handlers;
 mod notification_handlers;
 pub(crate) mod outbox;
 mod project_handlers;
@@ -95,9 +96,9 @@ pub struct RpcGateway {
     pub(crate) chat_image_previews: crate::chat_image_previews::ChatImagePreviews,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
-    /// Advances when a request publishes navigation entries under the protocol lock, so a
-    /// projection read ahead of that lock can tell it was overtaken.
-    project_entries_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// Serves every client's Navigation views. Only the protocol lock holder reaches it, so
+    /// its recompute never races a handler's mutation.
+    pub(crate) navigation: crate::navigation::NavigationOwner,
     project_roots: ConfiguredProjectRoots,
     probe_facts: AppServerProbeFacts,
     diagnostics: Arc<dyn RuntimeDiagnosticsWorkflow>,
@@ -228,7 +229,7 @@ impl RpcGateway {
             chat_image_previews: Default::default(),
             snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
-            project_entries_generation: Arc::default(),
+            navigation: crate::navigation::NavigationOwner::empty(),
             project_roots,
             probe_facts,
             diagnostics,
@@ -263,6 +264,14 @@ impl RpcGateway {
             remote_device_service: None,
             terminals,
         }
+    }
+
+    pub(crate) fn with_navigation(
+        mut self,
+        navigation: crate::navigation::NavigationOwner,
+    ) -> Self {
+        self.navigation = navigation;
+        self
     }
 
     /// The snapshot builder reads the same service, so a subscription and a
@@ -467,7 +476,7 @@ impl RpcGateway {
                 responses::not_initialized(STATE_SUBSCRIBE.to_string()),
             );
         };
-        let (mut result, subscription_added) = match self.state_stream.subscribe_with_membership(
+        let (mut result, _) = match self.state_stream.subscribe_with_membership(
             &ctx,
             params.scope,
             params.known_version,
@@ -478,18 +487,6 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.add_pending_to_subscription_snapshot(&mut result.snapshot);
-        if subscription_added
-            && matches!(
-                &result.scope,
-                openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
-            )
-        {
-            // The baseline is durable and immediate; discovery then refreshes it asynchronously.
-            self.agent_list_sessions
-                .request_native_session_catalog_refresh(
-                    crate::tasks::product_api::NativeCatalogRefreshRequester::NavigationSubscribed,
-                );
-        }
         let server_requests = match &result.scope {
             openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {
                 self.server_requests.observe_subscription_added(
