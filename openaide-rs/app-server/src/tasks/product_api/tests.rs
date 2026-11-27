@@ -9622,7 +9622,7 @@ fn corrupt_chat_snapshot(state_root: &std::path::Path, task_id: &str) {
     let path = state_root
         .join("task-store-v1/tasks")
         .join(task_id)
-        .join("chat.snapshot");
+        .join("chat.log");
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

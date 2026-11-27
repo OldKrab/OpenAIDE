@@ -568,6 +568,7 @@ function readTasks(root) {
           ? {
               layout: "split-v1",
               storageSequence: split.storageSequence,
+              chatFrame: split.chatFrame,
               chatSequence: split.chatSequence,
               chatSnapshot: split.chatSnapshot,
               chatJournal: split.chatJournal,

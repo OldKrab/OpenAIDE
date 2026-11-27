@@ -38,7 +38,7 @@ Before inspecting local roots, establish evidence that the affected OpenAIDE ins
 ## What To Check First
 
 - App diagnostics live under the OpenAIDE App Server storage root, not scattered VS Code log folders.
-- Current Task storage lives under `task-store-v1/tasks/<task-id>/`. Its `task.json` owns Durable Task Metadata and points to the active `chat.snapshot[.<generation>]` and `chat.journal[.<generation>]`.
+- Current Task storage lives under `task-store-v1/tasks/<task-id>/`. Its `task.json` owns Durable Task Metadata and the committed Chat frame number (`chatFrame`); `chat.log` holds the Chat as one snapshot plus delta frames. A Task not yet opened since the ADR-0086 upgrade still has the older `task.json` (schema 1) naming `chat.snapshot.<generation>` and `chat.journal.<generation>`; the helper script reads both.
 - Current Chat snapshots contain `messages`, `messageMeta`, and `artifactHeads`. Chat journals are checksummed framed JSON deltas, not JSONL; use the helper instead of `grep` or line-oriented parsing.
 - Legacy `tasks/<task-id>/task.json`, `message_meta.json`, and `messages.jsonl` remain readable for diagnostics, but are not the current storage authority.
 - File logs are in `diagnostics/logs/`: check `openaide-extension.jsonl` and `openaide-app-server.jsonl`.

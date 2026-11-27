@@ -4,14 +4,18 @@ import path from "node:path";
 const JOURNAL_MAGIC = Buffer.from("OAIDETJ\0");
 const JOURNAL_HEADER_BYTES = JOURNAL_MAGIC.length + 2;
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
+const CHAT_LOG_MAGIC = Buffer.from("OAIDECL\0");
+const CHAT_LOG_HEADER_BYTES = CHAT_LOG_MAGIC.length + 2 + 8;
 const SUPPORTED_CHAT_SCHEMA_VERSIONS = new Set([1, 2]);
 
 /** Identifies the durable metadata envelope used by task-store-v1. */
 export function splitMetadata(taskFile) {
-  if (!taskFile || typeof taskFile !== "object" || !taskFile.task || typeof taskFile.chatSnapshot !== "string") {
-    return undefined;
+  if (!taskFile || typeof taskFile !== "object" || !taskFile.task) return undefined;
+  // Schema 2 keeps the Chat in one chat.log; schema 1 (not yet converted) names a snapshot and journal.
+  if (taskFile.schemaVersion === 2 ? typeof taskFile.chatFrame === "number" : typeof taskFile.chatSnapshot === "string") {
+    return taskFile;
   }
-  return taskFile;
+  return undefined;
 }
 
 /**
@@ -19,6 +23,7 @@ export function splitMetadata(taskFile) {
  * The App Server owns repair; this diagnostic helper must remain read-only.
  */
 export function readSplitProjectionMaybe(taskDir, metadata) {
+  if (metadata.schemaVersion === 2) return readChatLogMaybe(taskDir, metadata);
   if (metadata.schemaVersion !== 1) return { error: `${path.join(taskDir, "task.json")}: unsupported Task metadata version` };
   if (typeof metadata.chatJournal !== "string") {
     return { error: `${path.join(taskDir, "task.json")}: missing Chat journal generation` };
@@ -58,32 +63,73 @@ export function readSplitProjectionMaybe(taskDir, metadata) {
   }
 }
 
+/** Reads chat.log: a snapshot covering frames through N, then frames N+1.. up to the committed frame. */
+function readChatLogMaybe(taskDir, metadata) {
+  const file = path.join(taskDir, "chat.log");
+  if (!fs.existsSync(file)) return { error: `${file}: missing Chat log` };
+  try {
+    const bytes = fs.readFileSync(file);
+    if (bytes.length < CHAT_LOG_HEADER_BYTES || !bytes.subarray(0, CHAT_LOG_MAGIC.length).equals(CHAT_LOG_MAGIC)) {
+      throw new Error("invalid Chat log header");
+    }
+    if (bytes.readUInt16LE(CHAT_LOG_MAGIC.length) !== 1) throw new Error("unsupported Chat log version");
+    const covers = Number(bytes.readBigUInt64LE(CHAT_LOG_MAGIC.length + 2));
+    const records = readFrames(bytes, CHAT_LOG_HEADER_BYTES, covers, true);
+    const snapshot = JSON.parse(records.snapshot.toString("utf8"));
+    if (!SUPPORTED_CHAT_SCHEMA_VERSIONS.has(snapshot.schemaVersion)) throw new Error("unsupported Chat snapshot version");
+    const projection = {
+      task: metadata.task,
+      messages: structuredClone(snapshot.messages ?? []),
+      messageMeta: structuredClone(snapshot.messageMeta),
+      artifactHeads: structuredClone(snapshot.artifactHeads ?? {}),
+      journal: { frameCount: 0, incompleteTailBytes: records.incompleteTailBytes },
+    };
+    const committed = records.frames.filter((frame) => frame.sequence <= metadata.chatFrame);
+    if (covers + committed.length < metadata.chatFrame) throw new Error("Chat log is behind committed Task metadata");
+    for (const frame of committed) applyChatOperations(projection, frame.operations ?? []);
+    projection.journal.frameCount = committed.length;
+    return { value: projection };
+  } catch (error) {
+    return { error: `${file}: ${error.message}` };
+  }
+}
+
 function readJournalFrames(file) {
   const bytes = fs.readFileSync(file);
   if (bytes.length < JOURNAL_HEADER_BYTES || !bytes.subarray(0, JOURNAL_MAGIC.length).equals(JOURNAL_MAGIC)) {
     throw new Error("invalid journal header");
   }
   if (bytes.readUInt16LE(JOURNAL_MAGIC.length) !== 1) throw new Error("unsupported journal version");
+  return readFrames(bytes, JOURNAL_HEADER_BYTES, 0, false);
+}
+
+/** Walks checksummed frames; with `leadingSnapshot` the first record is the raw snapshot, not a numbered frame. */
+function readFrames(bytes, start, firstNumber, leadingSnapshot) {
   const frames = [];
-  let offset = JOURNAL_HEADER_BYTES;
+  let snapshot;
+  let offset = start;
   while (offset < bytes.length) {
     const frameStart = offset;
-    if (bytes.length - offset < 8) return { frames, incompleteTailBytes: bytes.length - frameStart };
+    if (bytes.length - offset < 8) return { frames, snapshot, incompleteTailBytes: bytes.length - frameStart };
     const payloadLength = Number(bytes.readBigUInt64LE(offset));
     offset += 8;
     if (!Number.isSafeInteger(payloadLength) || payloadLength < 0 || payloadLength > MAX_FRAME_BYTES) {
       throw new Error("invalid journal frame length");
     }
     if (offset + payloadLength + 4 > bytes.length) {
-      return { frames, incompleteTailBytes: bytes.length - frameStart };
+      return { frames, snapshot, incompleteTailBytes: bytes.length - frameStart };
     }
     const payload = bytes.subarray(offset, offset + payloadLength);
     offset += payloadLength;
     const expectedChecksum = bytes.readUInt32LE(offset);
     offset += 4;
-    if (crc32(payload) !== expectedChecksum) throw new Error(`journal frame checksum mismatch at sequence ${frames.length + 1}`);
+    if (crc32(payload) !== expectedChecksum) throw new Error(`journal frame checksum mismatch at sequence ${firstNumber + frames.length + 1}`);
+    if (leadingSnapshot && snapshot === undefined) {
+      snapshot = payload;
+      continue;
+    }
     const frame = JSON.parse(payload.toString("utf8"));
-    const expectedSequence = frames.length + 1;
+    const expectedSequence = firstNumber + frames.length + 1;
     if (frame.format_version !== 1) throw new Error(`unsupported journal frame version ${frame.format_version}`);
     const schemaVersion = frame.schema_version ?? 1;
     if (!SUPPORTED_CHAT_SCHEMA_VERSIONS.has(schemaVersion)) {
@@ -94,7 +140,8 @@ function readJournalFrames(file) {
     }
     frames.push(frame);
   }
-  return { frames, incompleteTailBytes: 0 };
+  if (leadingSnapshot && snapshot === undefined) throw new Error("Chat log snapshot record is incomplete");
+  return { frames, snapshot, incompleteTailBytes: 0 };
 }
 
 function applyChatOperations(projection, operations) {

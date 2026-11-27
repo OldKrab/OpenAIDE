@@ -20,13 +20,13 @@ use crate::storage::subagents::{self, SubagentState};
 use super::artifact::ARTIFACTS_DIR;
 use super::frame::{self, FaultInjector};
 use super::model::TaskProjection;
-use super::split;
+use super::{chat_log, generation_layout, split};
 
 /// The latest set-aside Chat, kept for manual recovery until a later set-aside
 /// replaces it or the Task is deleted. Nothing reads it back.
 const SET_ASIDE_DIR: &str = "set-aside";
 /// A set-aside in progress; the next load of its Task settles it.
-const PENDING_DIR: &str = "set-aside.pending";
+pub(super) const PENDING_DIR: &str = "set-aside.pending";
 /// Inside the pending directory, written before anything moves into it.
 const RECORD_FILE: &str = "set-aside.json";
 
@@ -39,43 +39,66 @@ pub(super) struct NewerChat {
     known: u16,
 }
 
-/// Why a set-aside started and which generation it replaces. The next load
-/// compares the generation with `task.json` to tell an uncommitted set-aside,
-/// which it resumes, from a committed one, which it only finishes. It stays
-/// in `set-aside/` to explain the set-aside to a manual recovery.
+/// Why a set-aside started and which Chat it replaces. The next load compares
+/// that identity with `task.json` to tell an uncommitted set-aside, which it
+/// resumes, from a committed one, which it only finishes. It stays in
+/// `set-aside/` to explain the set-aside to a manual recovery.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetAsideRecord {
     #[serde(flatten)]
     newer: NewerChat,
-    chat_snapshot: String,
-    chat_journal: String,
+    /// `chat_identity` of the Chat being replaced. Records written before
+    /// `chat.log` named the replaced snapshot file here, which is the identity
+    /// of a generation Chat.
+    #[serde(alias = "chatSnapshot")]
+    chat_identity: String,
+}
+
+/// Names the Chat `task.json` currently commits: the snapshot file of a
+/// generation Task, or the committed frame of a `chat.log` Task. It changes
+/// whenever a set-aside publishes its replacement.
+fn chat_identity(file: &split::TaskFile) -> String {
+    match file {
+        split::TaskFile::Generations(metadata) => metadata.chat_snapshot.clone(),
+        split::TaskFile::Current(metadata) => format!("chat.log@{}", metadata.chat_frame),
+    }
 }
 
 /// Recognizes a Chat that failed to load because a newer App Server wrote it.
 /// Reads only version fields and repairs nothing; `None` keeps the load's own
 /// error, so a damaged Chat still fails closed.
 pub(super) fn detect(task_dir: &Path) -> Option<NewerChat> {
-    let metadata = split::load_task(task_dir).ok()??;
-    let snapshot = split::snapshot_schema_version(&task_dir.join(&metadata.chat_snapshot));
-    let journal = frame::recorded_versions(&task_dir.join(&metadata.chat_journal)).ok();
+    let file = split::read_task_file(task_dir).ok()??;
+    let (snapshot, file_format, frame_format, schema, known_file_format) = match &file {
+        split::TaskFile::Generations(metadata) => {
+            let snapshot =
+                generation_layout::snapshot_schema_version(&task_dir.join(&metadata.chat_snapshot));
+            let journal = frame::recorded_versions(&task_dir.join(&metadata.chat_journal)).ok();
+            (
+                snapshot,
+                journal.as_ref().map(|recorded| recorded.file_format),
+                journal.as_ref().map(|recorded| recorded.frame_format),
+                journal.as_ref().map(|recorded| recorded.schema),
+                frame::FORMAT_VERSION,
+            )
+        }
+        split::TaskFile::Current(_) => {
+            let log = chat_log::recorded_versions(&chat_log::path(task_dir)).ok();
+            (
+                log.as_ref().and_then(|recorded| recorded.snapshot_schema),
+                log.as_ref().map(|recorded| recorded.file_format),
+                log.as_ref().map(|recorded| recorded.frame_format),
+                log.as_ref().map(|recorded| recorded.schema),
+                chat_log::LOG_FORMAT_VERSION,
+            )
+        }
+    };
     [
         ("chat_snapshot", snapshot, split::CHAT_SCHEMA_VERSION),
-        (
-            "chat_journal_format",
-            journal.as_ref().map(|recorded| recorded.file_format),
-            frame::FORMAT_VERSION,
-        ),
-        (
-            "chat_frame_format",
-            journal.as_ref().map(|recorded| recorded.frame_format),
-            frame::FORMAT_VERSION,
-        ),
-        (
-            "chat_journal_schema",
-            journal.as_ref().map(|recorded| recorded.schema),
-            split::CHAT_SCHEMA_VERSION,
-        ),
+        ("chat_journal_format", file_format, known_file_format),
+        ("chat_frame_format", frame_format, frame::FORMAT_VERSION),
+        ("chat_journal_schema", schema, split::CHAT_SCHEMA_VERSION),
     ]
     .into_iter()
     .find_map(|(part, version, known)| {
@@ -108,9 +131,10 @@ pub(super) fn rebuild(
     subagent_state: &SubagentState,
 ) -> Result<(TaskProjection, u64), RuntimeError> {
     let started = Instant::now();
-    let metadata = split::load_task(task_dir)?
+    let file = split::read_task_file(task_dir)?
         .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
-    let task_id = metadata.task.task_id.clone();
+    let task = file.task().clone();
+    let task_id = task.task_id.clone();
     crate::logging::info(
         "newer_chat_set_aside_started",
         serde_json::json!({
@@ -121,7 +145,11 @@ pub(super) fn rebuild(
         }),
     );
     let result: Result<_, RuntimeError> = (|| {
-        let pending = begin(task_dir, &metadata, newer)?;
+        let pending = begin(task_dir, &chat_identity(&file), newer)?;
+        if matches!(file, split::TaskFile::Current(_)) {
+            // The log is replaced in place, so the set-aside keeps its own link first.
+            keep_chat_log(task_dir, &pending)?;
+        }
         // Images, Tool artifacts, and Subagents leave before the commit, and the
         // Chat files stay referenced until it, so a rebuild interrupted before
         // its commit resumes here with the same pending directory.
@@ -136,7 +164,7 @@ pub(super) fn rebuild(
         sync_directory(task_dir)?;
 
         let now = crate::time::now_string();
-        let mut task = metadata.task.clone();
+        let mut task = task.clone();
         let reload_required = task.agent_session_id.is_some()
             && task.mark_native_session_reload_required(now.clone());
         let message_meta = MessageMeta {
@@ -153,11 +181,14 @@ pub(super) fn rebuild(
             message_meta,
             artifact_heads: Default::default(),
         };
-        let storage_sequence = metadata.storage_sequence.saturating_add(1);
-        split::publish_generation(
+        let storage_sequence = file.storage_sequence().saturating_add(1);
+        // The next frame number, so a client holding any version of the set-aside
+        // Chat sees the new one as a replacement.
+        split::publish_replacement(
             task_dir,
             &projection,
             storage_sequence,
+            file.chat_frame() + 1,
             &FaultInjector::disabled(),
         )?;
         finish(task_dir)?;
@@ -203,13 +234,13 @@ pub(super) fn interrupted(task_dir: &Path, task_id: &str) -> Option<NewerChat> {
     let record = fs::read(pending.join(RECORD_FILE))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<SetAsideRecord>(&bytes).ok());
-    let current = split::load_task(task_dir).ok().flatten();
+    let current = split::read_task_file(task_dir).ok().flatten();
     let (outcome, error, resume) = match (record, current) {
         // Nothing moved before the record, so detection runs as usual and a
         // rebuild reuses the directory.
         (None, _) => ("unrecorded", None, None),
         (Some(_), None) => ("metadata_unavailable", None, None),
-        (Some(record), Some(current)) if current.chat_snapshot == record.chat_snapshot => {
+        (Some(record), Some(current)) if chat_identity(&current) == record.chat_identity => {
             ("resuming", None, Some(record.newer))
         }
         (Some(_), Some(_)) => match finish(task_dir) {
@@ -228,10 +259,10 @@ pub(super) fn interrupted(task_dir: &Path, task_id: &str) -> Option<NewerChat> {
     resume
 }
 
-/// Opens the pending directory and records the generation being replaced.
+/// Opens the pending directory and records the Chat being replaced.
 fn begin(
     task_dir: &Path,
-    metadata: &split::TaskMetadata,
+    identity: &str,
     newer: &NewerChat,
 ) -> Result<std::path::PathBuf, RuntimeError> {
     let pending = task_dir.join(PENDING_DIR);
@@ -244,27 +275,37 @@ fn begin(
                 version: newer.version,
                 known: newer.known,
             },
-            chat_snapshot: metadata.chat_snapshot.clone(),
-            chat_journal: metadata.chat_journal.clone(),
+            chat_identity: identity.to_string(),
         },
     )?;
     Ok(pending)
 }
 
-/// Moves the Chat files `task.json` no longer names into the pending directory,
-/// then makes it the set-aside, replacing any earlier one.
+/// Hard-links the committed `chat.log` into the pending directory, so the
+/// set-aside keeps the newer bytes when the log is replaced. A link from an
+/// earlier attempt already holds them and stays.
+fn keep_chat_log(task_dir: &Path, pending: &Path) -> Result<(), RuntimeError> {
+    let kept = pending.join(chat_log::CHAT_LOG_FILE);
+    if kept.exists() {
+        return Ok(());
+    }
+    let log = chat_log::path(task_dir);
+    if fs::hard_link(&log, &kept).is_err() {
+        fs::copy(&log, &kept)?;
+    }
+    sync_directory(pending)
+}
+
+/// Moves the generation Chat files `task.json` no longer names into the
+/// pending directory, then makes it the set-aside, replacing any earlier one.
 fn finish(task_dir: &Path) -> Result<(), RuntimeError> {
     let pending = task_dir.join(PENDING_DIR);
-    let metadata = split::load_task(task_dir)?
-        .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
     for entry in fs::read_dir(task_dir)? {
         let name = entry?.file_name();
         let Some(name) = name.to_str() else {
             continue;
         };
-        let is_chat_file = name.starts_with(split::CHAT_SNAPSHOT_FILE)
-            || name.starts_with(split::CHAT_JOURNAL_FILE);
-        if is_chat_file && name != metadata.chat_snapshot && name != metadata.chat_journal {
+        if generation_layout::is_generation_file(name) {
             fs::rename(task_dir.join(name), pending.join(name))?;
         }
     }

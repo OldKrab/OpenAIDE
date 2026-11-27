@@ -33,19 +33,10 @@ pub(super) fn compact_loaded_task(
             || (mode == CompactionMode::IfWorthwhile
                 && split::compaction_is_worthwhile(&tasks_root.join(task_id))?);
         if should_compact {
-            let RecoveredTask::Available {
-                projection,
-                journal_sequence,
-            } = &next_task
-            else {
+            let RecoveredTask::Available { projection, .. } = &next_task else {
                 return Err(RuntimeError::Storage("Task is unavailable".to_string()));
             };
-            if let Err(error) = split::compact(
-                &tasks_root.join(task_id),
-                projection,
-                *journal_sequence,
-                faults,
-            ) {
+            if let Err(error) = split::compact(&tasks_root.join(task_id), projection, faults) {
                 quarantine_or_abort(tasks_root, task_id);
                 return Err(freeze_shared_task(projections, task_id, error));
             }
@@ -116,6 +107,7 @@ pub(super) fn compact_loaded_task(
 
 /// Persists the split representation after the reducer has produced the exact
 /// next projection, preserving Chat-before-metadata ordering in one place.
+/// Returns the Chat version after the commit.
 pub(super) fn persist_split_commit(
     task_dir: &Path,
     task: &RecoveredTask,
@@ -123,12 +115,12 @@ pub(super) fn persist_split_commit(
     storage_sequence: u64,
     has_artifact_reference: bool,
     faults: &FaultInjector,
-) -> Result<(), RuntimeError> {
+) -> Result<u64, RuntimeError> {
     let RecoveredTask::Available { projection, .. } = task else {
         unreachable!("validated Task remains available")
     };
     if storage_sequence == 1 {
-        split::publish_initial(task_dir, projection, storage_sequence, faults)
+        split::publish_initial(task_dir, projection, storage_sequence, faults).map(|()| 0)
     } else {
         split::append(
             task_dir,

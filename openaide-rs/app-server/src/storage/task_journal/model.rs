@@ -502,6 +502,9 @@ pub struct CommittedTaskBatch {
     /// Present for a batch of Subagent writes, whose Task fields are unchanged.
     pub subagent: Option<CommittedSubagentBatch>,
     pub journal_sequence: u64,
+    /// The Chat version (last `chat.log` frame number) after this batch, or
+    /// `None` when the batch wrote no Chat frame.
+    pub chat_version: Option<u64>,
     /// Revision after this physical batch. Stream text advances it once per
     /// coalesced batch instead of once per ACP chunk.
     pub task_revision: u64,

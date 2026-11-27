@@ -192,12 +192,8 @@ pub(super) fn ensure_task_loaded(
         }
         (replayed_id, task)
     };
-    if let RecoveredTask::Available {
-        projection,
-        journal_sequence,
-    } = &mut task
-    {
-        migrate_inline_images(&task_dir, projection, *journal_sequence)?;
+    if let RecoveredTask::Available { projection, .. } = &mut task {
+        migrate_inline_images(&task_dir, projection)?;
     }
     let epoch_overlay = epoch_task_overlays
         .read()
@@ -229,12 +225,11 @@ pub(super) fn ensure_task_loaded(
 }
 
 /// Moves a Chat's inline images into files, records missing image dimensions,
-/// and publishes a compacted generation that holds only references (ADR-0075). A failure leaves the previous
-/// generation authoritative, so the Task fails to load and the next open retries.
+/// and publishes a compacted log that holds only references (ADR-0075). A failure leaves the previous
+/// log authoritative, so the Task fails to load and the next open retries.
 fn migrate_inline_images(
     task_dir: &std::path::Path,
     projection: &mut crate::storage::task_journal::TaskProjection,
-    journal_sequence: u64,
 ) -> Result<(), RuntimeError> {
     let started_at = std::time::Instant::now();
     let mut migrated = projection.clone();
@@ -244,7 +239,6 @@ fn migrate_inline_images(
                 split::compact(
                     task_dir,
                     &migrated,
-                    journal_sequence,
                     &crate::storage::task_journal::frame::FaultInjector::disabled(),
                 )?;
             }

@@ -26,7 +26,8 @@ fn released_inline_images_move_to_files_when_the_task_opens() {
         .unwrap();
     store.shutdown().unwrap();
     let task_dir = root.path().join("task-store-v1/tasks").join(task_id);
-    let snapshot_path = task_dir.join("chat.snapshot");
+    let snapshot_path =
+        super::super::generation_layout::test_support::downgrade(&task_dir).snapshot;
     let mut released: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     released["schemaVersion"] = serde_json::json!(2);
@@ -70,11 +71,11 @@ fn released_inline_images_move_to_files_when_the_task_opens() {
         b"agent"
     );
 
-    // The migrated generation is durable: it holds references only, at schema 3.
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(task_dir.join("task.json")).unwrap()).unwrap();
-    let snapshot = metadata["chatSnapshot"].as_str().unwrap();
-    let published = std::fs::read_to_string(task_dir.join(snapshot)).unwrap();
+    // The migrated log is durable: it holds references only, at schema 3.
+    let published = serde_json::to_string(
+        &super::super::generation_layout::test_support::log_snapshot_json(&task_dir),
+    )
+    .unwrap();
     assert!(published.contains("\"schemaVersion\":3"));
     assert!(!published.contains("aW1hZ2U=") && !published.contains("YWdlbnQ="));
     store.shutdown().unwrap();
@@ -94,7 +95,8 @@ fn storage_maintenance_leaves_an_unopened_released_chat_unmigrated() {
         .unwrap();
     store.shutdown().unwrap();
     let task_dir = root.path().join("task-store-v1/tasks").join(task_id);
-    let snapshot_path = task_dir.join("chat.snapshot");
+    let snapshot_path =
+        super::super::generation_layout::test_support::downgrade(&task_dir).snapshot;
     let mut released: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     released["schemaVersion"] = serde_json::json!(2);
@@ -169,7 +171,8 @@ fn stored_references_gain_their_image_size_when_the_task_opens() {
     let agent_image =
         chat_images::store(&task_dir, &crate::media::tests::encoded_png(2, 5)).unwrap();
     // References as the first release of ADR-0075 stored them: no width or height.
-    let snapshot_path = task_dir.join("chat.snapshot");
+    let snapshot_path =
+        super::super::generation_layout::test_support::downgrade(&task_dir).snapshot;
     let mut released: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     released["messages"] = serde_json::json!([
@@ -239,11 +242,7 @@ fn stored_references_gain_their_image_size_when_the_task_opens() {
         }
     ));
     // The sizes are durable, so the next open reads no image header.
-    let metadata: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(task_dir.join("task.json")).unwrap()).unwrap();
-    let snapshot = metadata["chatSnapshot"].as_str().unwrap();
-    let published: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(task_dir.join(snapshot)).unwrap()).unwrap();
+    let published = super::super::generation_layout::test_support::log_snapshot_json(&task_dir);
     assert!(!chat_images::has_references_without_dimensions(
         &serde_json::from_value::<Vec<crate::storage::records::StoredMessage>>(
             published["messages"].clone()

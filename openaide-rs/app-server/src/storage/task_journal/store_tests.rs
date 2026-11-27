@@ -17,6 +17,8 @@ use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, FramedRecor
 use crate::storage::task_journal::model::{JournalFrame, TaskOperation};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
 
+#[path = "chat_numbering_tests.rs"]
+mod chat_numbering;
 #[path = "crash_recovery_tests.rs"]
 mod crash_recovery;
 
@@ -165,7 +167,7 @@ fn task_catalog_lists_metadata_without_replaying_corrupt_chat_history() {
         .wait()
         .unwrap();
     store.shutdown().unwrap();
-    corrupt_first_frame_payload(&root.path().join("task-store-v1/tasks/task_1/chat.journal"));
+    corrupt_first_frame_payload(&root.path().join("task-store-v1/tasks/task_1/chat.log"));
 
     let (store, _commits) =
         TaskJournalStore::open(root.path().to_path_buf()).expect("open catalog-backed store");
@@ -211,7 +213,7 @@ fn legacy_task_is_migrated_only_when_its_chat_is_opened() {
         "task_legacy"
     );
     assert!(task_dir.join("task.json").is_file());
-    assert!(task_dir.join("chat.snapshot").is_file());
+    assert!(task_dir.join("chat.log").is_file());
     assert!(!task_dir.join("task.journal").exists());
     assert!(!task_dir.join("task.catalog.json").exists());
     store.shutdown().unwrap();
@@ -343,9 +345,12 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
         .unwrap();
     store.shutdown().unwrap();
 
-    let snapshot_path = root
-        .path()
-        .join("task-store-v1/tasks/task_legacy_presentation/chat.snapshot");
+    let snapshot_path = super::super::generation_layout::test_support::downgrade(
+        &root
+            .path()
+            .join("task-store-v1/tasks/task_legacy_presentation"),
+    )
+    .snapshot;
     let mut released: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     released["schemaVersion"] = serde_json::json!(1);
@@ -376,8 +381,9 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
             subjects: vec!["preview.png".to_string()],
         }]
     );
-    let migrated: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(snapshot_path).unwrap()).unwrap();
+    let migrated = super::super::generation_layout::test_support::log_snapshot_json(
+        snapshot_path.parent().unwrap(),
+    );
     assert_eq!(
         migrated["schemaVersion"],
         serde_json::json!(super::super::split::CHAT_SCHEMA_VERSION)
@@ -447,9 +453,12 @@ fn released_search_presentation_snapshot_migrates_when_task_opens() {
         .unwrap();
     store.shutdown().unwrap();
 
-    let snapshot_path = root
-        .path()
-        .join("task-store-v1/tasks/task_legacy_search_presentation/chat.snapshot");
+    let snapshot_path = super::super::generation_layout::test_support::downgrade(
+        &root
+            .path()
+            .join("task-store-v1/tasks/task_legacy_search_presentation"),
+    )
+    .snapshot;
     let mut released: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
     released["schemaVersion"] = serde_json::json!(1);
@@ -570,8 +579,7 @@ fn released_tool_presentation_journal_migrates_when_task_opens() {
         }]
     );
     assert!(!task_dir.join("task.journal").exists());
-    let migrated: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(task_dir.join("chat.snapshot")).unwrap()).unwrap();
+    let migrated = super::super::generation_layout::test_support::log_snapshot_json(&task_dir);
     assert_eq!(
         migrated["schemaVersion"],
         serde_json::json!(super::super::split::CHAT_SCHEMA_VERSION)
@@ -892,15 +900,13 @@ fn every_artifact_prepare_and_visibility_fault_freezes_across_restart() {
     ] {
         assert_existing_artifact_append_fault_quarantines(point);
     }
+    // The Chat log already exists, so the reference is a frame append.
     for point in [
-        FaultPoint::DirectoryParentSync,
-        FaultPoint::CreateOpen,
-        FaultPoint::CreateHeaderWrite,
+        FaultPoint::AppendOpen,
         FaultPoint::FrameLengthWrite,
         FaultPoint::FramePayloadWrite,
         FaultPoint::FrameChecksumWrite,
         FaultPoint::FileSync,
-        FaultPoint::ParentSync,
     ] {
         assert_commit_fault_quarantines(JournalKind::ArtifactReference, point, |_| {
             terminal_write()
@@ -1084,13 +1090,14 @@ fn corrupt_first_frame_payload(path: &Path) {
         .write(true)
         .open(path)
         .expect("open Task journal for corruption");
-    // Header (10 bytes) and frame length (8 bytes) precede the JSON payload.
-    file.seek(SeekFrom::Start(18))
+    // The Chat log header (18 bytes) and the snapshot record's length (8 bytes)
+    // precede its JSON payload.
+    file.seek(SeekFrom::Start(26))
         .expect("seek to first payload byte");
     let mut byte = [0_u8; 1];
     file.read_exact(&mut byte).expect("read payload byte");
     byte[0] ^= 0xff;
-    file.seek(SeekFrom::Start(18))
+    file.seek(SeekFrom::Start(26))
         .expect("rewind to first payload byte");
     file.write_all(&byte).expect("corrupt payload byte");
     file.sync_all().expect("sync corrupt fixture");
@@ -1260,7 +1267,7 @@ fn durability_sync_metric_counts_exercised_file_syncs() {
     store.submit(terminal_write()).unwrap().wait().unwrap();
     assert_eq!(
         store.durability_sync_calls() - before_artifact,
-        7,
+        5,
         "first artifact commit anchors artifact bytes, Chat visibility, and Task metadata"
     );
     store.shutdown().unwrap();

@@ -2,6 +2,9 @@ use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
 
+use crate::storage::task_journal::chat_log::{self, ChatChangesSince};
+use crate::storage::task_journal::split;
+
 use super::{
     artifact, recovery, RecoveredTask, TaskJournalStore, TaskProjection, ToolArtifactProjection,
 };
@@ -34,6 +37,75 @@ impl TaskJournalStore {
             })
             .transpose()?
             .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
+    }
+
+    /// The Task's Chat version: the number of the last committed `chat.log`
+    /// frame. It is durable and never restarts, so it survives restarts,
+    /// compaction and replacement.
+    #[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads it.
+    pub(crate) fn chat_version(&self, task_id: &str) -> Result<u64, RuntimeError> {
+        let task_dir = self.committed_task_dir(task_id)?;
+        let metadata = split::load_task(&task_dir)?
+            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+        Ok(metadata.chat_frame)
+    }
+
+    /// What changed in the Chat after `known`: nothing (`Current`), the
+    /// committed frames' operations (`Deltas`), or a reason the client must
+    /// take the whole Chat instead: its version predates the log's snapshot or
+    /// a replacement (`TooOld`), or is newer than anything committed
+    /// (`Ahead`). Reads the log without touching it, so it may run beside the
+    /// storage worker; it sees only frames `task.json` has committed.
+    #[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads it.
+    pub(crate) fn chat_changes_since(
+        &self,
+        task_id: &str,
+        known: u64,
+    ) -> Result<ChatChangesSince, RuntimeError> {
+        let task_dir = self.committed_task_dir(task_id)?;
+        let metadata = split::load_task(&task_dir)?
+            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+        chat_log::changes_since(&task_dir, known, metadata.chat_frame).inspect_err(|error| {
+            crate::logging::warn(
+                "chat_log_read_failed",
+                serde_json::json!({
+                    "operation": "chat_changes_since",
+                    "task_id": task_id,
+                    "known_version": known,
+                    "chat_version": metadata.chat_frame,
+                    "error_kind": error.reason(),
+                }),
+            );
+        })
+    }
+
+    /// The directory of a Task whose Chat is hydrated, which also converts an
+    /// older layout, so readers see only `chat.log`.
+    fn committed_task_dir(&self, task_id: &str) -> Result<std::path::PathBuf, RuntimeError> {
+        validate_task_id(task_id)?;
+        recovery::ensure_task_loaded(
+            &self.inner.tasks_root,
+            &self.inner.catalog,
+            &self.inner.epoch_task_overlays,
+            &self.inner.projections,
+            &self.inner.projection_load_lock,
+            &self.inner.subagents,
+            task_id,
+        )?;
+        match self
+            .inner
+            .projections
+            .read()
+            .expect("Task journal projections poisoned")
+            .get(task_id)
+        {
+            Some(RecoveredTask::Available { .. }) => {}
+            Some(RecoveredTask::Unavailable { error }) => {
+                return Err(RuntimeError::Storage(error.clone()))
+            }
+            None => return Err(RuntimeError::TaskNotFound(task_id.to_string())),
+        }
+        Ok(self.inner.tasks_root.join(task_id))
     }
 
     /// Whether this process has hydrated the Task's Chat. Listing Tasks at

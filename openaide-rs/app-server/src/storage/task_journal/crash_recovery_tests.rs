@@ -90,19 +90,8 @@ fn recovered_queue_delivery_never_reoffers_accepted_work_or_reverts_later_metada
         .unwrap();
     reopened.shutdown().unwrap();
 
-    // Absence of the additive checkpoint is a valid previous-format metadata
-    // file; old Chat frames must not undo the independently committed Archive.
-    let mut previous_format: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(task_dir.join("task.json")).unwrap()).unwrap();
-    previous_format
-        .as_object_mut()
-        .unwrap()
-        .remove("chatJournalBytes");
-    std::fs::write(
-        task_dir.join("task.json"),
-        serde_json::to_vec(&previous_format).unwrap(),
-    )
-    .unwrap();
+    // Frames the checkpoint covers must not undo the independently committed
+    // Archive on a later restart either.
     let (reopened, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     let loaded = reopened.load("task_queue_delivery").unwrap();
     assert_eq!(loaded.task.lifecycle, TaskLifecycle::Archived);
@@ -129,7 +118,7 @@ fn incomplete_chat_commit_does_not_promote_or_accept_another_message() {
     std::fs::write(task_dir.join("task.json"), before_send).unwrap();
     let journal = std::fs::OpenOptions::new()
         .write(true)
-        .open(task_dir.join("chat.journal"))
+        .open(task_dir.join("chat.log"))
         .unwrap();
     journal
         .set_len(journal.metadata().unwrap().len() - 2)
@@ -144,8 +133,10 @@ fn incomplete_chat_commit_does_not_promote_or_accept_another_message() {
 }
 
 #[test]
-fn interrupted_first_chat_header_leaves_prepared_task_reusable() {
-    for header_bytes in [0, 5, 10, 20] {
+fn interrupted_first_chat_frame_leaves_prepared_task_reusable() {
+    // Every way a crash can cut the first frame: inside its length, inside its
+    // payload, and one byte short of its checksum.
+    for kept_frame_bytes in [0, 3, 8, 20, 1] {
         let root = TempDir::new().unwrap();
         let (store, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
         let mut projection = task_projection("task_partial_header");
@@ -157,15 +148,16 @@ fn interrupted_first_chat_header_leaves_prepared_task_reusable() {
             .unwrap();
         let task_dir = root.path().join("task-store-v1/tasks/task_partial_header");
         let before_send = std::fs::read(task_dir.join("task.json")).unwrap();
+        let log_before_send = std::fs::metadata(task_dir.join("chat.log")).unwrap().len();
         projection.task.lifecycle = TaskLifecycle::Open;
         accept_user_message(&store, &mut projection, "interrupted prompt");
         store.shutdown().unwrap();
         std::fs::write(task_dir.join("task.json"), before_send).unwrap();
         std::fs::OpenOptions::new()
             .write(true)
-            .open(task_dir.join("chat.journal"))
+            .open(task_dir.join("chat.log"))
             .unwrap()
-            .set_len(header_bytes)
+            .set_len(log_before_send + kept_frame_bytes)
             .unwrap();
 
         let (reopened, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -175,18 +167,24 @@ fn interrupted_first_chat_header_leaves_prepared_task_reusable() {
             TaskLifecycle::Prepared { lease: None }
         );
         assert!(loaded.messages.is_empty());
+        assert_eq!(
+            std::fs::metadata(task_dir.join("chat.log")).unwrap().len(),
+            log_before_send,
+            "the incomplete frame is discarded"
+        );
         loaded.task.lifecycle = TaskLifecycle::Open;
         accept_user_message(&reopened, &mut loaded, "accepted prompt");
         assert_eq!(
             reopened.load("task_partial_header").unwrap().messages.len(),
             1
         );
+        assert_eq!(reopened.chat_version("task_partial_header").unwrap(), 1);
         reopened.shutdown().unwrap();
     }
 }
 
 #[test]
-fn first_send_of_previous_format_task_establishes_recovery_before_chat_commit() {
+fn first_send_of_converted_task_establishes_recovery_before_chat_commit() {
     let root = TempDir::new().unwrap();
     let (store, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     let mut projection = task_projection("task_upgrade_send");
@@ -197,18 +195,14 @@ fn first_send_of_previous_format_task_establishes_recovery_before_chat_commit() 
         .wait()
         .unwrap();
     store.shutdown().unwrap();
-    let metadata_path = root
-        .path()
-        .join("task-store-v1/tasks/task_upgrade_send/task.json");
-    let mut legacy: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    legacy.as_object_mut().unwrap().remove("chatJournalBytes");
-    std::fs::write(&metadata_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let task_dir = root.path().join("task-store-v1/tasks/task_upgrade_send");
+    crate::storage::task_journal::generation_layout::test_support::downgrade(&task_dir);
 
     let (store, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     let mut projection = store.load("task_upgrade_send").unwrap();
     // Capture the durable pre-Send state after crossing the normal old-Task
-    // hydration/migration seam, before accepting any new Chat transaction.
+    // hydration/conversion seam, before accepting any new Chat transaction.
+    let metadata_path = task_dir.join("task.json");
     let before_send = std::fs::read(&metadata_path).unwrap();
     projection.task.lifecycle = TaskLifecycle::Open;
     accept_user_message(&store, &mut projection, "first prompt after upgrade");
@@ -286,10 +280,7 @@ fn streamed_chat_does_not_duplicate_unchanged_queued_content_in_its_recovery_rec
         .path()
         .join("task-store-v1/tasks/task_bounded_recovery");
     assert!(
-        std::fs::metadata(task_dir.join("chat.journal"))
-            .unwrap()
-            .len()
-            < 64 * 1024,
+        std::fs::metadata(task_dir.join("chat.log")).unwrap().len() < 64 * 1024,
         "tiny Chat updates must not duplicate unrelated megabytes of queued work"
     );
     let (reopened, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -303,7 +294,11 @@ fn streamed_chat_does_not_duplicate_unchanged_queued_content_in_its_recovery_rec
     reopened.shutdown().unwrap();
 }
 
-fn accept_user_message(store: &TaskJournalStore, projection: &mut TaskProjection, text: &str) {
+pub(super) fn accept_user_message(
+    store: &TaskJournalStore,
+    projection: &mut TaskProjection,
+    text: &str,
+) {
     projection.task.revision += 1;
     projection.task.task_version += 1;
     projection.task.message_history_version += 1;

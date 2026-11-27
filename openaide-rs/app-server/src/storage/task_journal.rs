@@ -6,8 +6,10 @@
 
 mod artifact;
 mod catalog;
+mod chat_log;
 /// Shared with the Subagent Chat streams the worker writes (ADR-0076).
 pub(crate) mod frame;
+mod generation_layout;
 mod images;
 mod model;
 mod newer_chat;
@@ -16,6 +18,8 @@ mod scheduler;
 mod split;
 mod store;
 
+#[allow(unused_imports)] // TODO(state-sync phase 3): the Task subscription reads these.
+pub(crate) use chat_log::{ChatChangesSince, ChatFrameChanges};
 pub(crate) use model::TaskOperation;
 pub use model::{
     CommittedArtifactChange, CommittedChatTextAppend, CommittedTaskBatch, TaskJournalQueueMetrics,

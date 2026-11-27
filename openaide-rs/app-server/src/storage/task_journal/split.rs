@@ -1,23 +1,29 @@
-use std::collections::HashMap;
+//! `task.json` and the orchestration of one Task's durable files: the atomically
+//! replaced metadata record, the `chat.log` Chat (see `chat_log.rs`), recovery,
+//! compaction and the conversion of older layouts.
+
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage::atomic::{replace_file as durable_replace, sync_directory};
-use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
+use crate::storage::records::TaskRecord;
 
-use super::frame::{self, FaultInjector, FramedRecord, JournalKind, ReplayedFrames};
+use super::chat_log::{self, ChatFrame, ChatSnapshotFile, TaskMetadataPatch};
+use super::frame::{FaultInjector, FaultPoint, JournalKind};
+use super::generation_layout::{self, GenerationMetadata};
 use super::model::{JournalFrame, TaskOperation, TaskProjection};
 use super::store::RecoveredTask;
 
 pub(super) const TASK_FILE: &str = "task.json";
-pub(super) const CHAT_SNAPSHOT_FILE: &str = "chat.snapshot";
-pub(super) const CHAT_JOURNAL_FILE: &str = "chat.journal";
-const TASK_SCHEMA_VERSION: u16 = 1;
+/// Version 2 names a `chat.log`; version 1 named Chat generations
+/// (`generation_layout.rs`) and is converted when its Task hydrates.
+const TASK_SCHEMA_VERSION: u16 = 2;
 /// Version 3 stores Chat images as references (ADR-0075). A version 2 Chat
 /// reads unchanged; hydration moves any inline images out and compacts it.
 pub(super) const CHAT_SCHEMA_VERSION: u16 = 3;
@@ -27,341 +33,335 @@ pub(super) const CHAT_SCHEMA_VERSION: u16 = 3;
 struct DurableTaskFile {
     schema_version: u16,
     storage_sequence: u64,
-    chat_sequence: u64,
-    chat_snapshot: String,
-    chat_journal: String,
-    /// Optional for stores written before interrupted Chat commits were detected
-    /// at Navigation startup. A length check avoids replaying healthy cold Chat.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    chat_journal_bytes: Option<u64>,
+    /// Number of the last committed Chat frame: the startup checkpoint and the
+    /// Task's Chat version. A mismatch with `chat.log` only triggers a scan of
+    /// that log, never wrong data.
+    chat_frame: u64,
     task: TaskRecord,
 }
 
 pub(super) struct TaskMetadata {
     pub(super) task: TaskRecord,
     pub(super) storage_sequence: u64,
-    pub(super) chat_sequence: u64,
-    pub(super) chat_snapshot: String,
-    pub(super) chat_journal: String,
-    chat_journal_bytes: Option<u64>,
+    pub(super) chat_frame: u64,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ChatSnapshotFile {
-    schema_version: u16,
-    messages: Vec<StoredMessage>,
-    message_meta: MessageMeta,
-    artifact_heads: HashMap<String, u64>,
+/// `task.json` in either layout. Only a current Task is written.
+pub(super) enum TaskFile {
+    Current(TaskMetadata),
+    Generations(GenerationMetadata),
 }
 
-#[derive(Deserialize, Serialize)]
-struct ChatFrame {
-    #[serde(flatten)]
-    journal: JournalFrame,
-    #[serde(default)]
-    task_patch: TaskMetadataPatch,
-}
-
-impl FramedRecord for ChatFrame {
-    fn decode(payload: &[u8]) -> Result<Self, RuntimeError> {
-        // Keep released Chat migrations at their existing boundary. The added
-        // recovery facts are optional on all previously written journal frames.
-        let journal = JournalFrame::decode(payload)?;
-        let mut value: Value = serde_json::from_slice(payload)?;
-        let task_patch = match value
-            .as_object_mut()
-            .and_then(|fields| fields.remove("task_patch"))
-        {
-            Some(patch) => serde_json::from_value(patch)?,
-            None => TaskMetadataPatch::default(),
-        };
-        Ok(Self {
-            journal,
-            task_patch,
-        })
-    }
-
-    fn format_version(&self) -> u16 {
-        self.journal.format_version
-    }
-
-    fn sequence(&self) -> u64 {
-        self.journal.sequence
-    }
-}
-
-/// Only Task fields changed by this Chat commit need a recovery copy. Repeating
-/// complete metadata would journal queued Images and Composer History on every
-/// Agent chunk. Removed fields stay distinct from fields explicitly set to null.
-#[derive(Default, Deserialize, Serialize)]
-struct TaskMetadataPatch {
-    #[serde(default)]
-    fields: Map<String, Value>,
-    #[serde(default)]
-    removed_fields: Vec<String>,
-}
-
-impl TaskMetadataPatch {
-    fn between(before: &TaskRecord, after: &TaskRecord) -> Result<Self, RuntimeError> {
-        let before = serde_json::to_value(before)?;
-        let mut after = after.clone();
-        after.clear_process_local_agent_state();
-        let after = serde_json::to_value(after)?;
-        let before = before
-            .as_object()
-            .expect("Task metadata serializes as an object");
-        let after = after
-            .as_object()
-            .expect("Task metadata serializes as an object");
-        Ok(Self {
-            fields: after
-                .iter()
-                .filter(|(key, value)| before.get(*key) != Some(*value))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect(),
-            removed_fields: before
-                .keys()
-                .filter(|key| !after.contains_key(*key))
-                .cloned()
-                .collect(),
-        })
-    }
-
-    fn apply(self, task: &mut TaskRecord) -> Result<(), RuntimeError> {
-        if self.fields.is_empty() && self.removed_fields.is_empty() {
-            return Ok(());
+impl TaskFile {
+    /// The last committed Chat frame number in either layout.
+    pub(super) fn chat_frame(&self) -> u64 {
+        match self {
+            Self::Current(metadata) => metadata.chat_frame,
+            Self::Generations(metadata) => metadata.chat_sequence,
         }
-        let mut value = serde_json::to_value(&*task)?;
-        let fields = value
-            .as_object_mut()
-            .expect("Task metadata serializes as an object");
-        for key in self.removed_fields {
-            fields.remove(&key);
+    }
+
+    pub(super) fn task(&self) -> &TaskRecord {
+        match self {
+            Self::Current(metadata) => &metadata.task,
+            Self::Generations(metadata) => &metadata.task,
         }
-        fields.extend(self.fields);
-        let recovered: TaskRecord = serde_json::from_value(value)?;
-        if recovered.task_id != task.task_id {
-            return Err(RuntimeError::Storage(
-                "Chat recovery metadata changes Task identity".to_string(),
-            ));
+    }
+
+    pub(super) fn storage_sequence(&self) -> u64 {
+        match self {
+            Self::Current(metadata) => metadata.storage_sequence,
+            Self::Generations(metadata) => metadata.storage_sequence,
         }
-        *task = recovered;
-        Ok(())
     }
 }
 
-pub(super) fn exists(task_dir: &Path) -> bool {
-    matches!(load_task(task_dir), Ok(Some(metadata)) if task_dir.join(&metadata.chat_snapshot).is_file())
-}
-
-pub(super) fn load_task(task_dir: &Path) -> Result<Option<TaskMetadata>, RuntimeError> {
+pub(super) fn read_task_file(task_dir: &Path) -> Result<Option<TaskFile>, RuntimeError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Envelope {
+        schema_version: u16,
+    }
     let bytes = match fs::read(task_dir.join(TASK_FILE)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let mut file: DurableTaskFile = serde_json::from_slice(&bytes)?;
+    // The envelope is read first, so a newer release's file is refused before
+    // any field of it is interpreted.
+    let envelope: Envelope = serde_json::from_slice(&bytes)?;
+    let mut file = match envelope.schema_version {
+        TASK_SCHEMA_VERSION => {
+            let file: DurableTaskFile = serde_json::from_slice(&bytes)?;
+            TaskFile::Current(TaskMetadata {
+                task: file.task,
+                storage_sequence: file.storage_sequence,
+                chat_frame: file.chat_frame,
+            })
+        }
+        generation_layout::TASK_SCHEMA_VERSION => {
+            TaskFile::Generations(generation_layout::parse(&bytes)?)
+        }
+        version => {
+            return Err(RuntimeError::Storage(format!(
+                "Unsupported Task metadata schema version {version}"
+            )))
+        }
+    };
     // Older releases persisted option catalogs. Never hydrate those as live controls.
-    file.task.config_options_catalog = None;
-    file.task.config_mutation.preferences = None;
-    validate_schema("Task metadata", file.schema_version, TASK_SCHEMA_VERSION)?;
-    Ok(Some(TaskMetadata {
-        task: file.task,
-        storage_sequence: file.storage_sequence,
-        chat_sequence: file.chat_sequence,
-        chat_snapshot: file.chat_snapshot,
-        chat_journal: file.chat_journal,
-        chat_journal_bytes: file.chat_journal_bytes,
-    }))
+    let task = match &mut file {
+        TaskFile::Current(metadata) => &mut metadata.task,
+        TaskFile::Generations(metadata) => &mut metadata.task,
+    };
+    task.config_options_catalog = None;
+    task.config_mutation.preferences = None;
+    Ok(Some(file))
+}
+
+/// Metadata of a Task whose Chat is in `chat.log`. A Task still in the
+/// generation layout is refused: its hydration converts it first.
+pub(super) fn load_task(task_dir: &Path) -> Result<Option<TaskMetadata>, RuntimeError> {
+    match read_task_file(task_dir)? {
+        None => Ok(None),
+        Some(TaskFile::Current(metadata)) => Ok(Some(metadata)),
+        Some(TaskFile::Generations(_)) => Err(RuntimeError::Storage(
+            "Task Chat is not converted to chat.log".to_string(),
+        )),
+    }
+}
+
+pub(super) fn exists(task_dir: &Path) -> bool {
+    match read_task_file(task_dir) {
+        Ok(Some(TaskFile::Current(_))) => chat_log::exists(task_dir),
+        Ok(Some(TaskFile::Generations(metadata))) => generation_layout::exists(task_dir, &metadata),
+        _ => false,
+    }
 }
 
 /// Startup must recover Send promotion and queue consumption before a metadata
 /// reader can dispose a Prepared Task or offer accepted work for delivery again.
-/// Prior files without a checkpoint retain their existing lazy hydration path.
+/// The check is the checkpoint against the log's frame count; only a mismatch
+/// scans that one Task. A Task still in the generation layout keeps its byte
+/// checkpoint check and converts when it has an uncommitted frame.
 pub(super) fn load_catalog_task(task_dir: &Path) -> Result<Option<TaskMetadata>, RuntimeError> {
-    let Some(metadata) = load_task(task_dir)? else {
-        return Ok(None);
-    };
-    if let Some(committed_bytes) = metadata.chat_journal_bytes {
-        let journal_bytes = file_length_or_zero(&task_dir.join(&metadata.chat_journal))?;
-        if journal_bytes > committed_bytes {
-            let started = std::time::Instant::now();
-            crate::logging::info(
-                "task_metadata_recovery_started",
-                serde_json::json!({ "task_id": metadata.task.task_id, "chat_sequence": metadata.chat_sequence }),
+    let metadata = match read_task_file(task_dir)? {
+        None => return Ok(None),
+        Some(TaskFile::Generations(old)) => {
+            if !generation_layout::has_uncommitted_bytes(task_dir, &old)? {
+                return Ok(Some(TaskMetadata {
+                    task: old.task,
+                    storage_sequence: old.storage_sequence,
+                    chat_frame: old.chat_sequence,
+                }));
+            }
+            return scan_task(
+                task_dir,
+                &old.task.task_id,
+                old.chat_sequence,
+                "generation_tail",
             );
-            let recovery = load_projection(task_dir);
-            // A newer App Server's Chat is rebuilt when its Task loads (ADR-0078),
-            // so it stays listed instead of becoming unavailable at startup.
-            let newer = recovery.is_err() && super::newer_chat::detect(task_dir).is_some();
-            crate::logging::info(
-                "task_metadata_recovery_finished",
+        }
+        Some(TaskFile::Current(metadata)) => metadata,
+    };
+    chat_log::remove_orphaned_temp(task_dir);
+    let reason = match chat_log::inspect(task_dir) {
+        Ok(shape) if shape.clean_tail && shape.last_frame == metadata.chat_frame => {
+            return Ok(Some(metadata))
+        }
+        Ok(shape) if shape.clean_tail => "frame_mismatch",
+        Ok(_) => "incomplete_tail",
+        Err(error) => {
+            // A log that cannot even be walked is left to its Task's hydration,
+            // which fails closed (or sets a newer Chat aside, ADR-0078), so one
+            // damaged Chat never hides its Task from Navigation.
+            crate::logging::warn(
+                "chat_log_inspect_failed",
                 serde_json::json!({
+                    "operation": "chat_log_startup_scan",
                     "task_id": metadata.task.task_id,
-                    "outcome": match (&recovery, newer) {
-                        (Ok(_), _) => "recovered",
-                        (Err(_), true) => "newer_chat",
-                        (Err(_), false) => "unavailable",
-                    },
-                    "duration_ms": started.elapsed().as_millis(),
+                    "error_kind": error.reason(),
                 }),
             );
-            if newer {
-                return Ok(Some(metadata));
-            }
-            recovery?;
-            return load_task(task_dir);
+            return Ok(Some(metadata));
         }
-    }
-    Ok(Some(metadata))
+    };
+    scan_task(
+        task_dir,
+        &metadata.task.task_id,
+        metadata.chat_frame,
+        reason,
+    )
 }
 
+/// The one-time scan of a Task whose checkpoint does not match its Chat.
+fn scan_task(
+    task_dir: &Path,
+    task_id: &str,
+    checkpoint: u64,
+    reason: &str,
+) -> Result<Option<TaskMetadata>, RuntimeError> {
+    let started = Instant::now();
+    crate::logging::info(
+        "task_metadata_recovery_started",
+        serde_json::json!({
+            "operation": "chat_log_startup_scan",
+            "task_id": task_id,
+            "chat_frame": checkpoint,
+            "reason": reason,
+        }),
+    );
+    let recovery = load_projection(task_dir);
+    // A newer App Server's Chat is rebuilt when its Task loads (ADR-0078),
+    // so it stays listed instead of becoming unavailable at startup.
+    let newer = recovery.is_err() && super::newer_chat::detect(task_dir).is_some();
+    crate::logging::info(
+        "task_metadata_recovery_finished",
+        serde_json::json!({
+            "operation": "chat_log_startup_scan",
+            "task_id": task_id,
+            "reason": reason,
+            "outcome": match (&recovery, newer) {
+                (Ok(_), _) => "recovered",
+                (Err(_), true) => "newer_chat",
+                (Err(_), false) => "unavailable",
+            },
+            "error_kind": recovery.as_ref().err().map(RuntimeError::reason),
+            "duration_ms": started.elapsed().as_millis(),
+        }),
+    );
+    if newer {
+        return Ok(match read_task_file(task_dir)? {
+            Some(TaskFile::Current(metadata)) => Some(metadata),
+            Some(TaskFile::Generations(old)) => Some(TaskMetadata {
+                task: old.task,
+                storage_sequence: old.storage_sequence,
+                chat_frame: old.chat_sequence,
+            }),
+            None => None,
+        });
+    }
+    recovery?;
+    load_task(task_dir)
+}
+
+/// Hydrates the Task: the log's snapshot plus its frames, with a complete
+/// frame past the checkpoint rolled forward, an incomplete final frame
+/// discarded, and frames the checkpoint covers unable to override `task.json`.
+/// A Task still in the generation layout is converted first.
 pub(super) fn load_projection(
     task_dir: &Path,
 ) -> Result<Option<(TaskProjection, u64)>, RuntimeError> {
-    let Some(metadata) = load_task(task_dir)? else {
-        return Ok(None);
+    let metadata = match read_task_file(task_dir)? {
+        None => return Ok(None),
+        Some(TaskFile::Generations(_)) => {
+            generation_layout::migrate(task_dir, &FaultInjector::disabled())?;
+            match load_task(task_dir)? {
+                Some(metadata) => metadata,
+                None => return Ok(None),
+            }
+        }
+        Some(TaskFile::Current(metadata)) => metadata,
     };
-    let snapshot_path = task_dir.join(&metadata.chat_snapshot);
-    let (snapshot, migrated_snapshot) = load_chat_snapshot(&snapshot_path)?;
-    let mut projection = TaskProjection {
-        task: metadata.task.clone(),
-        messages: snapshot.messages.clone(),
-        message_meta: snapshot.message_meta.clone(),
-        artifact_heads: snapshot.artifact_heads.clone(),
-    };
-    let journal = task_dir.join(&metadata.chat_journal);
-    if metadata.chat_sequence == 0
-        && journal.is_file()
-        && fs::metadata(&journal)?.len() < frame::FILE_HEADER_LEN as u64
-    {
-        // A crash can interrupt creation before even the first frame header.
-        // No committed reference exists, so this empty generation is disposable.
-        fs::remove_file(&journal)?;
-        sync_directory(task_dir)?;
+    chat_log::remove_orphaned_temp(task_dir);
+    if !task_dir.join(super::newer_chat::PENDING_DIR).exists() {
+        // Files of the generation layout a conversion could not remove. A
+        // pending set-aside still owns them.
+        if let Err(error) = generation_layout::remove_files(task_dir) {
+            crate::logging::warn(
+                "chat_generation_cleanup_failed",
+                serde_json::json!({
+                    "task_id": metadata.task.task_id,
+                    "error_kind": error.reason(),
+                }),
+            );
+        }
     }
-    if journal.is_file() {
-        let replayed: ReplayedFrames<ChatFrame> = frame::replay(&journal)?;
-        let recovered_chat_sequence = replayed.frame_count as u64;
-        if recovered_chat_sequence < metadata.chat_sequence {
-            return Err(RuntimeError::Storage(
-                "Chat journal is behind its committed Task metadata".to_string(),
-            ));
-        }
-        let task_id = metadata.task.task_id.clone();
-        let mut state = HashMap::from([(
-            task_id.clone(),
-            RecoveredTask::Available {
-                projection: Box::new(projection),
-                journal_sequence: 0,
-            },
-        )]);
-        for ChatFrame {
-            journal: frame,
-            task_patch,
-        } in replayed.frames
-        {
-            let is_checkpoint = frame.sequence == metadata.chat_sequence;
-            let needs_recovery = frame.sequence > metadata.chat_sequence;
-            super::projection::apply_operations(
-                &mut state,
-                &task_id,
-                frame.operations,
-                frame.sequence,
-            )?;
-            if is_checkpoint || needs_recovery {
-                // Later metadata-only changes (Archive, title, queue edits) own
-                // their facts even when an older Chat frame contains Task state.
-                let RecoveredTask::Available { projection, .. } =
-                    state.get_mut(&task_id).expect("split replay retains Task")
-                else {
-                    unreachable!("split replay cannot quarantine Task")
-                };
-                if is_checkpoint {
-                    projection.task = metadata.task.clone();
-                } else {
-                    task_patch.apply(&mut projection.task)?;
-                }
-            }
-        }
-        let RecoveredTask::Available {
-            projection: replayed,
-            ..
-        } = state.remove(&task_id).expect("split replay retains Task")
-        else {
-            unreachable!("split replay cannot quarantine Task")
-        };
-        projection = *replayed;
-        projection.task.message_history_version = projection.message_meta.version;
-        let journal_bytes = if recovered_chat_sequence == 0 {
-            // A complete file header can survive an interrupted first frame.
-            // The next first append uses create_new, so an empty generation must
-            // disappear just like a partially written header above.
-            fs::remove_file(&journal)?;
-            sync_directory(task_dir)?;
-            0
-        } else {
-            fs::metadata(&journal)?.len()
-        };
-        if recovered_chat_sequence > metadata.chat_sequence
-            || metadata
-                .chat_journal_bytes
-                .is_some_and(|bytes| bytes != journal_bytes)
-        {
-            let repaired_storage_sequence = metadata
-                .storage_sequence
-                .saturating_add(recovered_chat_sequence - metadata.chat_sequence);
-            publish_task(
-                task_dir,
-                &projection.task,
-                repaired_storage_sequence,
-                recovered_chat_sequence,
-                &metadata.chat_snapshot,
-                &metadata.chat_journal,
-                &FaultInjector::disabled(),
-            )?;
-            if migrated_snapshot {
-                durable_replace_json(
-                    &snapshot_path,
-                    &snapshot,
-                    JournalKind::Task,
-                    &FaultInjector::disabled(),
-                )?;
-            }
-            return Ok(Some((projection, repaired_storage_sequence)));
-        }
-    } else if metadata.chat_sequence > 0 {
+    let replayed = chat_log::replay_for_owner(task_dir)?;
+    if replayed.last_frame < metadata.chat_frame {
         return Err(RuntimeError::Storage(
-            "Committed Chat journal generation is missing".to_string(),
+            "Chat log is behind its committed Task metadata".to_string(),
         ));
     }
-    if migrated_snapshot {
-        durable_replace_json(
-            &snapshot_path,
-            &snapshot,
-            JournalKind::Task,
-            &FaultInjector::disabled(),
+    let projection = TaskProjection {
+        task: metadata.task.clone(),
+        messages: replayed.snapshot.messages,
+        message_meta: replayed.snapshot.message_meta,
+        artifact_heads: replayed.snapshot.artifact_heads,
+    };
+    let task_id = metadata.task.task_id.clone();
+    let replayed_frames = !replayed.frames.is_empty();
+    let mut state = std::collections::HashMap::from([(
+        task_id.clone(),
+        RecoveredTask::Available {
+            projection: Box::new(projection),
+            journal_sequence: 0,
+        },
+    )]);
+    for ChatFrame {
+        journal: frame,
+        task_patch,
+    } in replayed.frames
+    {
+        let is_checkpoint = frame.sequence == metadata.chat_frame;
+        let needs_recovery = frame.sequence > metadata.chat_frame;
+        super::projection::apply_operations(
+            &mut state,
+            &task_id,
+            frame.operations,
+            frame.sequence,
         )?;
+        if is_checkpoint || needs_recovery {
+            // Later metadata-only changes (Archive, title, queue edits) own
+            // their facts even when an older Chat frame contains Task state.
+            let RecoveredTask::Available { projection, .. } =
+                state.get_mut(&task_id).expect("split replay retains Task")
+            else {
+                unreachable!("split replay cannot quarantine Task")
+            };
+            if is_checkpoint {
+                projection.task = metadata.task.clone();
+            } else {
+                task_patch.apply(&mut projection.task)?;
+            }
+        }
     }
-    if metadata.chat_journal_bytes.is_none() {
-        // Upgrade at the normal hydration seam before any new Chat write can
-        // enter the worker. A crash after its first new frame must leave an
-        // already-durable old-byte checkpoint for metadata-only startup readers.
+    let RecoveredTask::Available {
+        projection: replayed_projection,
+        ..
+    } = state.remove(&task_id).expect("split replay retains Task")
+    else {
+        unreachable!("split replay cannot quarantine Task")
+    };
+    let mut projection = *replayed_projection;
+    if replayed_frames {
+        projection.task.message_history_version = projection.message_meta.version;
+    }
+    if replayed.last_frame > metadata.chat_frame {
+        let repaired_storage_sequence = metadata
+            .storage_sequence
+            .saturating_add(replayed.last_frame - metadata.chat_frame);
         publish_task(
             task_dir,
             &projection.task,
-            metadata.storage_sequence,
-            metadata.chat_sequence,
-            &metadata.chat_snapshot,
-            &metadata.chat_journal,
+            repaired_storage_sequence,
+            replayed.last_frame,
             &FaultInjector::disabled(),
         )?;
+        return Ok(Some((projection, repaired_storage_sequence)));
     }
     Ok(Some((projection, metadata.storage_sequence)))
 }
 
-/// Publishes the initial Chat snapshot before metadata becomes discoverable.
+fn snapshot_of(projection: &TaskProjection) -> ChatSnapshotFile {
+    ChatSnapshotFile {
+        schema_version: CHAT_SCHEMA_VERSION,
+        messages: projection.messages.clone(),
+        message_meta: projection.message_meta.clone(),
+        artifact_heads: projection.artifact_heads.clone(),
+    }
+}
+
+/// Publishes the initial Chat log before metadata becomes discoverable.
 pub(super) fn publish_initial(
     task_dir: &Path,
     projection: &TaskProjection,
@@ -369,30 +369,18 @@ pub(super) fn publish_initial(
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
     fs::create_dir_all(task_dir)?;
-    let snapshot = ChatSnapshotFile {
-        schema_version: CHAT_SCHEMA_VERSION,
-        messages: projection.messages.clone(),
-        message_meta: projection.message_meta.clone(),
-        artifact_heads: projection.artifact_heads.clone(),
-    };
-    durable_replace_json(
-        &task_dir.join(CHAT_SNAPSHOT_FILE),
-        &snapshot,
+    chat_log::publish_snapshot(
+        task_dir,
+        0,
+        &snapshot_of(projection),
         JournalKind::Task,
         faults,
     )?;
-    publish_task(
-        task_dir,
-        &projection.task,
-        storage_sequence,
-        0,
-        CHAT_SNAPSHOT_FILE,
-        CHAT_JOURNAL_FILE,
-        faults,
-    )
+    publish_task(task_dir, &projection.task, storage_sequence, 0, faults)
 }
 
-/// Appends only Chat-affecting operations, then publishes compact Task metadata.
+/// Appends only Chat-affecting operations, then publishes compact Task
+/// metadata. Returns the Chat version after the commit.
 pub(super) fn append(
     task_dir: &Path,
     projection: &TaskProjection,
@@ -400,17 +388,17 @@ pub(super) fn append(
     storage_sequence: u64,
     journal_kind: JournalKind,
     faults: &FaultInjector,
-) -> Result<(), RuntimeError> {
+) -> Result<u64, RuntimeError> {
     let metadata = load_task(task_dir)?
         .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
     let chat_operations = durable_chat_operations(operations);
-    let next_chat_sequence = if chat_operations.is_empty() {
-        metadata.chat_sequence
+    let next_chat_frame = if chat_operations.is_empty() {
+        metadata.chat_frame
     } else {
         let next = metadata
-            .chat_sequence
+            .chat_frame
             .checked_add(1)
-            .ok_or_else(|| RuntimeError::Storage("Chat journal sequence overflow".to_string()))?;
+            .ok_or_else(|| RuntimeError::Storage("Chat frame number overflow".to_string()))?;
         let frame = ChatFrame {
             journal: JournalFrame {
                 format_version: 1,
@@ -420,111 +408,92 @@ pub(super) fn append(
             },
             task_patch: TaskMetadataPatch::between(&metadata.task, &projection.task)?,
         };
-        let journal = task_dir.join(&metadata.chat_journal);
-        if next == 1 {
-            frame::create_with_faults(&journal, &frame, journal_kind, faults)?;
-        } else {
-            frame::append_with_faults(&journal, &frame, journal_kind, faults)?;
-        }
+        chat_log::append(task_dir, &frame, journal_kind, faults)?;
         next
     };
     publish_task(
         task_dir,
         &projection.task,
         storage_sequence,
-        next_chat_sequence,
-        &metadata.chat_snapshot,
-        &metadata.chat_journal,
+        next_chat_frame,
         faults,
-    )
+    )?;
+    Ok(next_chat_frame)
 }
 
-/// Switches metadata to a new snapshot generation before removing obsolete bytes.
+/// Rewrites the log as one snapshot record covering every committed frame and
+/// renames it over the old log. The rename is the commit: a crash before it
+/// leaves an orphaned temp file the next load removes, and one after it keeps
+/// numbering where it was, so `task.json` needs no change.
 pub(super) fn compact(
     task_dir: &Path,
     projection: &TaskProjection,
-    storage_sequence: u64,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
-    let replaced = publish_generation(task_dir, projection, storage_sequence, faults)?;
-    remove_if_present(&task_dir.join(replaced.chat_journal))?;
-    remove_if_present(&task_dir.join(replaced.chat_snapshot))?;
-    faults.check(
+    let started = Instant::now();
+    let metadata = load_task(task_dir)?
+        .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
+    let before = chat_log::inspect(task_dir).ok();
+    crate::logging::info(
+        "chat_log_compaction_started",
+        serde_json::json!({
+            "operation": "chat_log_compaction",
+            "task_id": metadata.task.task_id,
+            "chat_frame": metadata.chat_frame,
+            "frames": before.as_ref().map(|shape| shape.last_frame - shape.covers),
+            "old_bytes": before.as_ref().map(|shape| shape.delta_bytes + shape.snapshot_bytes),
+        }),
+    );
+    let result = chat_log::publish_snapshot(
+        task_dir,
+        metadata.chat_frame,
+        &snapshot_of(projection),
         JournalKind::Compaction,
-        super::frame::FaultPoint::CompactionPublishParentSync,
-    )?;
-    sync_directory(task_dir)?;
+        faults,
+    );
+    crate::logging::info(
+        "chat_log_compaction_finished",
+        serde_json::json!({
+            "operation": "chat_log_compaction",
+            "task_id": metadata.task.task_id,
+            "outcome": if result.is_ok() { "compacted" } else { "failed" },
+            "error_kind": result.as_ref().err().map(RuntimeError::reason),
+            "new_bytes": result.as_ref().ok(),
+            "duration_ms": started.elapsed().as_millis(),
+        }),
+    );
+    result?;
     super::images::sweep_unreferenced(task_dir, projection);
     Ok(())
 }
 
-/// The Chat files a published generation no longer references.
-pub(super) struct ReplacedGeneration {
-    pub(super) chat_snapshot: String,
-    pub(super) chat_journal: String,
-}
-
-/// Publishes `projection` as a new Chat generation and leaves the files of the
-/// generation it replaces to the caller. `task.json` is the commit point.
-pub(super) fn publish_generation(
+/// Replaces the whole Chat with `projection` as one snapshot covering the next
+/// frame number, so a client holding any earlier version sees the Chat as
+/// replaced. `task.json` names it, which is the commit. The caller keeps the
+/// replaced log if it needs it.
+pub(super) fn publish_replacement(
     task_dir: &Path,
     projection: &TaskProjection,
     storage_sequence: u64,
+    covers: u64,
     faults: &FaultInjector,
-) -> Result<ReplacedGeneration, RuntimeError> {
-    let metadata = load_task(task_dir)?
-        .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
-    let generation = uuid::Uuid::new_v4();
-    let new_snapshot = format!("{CHAT_SNAPSHOT_FILE}.{generation}");
-    let new_journal = format!("{CHAT_JOURNAL_FILE}.{generation}");
-    durable_replace_json(
-        &task_dir.join(&new_snapshot),
-        &ChatSnapshotFile {
-            schema_version: CHAT_SCHEMA_VERSION,
-            messages: projection.messages.clone(),
-            message_meta: projection.message_meta.clone(),
-            artifact_heads: projection.artifact_heads.clone(),
-        },
-        JournalKind::Compaction,
-        faults,
-    )?;
-    faults.check(
-        JournalKind::Compaction,
-        super::frame::FaultPoint::CompactionValidate,
-    )?;
-    faults.check(
-        JournalKind::Compaction,
-        super::frame::FaultPoint::CompactionPublish,
-    )?;
-    publish_task(
+) -> Result<(), RuntimeError> {
+    chat_log::publish_snapshot(
         task_dir,
-        &projection.task,
-        storage_sequence,
-        0,
-        &new_snapshot,
-        &new_journal,
+        covers,
+        &snapshot_of(projection),
+        JournalKind::Compaction,
         faults,
     )?;
-    Ok(ReplacedGeneration {
-        chat_snapshot: metadata.chat_snapshot,
-        chat_journal: metadata.chat_journal,
-    })
+    publish_task(task_dir, &projection.task, storage_sequence, covers, faults)
 }
 
 pub(super) fn compaction_is_worthwhile(task_dir: &Path) -> Result<bool, RuntimeError> {
-    let metadata = load_task(task_dir)?
-        .ok_or_else(|| RuntimeError::Storage("Split Task metadata is missing".to_string()))?;
-    let journal = task_dir.join(&metadata.chat_journal);
-    if !journal.exists() {
-        return Ok(false);
-    }
-    let replayed: ReplayedFrames<JournalFrame> = frame::scan(&journal)?;
-    if replayed.frame_count >= 128 {
+    let shape = chat_log::inspect(task_dir)?;
+    if shape.last_frame - shape.covers >= 128 {
         return Ok(true);
     }
-    let journal_bytes = fs::metadata(journal)?.len();
-    let snapshot_bytes = fs::metadata(task_dir.join(metadata.chat_snapshot))?.len();
-    Ok(journal_bytes >= snapshot_bytes && journal_bytes >= 1024 * 1024)
+    Ok(shape.delta_bytes >= shape.snapshot_bytes && shape.delta_bytes >= 1024 * 1024)
 }
 
 pub(super) fn migrate(
@@ -588,13 +557,11 @@ fn durable_chat_operations(operations: &[TaskOperation]) -> Vec<TaskOperation> {
         .collect()
 }
 
-fn publish_task(
+pub(super) fn publish_task(
     task_dir: &Path,
     task: &TaskRecord,
     storage_sequence: u64,
-    chat_sequence: u64,
-    chat_snapshot: &str,
-    chat_journal: &str,
+    chat_frame: u64,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
     let mut task = task.clone();
@@ -604,23 +571,12 @@ fn publish_task(
         &DurableTaskFile {
             schema_version: TASK_SCHEMA_VERSION,
             storage_sequence,
-            chat_sequence,
-            chat_snapshot: chat_snapshot.to_string(),
-            chat_journal: chat_journal.to_string(),
-            chat_journal_bytes: Some(file_length_or_zero(&task_dir.join(chat_journal))?),
+            chat_frame,
             task,
         },
         JournalKind::Task,
         faults,
     )
-}
-
-fn file_length_or_zero(path: &Path) -> Result<u64, RuntimeError> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.len()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
-        Err(error) => Err(error.into()),
-    }
 }
 
 fn durable_replace_json<T: Serialize>(
@@ -635,23 +591,23 @@ fn durable_replace_json<T: Serialize>(
         .ok_or_else(|| RuntimeError::Storage("split Task file has no parent".to_string()))?;
     let temporary = temporary_path(path);
     let result = (|| {
-        faults.check(kind, super::frame::FaultPoint::DirectoryParentSync)?;
-        faults.check(kind, super::frame::FaultPoint::CreateOpen)?;
-        faults.check(kind, super::frame::FaultPoint::AppendOpen)?;
+        faults.check(kind, FaultPoint::DirectoryParentSync)?;
+        faults.check(kind, FaultPoint::CreateOpen)?;
+        faults.check(kind, FaultPoint::AppendOpen)?;
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&temporary)?;
-        faults.check(kind, super::frame::FaultPoint::CreateHeaderWrite)?;
-        faults.check(kind, super::frame::FaultPoint::FrameLengthWrite)?;
-        faults.check(kind, super::frame::FaultPoint::FramePayloadWrite)?;
+        faults.check(kind, FaultPoint::CreateHeaderWrite)?;
+        faults.check(kind, FaultPoint::FrameLengthWrite)?;
+        faults.check(kind, FaultPoint::FramePayloadWrite)?;
         file.write_all(&bytes)?;
-        faults.check(kind, super::frame::FaultPoint::FrameChecksumWrite)?;
-        faults.check(kind, super::frame::FaultPoint::FileSync)?;
+        faults.check(kind, FaultPoint::FrameChecksumWrite)?;
+        faults.check(kind, FaultPoint::FileSync)?;
         faults.record_sync();
         file.sync_all()?;
         durable_replace(&temporary, path)?;
-        faults.check(kind, super::frame::FaultPoint::ParentSync)?;
+        faults.check(kind, FaultPoint::ParentSync)?;
         sync_directory(parent)
     })();
     if result.is_err() {
@@ -666,64 +622,6 @@ fn temporary_path(path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("task");
     path.with_file_name(format!(".{name}.{}", uuid::Uuid::new_v4()))
-}
-
-fn remove_if_present(path: &Path) -> Result<(), RuntimeError> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-/// The schema version a Chat snapshot records, read without loading it.
-pub(super) fn snapshot_schema_version(path: &Path) -> Option<u16> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct SnapshotVersion {
-        schema_version: u16,
-    }
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice::<SnapshotVersion>(&bytes)
-        .ok()
-        .map(|snapshot| snapshot.schema_version)
-}
-
-fn load_chat_snapshot(path: &Path) -> Result<(ChatSnapshotFile, bool), RuntimeError> {
-    let bytes = fs::read(path)?;
-    let mut value: Value = serde_json::from_slice(&bytes)?;
-    let version = value
-        .get("schemaVersion")
-        .and_then(Value::as_u64)
-        .and_then(|version| u16::try_from(version).ok())
-        .ok_or_else(|| {
-            RuntimeError::Storage("Chat snapshot schema version is missing".to_string())
-        })?;
-    let migrated = match version {
-        CHAT_SCHEMA_VERSION => false,
-        2 => {
-            // Its images move at hydration, which publishes a version 3 generation.
-            value["schemaVersion"] = Value::from(CHAT_SCHEMA_VERSION);
-            false
-        }
-        1 => {
-            migrate_v1_tool_presentations(&mut value);
-            value["schemaVersion"] = Value::from(CHAT_SCHEMA_VERSION);
-            true
-        }
-        _ => {
-            return Err(RuntimeError::Storage(format!(
-                "Unsupported Chat snapshot schema version {version}"
-            )))
-        }
-    };
-    let snapshot: ChatSnapshotFile = serde_json::from_value(value)?;
-    validate_schema(
-        "Chat snapshot",
-        snapshot.schema_version,
-        CHAT_SCHEMA_VERSION,
-    )?;
-    Ok((snapshot, migrated))
 }
 
 /// Converts the only released v1 Chat shape that cannot deserialize into v2.
@@ -779,15 +677,5 @@ pub(super) fn migrate_v1_tool_presentations(value: &mut Value) {
             }
         }
         _ => {}
-    }
-}
-
-fn validate_schema(kind: &str, version: u16, current: u16) -> Result<(), RuntimeError> {
-    if version == current {
-        Ok(())
-    } else {
-        Err(RuntimeError::Storage(format!(
-            "Unsupported {kind} schema version {version}"
-        )))
     }
 }

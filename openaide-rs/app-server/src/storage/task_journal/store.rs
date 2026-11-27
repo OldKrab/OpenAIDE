@@ -584,7 +584,7 @@ fn commit_batch(
         }
         artifact_changes.push(change);
     }
-    let persisted = maintenance::persist_split_commit(
+    let chat_version = maintenance::persist_split_commit(
         journal.parent().expect("Task journal path has a parent"),
         &next_task,
         &frame.operations,
@@ -592,10 +592,13 @@ fn commit_batch(
         has_artifact_reference,
         faults,
     );
-    if let Err(error) = persisted {
-        quarantine_or_abort(tasks_root, task_id);
-        return Err(freeze_shared_task(projections, task_id, error));
-    }
+    let chat_version = match chat_version {
+        Ok(version) => version,
+        Err(error) => {
+            quarantine_or_abort(tasks_root, task_id);
+            return Err(freeze_shared_task(projections, task_id, error));
+        }
+    };
     if let Err(error) = recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)
     {
         quarantine_or_abort(tasks_root, task_id);
@@ -609,6 +612,7 @@ fn commit_batch(
         task_id: task_id.to_string(),
         subagent: None,
         journal_sequence: sequence,
+        chat_version: Some(chat_version),
         task_revision,
         task_snapshot_changed,
         chat_text_appends,
@@ -693,6 +697,7 @@ fn current_commit(
         task_id: task_id.to_string(),
         subagent: None,
         journal_sequence: sequence,
+        chat_version: None,
         task_revision,
         task_snapshot_changed: false,
         chat_text_appends: Vec::new(),
