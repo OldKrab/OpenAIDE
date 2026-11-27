@@ -83,7 +83,7 @@ impl ServerRequestBroker {
             .filter(|&(_request_id, record)| {
                 record.status == RequestStatus::Pending
                     && can_deliver_to(record, &delivery.client_instance_id)
-                    && delivery.supports_method(&record.method)
+                    && !super::types::is_task_state_request(&record.method)
                     && record_matches_responder(record, &delivery.client_instance_id)
             })
             .map(|(request_id, _record)| request_id.clone())

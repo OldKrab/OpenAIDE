@@ -15,23 +15,20 @@ describe("startAppServerStateSubscription", () => {
     const onTaskRemoved = vi.fn();
     const dispatch = vi.fn();
     startAppServerStateSubscription({
+      context: {},
       backendConnection: task.connection,
       onTaskRemoved,
-      context: { stateRootId: "root_1" as StateRootId },
       dispatch,
       scope: { kind: "task", taskId: "task_1" as never },
     });
 
     task.observer().onSnapshot({ kind: "task", task: {} } as never, {
-      cursor: "cursor_2",
       payload: {
         kind: "taskChanged",
         taskId: "task_1",
         revision: 2,
         changes: { removed: true },
       },
-      previousCursor: "cursor_1",
-      scope: { kind: "task", stateRootId: "root_1", taskId: "task_1" },
     } as never);
 
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "task:list:remove", taskId: "task_1" });
@@ -50,8 +47,8 @@ describe("startAppServerStateSubscription", () => {
       devices: [{ deviceId: "device_1", name: "Phone", addedAtMs: 1 }],
     };
     startGlobalSyncSubscription({
+      context: {},
       backendConnection: sync.connection,
-      context: { stateRootId: "root_1" as StateRootId },
       currentAgentId: () => "",
       dispatch,
       setAgents,
@@ -91,12 +88,65 @@ describe("startAppServerStateSubscription", () => {
     expect(setAgents).toHaveBeenCalledWith([expect.objectContaining({ id: "codex", label: "Codex" })]);
   });
 
+  it("applies settings and removed worktree repositories from a sync notification", () => {
+    const sync = fakeSync();
+    const dispatch = vi.fn();
+    const setPreferences = vi.fn();
+    startGlobalSyncSubscription({ context: {}, backendConnection: sync.connection, dispatch, setPreferences });
+
+    sync.emit({
+      settings: {
+        sections: [],
+        preferences: { preferences: { composerSubmitShortcut: "enter" } },
+        runtime: { developer: { acpTrace: { enabled: true, directory: "trace" } } },
+      },
+      removedWorktreeRepositories: ["repository_1"],
+    } as never);
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:runtimeSettings",
+      settings: { developer: { acp_trace: { enabled: true, directory: "trace" } } },
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:preferences",
+      preferences: { composer_submit_shortcut: "enter" },
+    });
+    expect(setPreferences).toHaveBeenCalledWith({ composer_submit_shortcut: "enter" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "worktreeRepository:removed", repositoryId: "repository_1" });
+  });
+
+  it("applies New Task defaults only where the user has not chosen", () => {
+    const sync = fakeSync();
+    const dispatch = vi.fn();
+    let live: { projectId?: string; agentId?: string } = {};
+    const context = {
+      agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
+      projects: [{ projectId: "project_1", label: "App", workspaceRoot: "/w/App", available: true }] as never,
+    };
+    startGlobalSyncSubscription({
+      context,
+      backendConnection: sync.connection,
+      dispatch,
+      liveNewTaskContext: () => live,
+    });
+
+    sync.emit({ newTaskDefaults: { projectId: "project_1", agentId: "codex" } } as never);
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "projects", initialProjectId: "project_1" }));
+
+    dispatch.mockClear();
+    live = { projectId: "project_1", agentId: "codex" };
+    sync.emit({ newTaskDefaults: { projectId: "project_1", agentId: "codex" } } as never);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("dispatches nothing for areas a sync notification leaves out", () => {
     const sync = fakeSync();
     const dispatch = vi.fn();
     startGlobalSyncSubscription({
+      context: {},
       backendConnection: sync.connection,
-      context: { stateRootId: "root_1" as StateRootId },
       dispatch,
     });
 
@@ -110,7 +160,7 @@ describe("startAppServerStateSubscription", () => {
     const sync = fakeSync();
     const dispatch = vi.fn();
     const context = {
-      stateRootId: "root_1" as StateRootId,
+      
       agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
     };
     startAppServerStateSubscription({
@@ -169,8 +219,8 @@ describe("startAppServerStateSubscription", () => {
     const view = viewParams("tasks");
 
     startAppServerStateSubscription({
+      context: {},
       backendConnection: navigation.connection,
-      context: { stateRootId: "root_1" as StateRootId },
       dispatch: vi.fn(),
       scope: { kind: "taskNavigation", section: "tasks" },
       view,
@@ -189,7 +239,6 @@ describe("startAppServerStateSubscription", () => {
     startAppServerStateSubscription({
       backendConnection: navigation.connection,
       context: {
-        stateRootId: "root_1" as StateRootId,
         agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
         projects: [{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" }] as never,
       },
@@ -240,7 +289,6 @@ describe("startAppServerStateSubscription", () => {
     startAppServerStateSubscription({
       backendConnection: navigation.connection,
       context: {
-        stateRootId: "root_1" as StateRootId,
         agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
       },
       dispatch,
@@ -284,8 +332,8 @@ describe("startAppServerStateSubscription", () => {
     const task = fakeSubscription();
     const dispatch = vi.fn();
     startAppServerStateSubscription({
+      context: {},
       backendConnection: task.connection,
-      context: { stateRootId: "root_1" as StateRootId },
       dispatch,
       scope: { kind: "task", taskId: "task_1" as never },
     });
@@ -300,10 +348,10 @@ describe("startAppServerStateSubscription", () => {
         }] },
       },
     } as never, {
-      cursor: "cursor_2",
       payload: {
         kind: "taskChanged",
         taskId: "task_1",
+        revision: 2,
         changes: { chat: [{ kind: "appendText", messageId: "message_1", text: " world" }] },
       },
     } as never, false);
@@ -313,7 +361,7 @@ describe("startAppServerStateSubscription", () => {
       taskId: "task_1",
       messageId: "message_1",
       channel: "agent",
-      eventCursor: "cursor_2",
+      eventToken: "2",
     });
   });
 
@@ -324,8 +372,8 @@ describe("startAppServerStateSubscription", () => {
     const onBaselineReady = vi.fn();
 
     const stop = startAppServerStateSubscription({
+      context: {},
       backendConnection: subscription.connection,
-      context: { stateRootId: "root_1" as StateRootId },
       dispatch: vi.fn(),
       onBaselineError,
       onBaselineLost,

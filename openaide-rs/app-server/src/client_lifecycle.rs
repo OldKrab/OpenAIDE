@@ -109,16 +109,6 @@ impl Delivery {
             connection_id,
         }
     }
-
-    /// Permission and Question requests reach clients only as Task state (ADR-0086); a client
-    /// answers them with `pendingRequest/resolve`, never as a server request on the wire.
-    pub fn supports_method(&self, method: &str) -> bool {
-        !matches!(
-            method,
-            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
-                | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
-        )
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -420,15 +410,6 @@ impl ClientHub {
             client_instance_id.clone(),
             context.connection_id.clone(),
         ))
-    }
-
-    /// Returns connected clients that declared support for an App Server request method.
-    pub fn deliveries_supporting(&self, method: &str) -> Vec<Delivery> {
-        self.clients
-            .keys()
-            .filter_map(|client_instance_id| self.delivery_for(client_instance_id))
-            .filter(|delivery| delivery.supports_method(method))
-            .collect()
     }
 
     /// Browser Frontends advertise `openExternal`. The Web Node shell client does not.

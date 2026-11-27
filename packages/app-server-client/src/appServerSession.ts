@@ -408,17 +408,12 @@ export function createAppServerSession(
             knownVersion === undefined ? { scope: replica.scope } : { scope: replica.scope, knownVersion },
           );
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
-        const snapshot = initialization?.snapshot;
-        if (!snapshot) throw new Error("App Server session is not initialized");
+        if (!initialization) throw new Error("App Server session is not initialized");
         const offered = retained;
         retained = undefined;
-        const context = {
-          stateRootId: snapshot.stateRoot.stateRootId,
-          clientInstanceId: snapshot.client.clientInstanceId,
-        };
         const state = "frame" in result
-          ? installNavigationSubscribeReply(result, replica.scope, context)
-          : installSubscriptionReply(result, context, offered);
+          ? installNavigationSubscribeReply(result, replica.scope)
+          : installSubscriptionReply(result, offered);
         if (navigation && state) navigation.sent = sentParams;
         if (!state) {
           logger.warn("app_server_state_resume_rejected", {
@@ -433,7 +428,7 @@ export function createAppServerSession(
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
-        const droppedPendingCount = replayPendingEvents(replica);
+        const replayedPendingCount = replayPendingEvents(replica);
         // Replay can invalidate the baseline while this refresh still owns the
         // promise. Keep that owner running until the buffered stream is coherent.
         if (replica.refreshing) continue;
@@ -446,7 +441,7 @@ export function createAppServerSession(
           attempt,
           reply_kind: "frame" in result ? "navigationFrame" : result.snapshot.kind,
           ...("frame" in result ? {} : replySyncDiagnosticFields(result.snapshot)),
-          dropped_pending_event_count: droppedPendingCount,
+          replayed_pending_event_count: replayedPendingCount,
           duration_ms: Date.now() - startedAt,
         });
         return;
@@ -495,23 +490,13 @@ export function createAppServerSession(
       return true;
     }
     if (result.kind === "resyncRequired") {
-      if (result.reason === "cursorGap") {
-        // Each subscription's chain links every event App Server sent it, in wire order, so a
-        // gap means an event was lost or reordered: a bug, not a race. Resync still recovers.
-        logger.error("app_server_state_cursor_gap", {
-          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
-          generation,
-          expected_previous_cursor: replica.state.cursor,
-          previous_cursor: event.previousCursor,
-          cursor: event.cursor,
-        });
-      } else {
-        logger.warn("app_server_state_event_rejected", {
-          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
-          generation,
-          reason: result.reason,
-        });
-      }
+      // The entity's revision (or the Navigation row/group a frame needs) says an event was
+      // lost or reordered, which is a bug, not a race. Resync still recovers.
+      logger.warn("app_server_state_event_rejected", {
+        ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+        generation,
+        reason: result.reason,
+      });
       invalidateReplica(replica);
       void refreshReplica(replica, generation);
       return false;
@@ -529,24 +514,21 @@ export function createAppServerSession(
   }
 
   /**
-   * Applies the events buffered while the baseline was in flight and returns how many it
-   * dropped. App Server sends events in publish order and sends a subscription's earlier events
-   * before its subscribe reply, so the first event after the baseline links to the baseline's
-   * cursor; every buffered event before it is already in the baseline.
+   * Applies the events buffered while the baseline was in flight: those sent before the subscribe
+   * reply, which the baseline already contains, and those after it in the same transport batch.
+   * Each entity's revision (and a Navigation frame's revision) drops the first kind without
+   * changing the copy. Returns how many events were buffered.
    */
   function replayPendingEvents(replica: ScopeReplica) {
     if (!replica.state || replica.pendingEvents.length === 0) return 0;
-    const baseline = replica.state.cursor;
-    const firstAfterBaseline = replica.pendingEvents.findIndex((event) => event.previousCursor === baseline);
-    const events = firstAfterBaseline === -1 ? [] : replica.pendingEvents.slice(firstAfterBaseline);
-    const dropped = replica.pendingEvents.length - events.length;
+    const events = replica.pendingEvents;
     replica.pendingEvents = [];
     for (const [index, event] of events.entries()) {
       if (applyEvent(replica, event)) continue;
       for (const pending of events.slice(index + 1)) queuePendingEvent(replica, pending);
       break;
     }
-    return dropped;
+    return events.length;
   }
 
   function queuePendingEvent(replica: ScopeReplica, event: AppServerEvent) {

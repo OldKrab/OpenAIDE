@@ -2,7 +2,7 @@ use openaide_app_server_protocol::client::ShellKind;
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, ResponseMeta};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::ids::{RequestId, TaskId};
 use openaide_app_server_protocol::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
@@ -20,7 +20,7 @@ use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome,
 use crate::global_state::GlobalAreas;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{
-    event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway,
+    responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway,
 };
 use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
@@ -542,19 +542,13 @@ impl RpcGateway {
     ) -> Vec<GatewayEventDelivery> {
         let requests = self.server_requests.pending_for_task(task_id);
         self.record_published_task_requests(task_id, &requests, "request_resolution");
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Task {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                task_id: task_id.clone(),
-            },
+        self.publish_task_payload(
             AppServerEventPayload::TaskRequestsUpdated {
                 task_id: task_id.clone(),
                 requests,
             },
-            |client_id| client_hub.delivery_for(client_id),
             now,
-        ))
+        )
     }
 
     #[cfg(test)]
@@ -565,14 +559,11 @@ impl RpcGateway {
                 .delivery_for(client_instance_id)
                 .into_iter()
                 .collect(),
+            // Permission and Question requests reach clients as Task state, not as requests.
             PendingRequestScope::Task { .. }
-                if matches!(
-                    draft.method.as_str(),
-                    openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
-                        | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
-                ) =>
+                if crate::server_requests::is_task_state_request(&draft.method) =>
             {
-                self.client_hub.deliveries_supporting(&draft.method)
+                Vec::new()
             }
             PendingRequestScope::Task { task_id } => self
                 .state_stream

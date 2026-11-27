@@ -5,9 +5,9 @@ use openaide_app_server_protocol::client::{
 };
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::ids::{
-    AgentId, ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
+    AgentId, ClientInstanceId, ClientRequestId, ProjectId, TaskId,
 };
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_LOGOUT,
@@ -54,7 +54,7 @@ use crate::snapshots::{
     AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
     TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore,
 };
-use crate::state_sync::StateStream;
+use crate::state_sync::{EventAddress, StateStream};
 use crate::storage::Store;
 use crate::task_events::{
     CommittedChatChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind, ToolDetailUpdate,
@@ -113,7 +113,7 @@ fn rejects_product_request_before_initialize() {
 }
 
 #[test]
-fn initialize_records_client_and_returns_snapshot_cursor() {
+fn initialize_records_client_and_returns_snapshot() {
     let mut gateway = gateway();
 
     let outcome = gateway.handle_inbound(
@@ -123,7 +123,6 @@ fn initialize_records_client_and_returns_snapshot_cursor() {
     );
 
     let value = response_value(outcome);
-    assert_eq!(value["result"]["snapshot"]["cursor"], json!("cursor-0"));
     assert_eq!(
         value["result"]["snapshot"]["client"]["clientInstanceId"],
         json!("client-1")
@@ -1878,29 +1877,6 @@ fn error_envelope_preserves_client_request_meta_and_invalid_params_details() {
 }
 
 #[test]
-fn initialize_after_event_uses_state_stream_cursor() {
-    let mut gateway = gateway();
-    gateway.state_stream.publish_committed(
-        EventScope::Task {
-            state_root_id: StateRootId::from("root-1"),
-            task_id: TaskId::from("task-1"),
-        },
-        empty_navigation_frame(),
-        |_| None,
-        AppServerTime(1),
-    );
-
-    let outcome = gateway.handle_inbound(
-        ConnectionId::new("conn-1"),
-        request("1", CLIENT_INITIALIZE, init_params("client-1")),
-        AppServerTime(2),
-    );
-
-    let value = response_value(outcome);
-    assert_eq!(value["result"]["snapshot"]["cursor"], json!("cursor-1"));
-}
-
-#[test]
 fn initialize_during_stopping_returns_server_stopping() {
     let mut gateway = gateway();
     gateway.lifecycle.begin_stopping();
@@ -1930,7 +1906,6 @@ fn navigation_subscribe_after_initialize_returns_baseline_and_stores_subscriptio
     );
 
     let value = response_value(outcome);
-    assert_eq!(value["result"]["cursor"], json!("cursor-0"));
     assert_eq!(value["result"]["frame"]["section"], json!("tasks"));
     assert_eq!(gateway.state_stream.subscription_count(), 1);
 }
@@ -2869,10 +2844,12 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
         AppServerTime(4),
     );
 
-    let publish = gateway.state_stream.publish_committed(
-        EventScope::Client {
-            state_root_id: StateRootId::from("root-1"),
-            client_instance_id: ClientInstanceId::from("client-1"),
+    let publish = gateway.state_stream.publish(
+        EventAddress::Client {
+            client: ClientInstanceId::from("client-1"),
+            scope: openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation {
+                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            },
         },
         empty_navigation_frame(),
         |client_id| gateway.client_hub.delivery_for(client_id),
@@ -3299,7 +3276,7 @@ fn gateway_with_project_store_and_listing(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         snapshots,
@@ -3339,7 +3316,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3381,7 +3358,7 @@ fn gateway_with_agent_mutations_and_task_release(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3479,7 +3456,7 @@ fn gateway_with_agent_session_listing(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3520,7 +3497,7 @@ pub(super) fn gateway_with_agent_authenticate(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -5117,6 +5094,7 @@ fn empty_navigation_frame() -> AppServerEventPayload {
     AppServerEventPayload::NavigationFrame {
         frame: openaide_app_server_protocol::navigation::NavigationFrame {
             section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            revision: 1,
             group_order: None,
             removed_groups: Vec::new(),
             groups: Vec::new(),
@@ -5241,7 +5219,7 @@ fn task_question_request(task_id: &str) -> ServerRequestDraft {
         scope: PendingRequestScope::Task {
             task_id: TaskId::from(task_id),
         },
-        method: openaide_app_server_protocol::server_requests::QUESTION_REQUEST.to_string(),
+        method: crate::server_requests::QUESTION_REQUEST_TAG.to_string(),
         title: "Question".to_string(),
         params: json!({ "message": "Choose a test seam.", "fields": [] }),
     }

@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use openaide_app_server_protocol::envelopes::ServerRequestEnvelope;
-use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload};
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::SubscriptionScope;
 use serde_json::{json, Value};
@@ -14,19 +14,14 @@ fn connection(name: &str) -> ConnectionId {
     ConnectionId::new(name)
 }
 
-fn event(cursor: &str) -> AppServerEvent {
+/// An event whose payload names `marker`, so tests can tell events apart.
+fn event(marker: &str) -> AppServerEvent {
     AppServerEvent {
         subscription: SubscriptionScope::Task {
             task_id: "task-1".into(),
         },
-        previous_cursor: "0".into(),
-        cursor: cursor.into(),
-        scope: EventScope::Task {
-            state_root_id: "root-1".into(),
-            task_id: "task-1".into(),
-        },
         payload: AppServerEventPayload::TaskContentRemoved {
-            task_id: "task-1".into(),
+            task_id: marker.into(),
         },
     }
 }
@@ -38,10 +33,10 @@ fn delivery(connection_id: &ConnectionId) -> Delivery {
     }
 }
 
-fn event_for(connection_id: &ConnectionId, cursor: &str) -> GatewayEventDelivery {
+fn event_for(connection_id: &ConnectionId, marker: &str) -> GatewayEventDelivery {
     GatewayEventDelivery {
         delivery: delivery(connection_id),
-        event: event(cursor),
+        event: event(marker),
     }
 }
 

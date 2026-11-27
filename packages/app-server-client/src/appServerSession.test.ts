@@ -6,7 +6,6 @@ import type {
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
   ChatItem,
-  EventCursor,
   InitializeResult,
   MessageId,
   StateSubscribeResult,
@@ -41,7 +40,6 @@ describe("AppServerSession", () => {
     const session = createAppServerSession(raw.connection);
     const initialized = vi.fn();
     const recovered = initializeResult();
-    recovered.snapshot.cursor = "cursor_recovered" as EventCursor;
     const statuses: string[] = [];
     session.handleSessionStatus((status) => statuses.push(status.status));
     session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, { onSnapshot: vi.fn() });
@@ -54,12 +52,12 @@ describe("AppServerSession", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(subscriptions).toBe(2);
 
-      obsolete.resolve(taskSubscription("obsolete", 1));
+      obsolete.resolve(taskSubscription(1));
       await vi.advanceTimersByTimeAsync(0);
       expect(statuses.at(-1)).toBe("recovering");
       expect(initialized).not.toHaveBeenCalled();
 
-      replacement.resolve(taskSubscription("replacement", 2));
+      replacement.resolve(taskSubscription(2));
       await initialization;
       expect(statuses.at(-1)).toBe("ready");
       expect(initialized).toHaveBeenCalledOnce();
@@ -83,7 +81,7 @@ describe("AppServerSession", () => {
       await vi.advanceTimersByTimeAsync(0);
       raw.invalidate();
       raw.fail(new Error("Recovery failed"));
-      obsolete.resolve(taskSubscription("obsolete", 1));
+      obsolete.resolve(taskSubscription(1));
       await expect(first).resolves.toMatch(/Recovery failed/);
       expect(statuses.at(-1)).toBe("unavailable");
 
@@ -109,7 +107,7 @@ describe("AppServerSession", () => {
       raw.invalidate();
       if (outcome === "failed") raw.fail(new Error("Recovery failed"));
       else session.close();
-      obsolete.resolve(taskSubscription("obsolete", 1));
+      obsolete.resolve(taskSubscription(1));
 
       await expect(initialization).resolves.toMatch(outcome === "failed" ? /Recovery failed/ : /closed/);
       expect(statuses).not.toContain("ready");
@@ -140,13 +138,13 @@ describe("AppServerSession", () => {
     });
 
     // Revision 2 follows the baseline, but the next event skips revision 3's link.
-    raw.emit(taskEvent("cursor_1", "cursor_2", 2));
-    raw.emit(taskEvent("cursor_3", "cursor_4", 4));
-    initial.resolve(taskSubscription("cursor_1", 1));
+    raw.emit(taskEvent(2));
+    raw.emit(taskEvent(4));
+    initial.resolve(taskSubscription(1));
     try {
       await vi.waitFor(() => expect(subscribeCount).toBe(2));
       expect(ready).not.toHaveBeenCalled();
-      replacement.resolve(taskSubscription("cursor_4", 4));
+      replacement.resolve(taskSubscription(4));
       await vi.waitFor(() => expect(snapshots.at(-1)).toBe(4));
       expect(ready).toHaveBeenCalledOnce();
     } finally {
@@ -154,7 +152,7 @@ describe("AppServerSession", () => {
     }
   });
 
-  it("drops buffered events the baseline already contains and applies those that follow it", async () => {
+  it("replays buffered events past the baseline and skips those it already contains", async () => {
     const initial = deferred<StateSubscribeResult>();
     const raw = fakeConnection(async (method) => {
       if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
@@ -165,36 +163,37 @@ describe("AppServerSession", () => {
     await session.initialize(initializeParams());
     const snapshots: number[] = [];
     session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
-      onSnapshot(snapshot) {
+      onSnapshot(snapshot, _event, snapshotChanged) {
+        if (snapshotChanged === false) return;
         if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
       },
     });
 
-    // App Server sends the subscription's earlier events before its reply, and later ones after.
-    raw.emit(taskEvent("cursor_1", "cursor_2", 2));
-    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
-    // Cursor values are unique, not consecutive: other subscriptions' events take values too.
-    raw.emit(taskEvent("cursor_3", "cursor_5", 4));
-    initial.resolve(taskSubscription("cursor_3", 3));
+    // App Server sends the subscription's earlier events before its reply, and later ones after;
+    // the Task's revision tells them apart.
+    raw.emit(taskEvent(2));
+    raw.emit(taskEvent(3));
+    raw.emit(taskEvent(4));
+    initial.resolve(taskSubscription(3));
     try {
       await vi.waitFor(() => expect(snapshots).toEqual([3, 4]));
       expect(logger.error).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
         "app_server_state_baseline_ready",
-        expect.objectContaining({ dropped_pending_event_count: 2 }),
+        expect.objectContaining({ replayed_pending_event_count: 3 }),
       );
     } finally {
       session.close();
     }
   });
 
-  it("logs a cursor gap as an error and resyncs", async () => {
+  it("logs a skipped revision as a rejected event and resyncs", async () => {
     const replacement = deferred<StateSubscribeResult>();
     let subscribeCount = 0;
     const raw = fakeConnection(async (method) => {
       if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
       subscribeCount += 1;
-      return subscribeCount === 1 ? taskSubscription("cursor_1", 1) : replacement.promise;
+      return subscribeCount === 1 ? taskSubscription(1) : replacement.promise;
     });
     const logger = recordingLogger();
     const session = createAppServerSession(raw.connection, logger);
@@ -207,32 +206,28 @@ describe("AppServerSession", () => {
     });
     await vi.waitFor(() => expect(snapshots).toEqual([1]));
 
-    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+    raw.emit(taskEvent(3));
     try {
       await vi.waitFor(() => expect(subscribeCount).toBe(2));
-      expect(logger.error).toHaveBeenCalledWith(
-        "app_server_state_cursor_gap",
-        expect.objectContaining({
-          expected_previous_cursor: "cursor_1",
-          previous_cursor: "cursor_2",
-          cursor: "cursor_3",
-        }),
+      expect(logger.warn).toHaveBeenCalledWith(
+        "app_server_state_event_rejected",
+        expect.objectContaining({ reason: "taskRevisionGap" }),
       );
-      replacement.resolve(taskSubscription("cursor_3", 3));
+      replacement.resolve(taskSubscription(3));
       await vi.waitFor(() => expect(snapshots.at(-1)).toBe(3));
     } finally {
       session.close();
     }
   });
 
-  it("refreshes once for a cursor gap and replays events received behind the new baseline", async () => {
+  it("refreshes once for a revision gap and replays events received behind the new baseline", async () => {
     const replacement = deferred<StateSubscribeResult>();
     let subscribeCount = 0;
     const raw = fakeConnection(async (method) => {
       if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
       subscribeCount += 1;
       return subscribeCount === 1
-        ? taskSubscription("cursor_1", 1)
+        ? taskSubscription(1)
         : replacement.promise;
     });
     const session = createAppServerSession(raw.connection);
@@ -245,13 +240,14 @@ describe("AppServerSession", () => {
     });
     await vi.waitFor(() => expect(snapshots).toEqual([1]));
 
-    raw.emit(taskEvent("missing_cursor", "cursor_2", 2));
-    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
-    raw.emit(taskEvent("cursor_3", "cursor_4", 4));
+    // Revision 2 never arrived: the first event skips it, the next two wait for the baseline.
+    raw.emit(taskEvent(3));
+    raw.emit(taskEvent(4));
+    raw.emit(taskEvent(5));
     await vi.waitFor(() => expect(subscribeCount).toBe(2));
-    replacement.resolve(taskSubscription("cursor_2", 2));
+    replacement.resolve(taskSubscription(3));
 
-    await vi.waitFor(() => expect(snapshots).toEqual([1, 2, 3, 4]));
+    await vi.waitFor(() => expect(snapshots).toEqual([1, 3, 4, 5]));
     expect(subscribeCount).toBe(2);
     session.close();
   });
@@ -281,9 +277,9 @@ describe("AppServerSession", () => {
           if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
         },
       });
-      raw.emit(taskEvent("cursor_1", "cursor_2", 2));
-      raw.emit(taskEvent("cursor_3", "cursor_4", 4));
-      initial.resolve(taskSubscription("cursor_1", 1));
+      raw.emit(taskEvent(2));
+      raw.emit(taskEvent(4));
+      initial.resolve(taskSubscription(1));
       await vi.advanceTimersByTimeAsync(0);
       expect(failed).toHaveBeenCalledOnce();
       expect(ready).not.toHaveBeenCalled();
@@ -291,7 +287,7 @@ describe("AppServerSession", () => {
       await vi.advanceTimersByTimeAsync(500);
       expect(subscribeCount).toBe(3);
       expect(ready).not.toHaveBeenCalled();
-      replacement.resolve(taskSubscription("cursor_4", 4));
+      replacement.resolve(taskSubscription(4));
       await vi.advanceTimersByTimeAsync(0);
       expect(snapshots.at(-1)).toBe(4);
       expect(ready).toHaveBeenCalledOnce();
@@ -305,7 +301,7 @@ describe("AppServerSession", () => {
     const requests: string[] = [];
     const raw = fakeConnection(async (method) => {
       requests.push(method);
-      if (method === STATE_SUBSCRIBE) return taskSubscription("cursor_1", 1);
+      if (method === STATE_SUBSCRIBE) return taskSubscription(1);
       if (method === STATE_UNSUBSCRIBE) {
         return { scope: { kind: "task", taskId: "task_1" as TaskId } };
       }
@@ -341,10 +337,10 @@ describe("AppServerSession", () => {
     let taskSubscriptions = 0;
     let projectSubscriptions = 0;
     const mutation = vi.fn();
-    const projects = (cursor: string): StateSubscribeResult => ({
-      scope: { kind: "projects" },
-      cursor: cursor as EventCursor,
-      snapshot: { kind: "projects", projects: { projects: [] } },
+    const catalogScope = { kind: "subagentCatalog" as const, taskId: "task_1" as TaskId };
+    const projects = (revision: number): StateSubscribeResult => ({
+      scope: catalogScope,
+      snapshot: { kind: "subagentCatalog", catalog: { taskId: catalogScope.taskId, revision, entries: [] } },
     });
     const raw = fakeConnection(async (method, params) => {
       if (method === TASK_CANCEL) {
@@ -354,10 +350,10 @@ describe("AppServerSession", () => {
       if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
       if ((params as { scope: { kind: string } }).scope.kind === "task") {
         taskSubscriptions += 1;
-        return taskSubscription(`task_${taskSubscriptions}`, taskSubscriptions);
+        return taskSubscription(taskSubscriptions);
       }
       projectSubscriptions += 1;
-      if (projectSubscriptions === 1) return projects("projects_1");
+      if (projectSubscriptions === 1) return projects(1);
       return projectSubscriptions === 2 ? obsoleteProjects.promise : latestProjects.promise;
     });
     const session = createAppServerSession(raw.connection);
@@ -369,7 +365,7 @@ describe("AppServerSession", () => {
           if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
         },
       });
-      session.subscribeState({ kind: "projects" }, { onSnapshot: vi.fn() });
+      session.subscribeState(catalogScope, { onSnapshot: vi.fn() });
       await vi.waitFor(() => expect(snapshots).toEqual([1]));
 
       raw.invalidate();
@@ -379,11 +375,11 @@ describe("AppServerSession", () => {
       raw.invalidate();
       raw.recover();
       await vi.waitFor(() => expect(snapshots).toEqual([1, 2, 3]));
-      obsoleteProjects.resolve(projects("projects_2"));
+      obsoleteProjects.resolve(projects(2));
       await Promise.resolve();
       expect(mutation).not.toHaveBeenCalled();
 
-      latestProjects.resolve(projects("projects_3"));
+      latestProjects.resolve(projects(3));
       await pendingMutation;
       expect(mutation).toHaveBeenCalledOnce();
       expect(projectSubscriptions).toBe(3);
@@ -409,8 +405,8 @@ function fakeConnection(
       return () => undefined;
     },
     handleNotification(_method, handler) {
-      eventListeners.add(handler);
-      return () => eventListeners.delete(handler);
+      eventListeners.add(handler as never);
+      return () => eventListeners.delete(handler as never);
     },
     handleGenerationInvalidated(handler) {
       invalidationListeners.add(handler);
@@ -447,14 +443,12 @@ function fakeConnection(
 }
 
 function taskSubscription(
-  cursor: string,
   revision: number,
   chatVersion = revision,
   chatSync: TaskChatSync = { kind: "full" },
   chatItems: ChatItem[] = [],
 ): StateSubscribeResult {
   return {
-    cursor: cursor as EventCursor,
     scope: { kind: "task", taskId: "task_1" as TaskId },
     snapshot: {
       kind: "task",
@@ -493,12 +487,9 @@ function recordingLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function taskEvent(previousCursor: string, cursor: string, revision: number): AppServerEvent {
+function taskEvent(revision: number): AppServerEvent {
   return {
     subscription: { kind: "task", taskId: "task_1" as TaskId },
-    previousCursor: previousCursor as EventCursor,
-    cursor: cursor as EventCursor,
-    scope: { kind: "task", stateRootId: "root_1" as never, taskId: "task_1" as TaskId },
     payload: {
       kind: "taskChanged",
       taskId: "task_1" as TaskId,
@@ -536,7 +527,6 @@ function initializeParams() {
 function initializeResult(): InitializeResult {
   return {
     snapshot: {
-      cursor: "cursor_initial" as EventCursor,
       server: { serverId: "server_1" as never, protocolVersion: { major: 1, minor: 0 }, capabilities: {} },
       stateRoot: { stateRootId: "root_1" as never },
       client: { clientInstanceId: "client_1" as never, shellKind: "web", surface: { kind: "home" } },
@@ -549,7 +539,6 @@ function initializeResult(): InitializeResult {
         devices: { remoteAccess: "off", serverName: "test" },
         terminals: { terminals: [] },
       },
-      pendingRequests: [],
     },
   };
 }
@@ -569,9 +558,8 @@ describe("AppServerSession Task resume", () => {
     revision: number,
     chatVersion: number,
     chatSync: TaskChatSync,
-    cursor = "cursor_resume",
   ): StateSubscribeResult {
-    const reply = taskSubscription(cursor, revision, chatVersion, chatSync);
+    const reply = taskSubscription(revision, chatVersion, chatSync);
     if (reply.snapshot.kind !== "task") throw new Error("expected a Task reply");
     // Fields are always current; the placeholder Chat is replaced by the client's own.
     reply.snapshot.task = {
@@ -614,7 +602,7 @@ describe("AppServerSession Task resume", () => {
 
   it("offers the released copy's Chat version and installs the missed changes on its Chat", async () => {
     const { session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
+      taskSubscription(4, 10, { kind: "full" }, [userItem("one")]),
       resume(6, 12, { kind: "deltas", changes: [{ kind: "append", item: userItem("two") }] }),
     ]);
 
@@ -635,7 +623,7 @@ describe("AppServerSession Task resume", () => {
 
   it("keeps the retained Chat when the reply says it is current", async () => {
     const { session } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
+      taskSubscription(4, 10, { kind: "full" }, [userItem("one")]),
       resume(5, 10, { kind: "current" }),
     ]);
 
@@ -649,8 +637,8 @@ describe("AppServerSession Task resume", () => {
 
   it("takes the reply's tail page when the server answers full", async () => {
     const { session } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
-      taskSubscription("cursor_2", 9, 30, { kind: "full" }, [userItem("fresh")]),
+      taskSubscription(4, 10, { kind: "full" }, [userItem("one")]),
+      taskSubscription(9, 30, { kind: "full" }, [userItem("fresh")]),
     ]);
 
     const snapshots = taskSnapshots(session);
@@ -663,9 +651,9 @@ describe("AppServerSession Task resume", () => {
 
   it("subscribes again without a version when the missed changes do not fit the copy", async () => {
     const { session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10),
+      taskSubscription(4, 10),
       resume(6, 12, { kind: "deltas", changes: [{ kind: "appendText", messageId: "absent" as MessageId, text: "x" }] }),
-      taskSubscription("cursor_2", 6, 12, { kind: "full" }, [userItem("fresh")]),
+      taskSubscription(6, 12, { kind: "full" }, [userItem("fresh")]),
     ]);
 
     const snapshots = taskSnapshots(session);
@@ -678,7 +666,7 @@ describe("AppServerSession Task resume", () => {
 
   it("offers a copy across a recovery on the same state root", async () => {
     const { raw, session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10),
+      taskSubscription(4, 10),
       resume(7, 10, { kind: "current" }),
     ]);
     raw.invalidate();
@@ -693,8 +681,8 @@ describe("AppServerSession Task resume", () => {
 
   it("drops copies when a recovery reports another state root", async () => {
     const { raw, session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4, 10),
-      taskSubscription("cursor_2", 7, 3),
+      taskSubscription(4, 10),
+      taskSubscription(7, 3),
     ]);
     raw.invalidate();
     const other = initializeResult();
@@ -724,7 +712,6 @@ describe("AppServerSession Tool detail and Subagent History resume", () => {
     content = "text",
   ): StateSubscribeResult {
     return {
-      cursor: `cursor_${revision}` as EventCursor,
       scope: toolScope,
       snapshot: {
         kind: "toolDetail",
@@ -743,7 +730,6 @@ describe("AppServerSession Tool detail and Subagent History resume", () => {
     availability: "available" | "waitingForActivity" = "available",
   ): StateSubscribeResult {
     return {
-      cursor: `cursor_${revision}` as EventCursor,
       scope: historyScope,
       snapshot: {
         kind: "subagentHistory",
@@ -918,16 +904,15 @@ describe("AppServerSession Navigation views", () => {
     historyLimit,
     historyLimits: [],
   });
-  const reply = (cursor: string) => ({
-    cursor: cursor as EventCursor,
-    frame: { section: "tasks", groupOrder: [], removedGroups: [], groups: [] },
+  const reply = (revision: number) => ({
+    frame: { section: "tasks", revision, groupOrder: [], removedGroups: [], groups: [] },
   });
 
   it("subscribes with the view parameters and unsubscribes by section", async () => {
     const requests: Array<[string, unknown]> = [];
     const raw = fakeConnection(async (method, params) => {
       requests.push([method, params]);
-      if (method === NAVIGATION_SUBSCRIBE) return reply("cursor_1");
+      if (method === NAVIGATION_SUBSCRIBE) return reply(1);
       return {};
     });
     const session = createAppServerSession(raw.connection);
@@ -947,7 +932,7 @@ describe("AppServerSession Navigation views", () => {
     const requests: Array<[string, unknown]> = [];
     const raw = fakeConnection(async (method, params) => {
       requests.push([method, params]);
-      if (method === NAVIGATION_SUBSCRIBE) return reply("cursor_1");
+      if (method === NAVIGATION_SUBSCRIBE) return reply(1);
       return {};
     });
     const session = createAppServerSession(raw.connection);
@@ -967,7 +952,7 @@ describe("AppServerSession Navigation views", () => {
     const requests: Array<[string, unknown]> = [];
     const raw = fakeConnection(async (method, params) => {
       requests.push([method, params]);
-      if (method === NAVIGATION_SUBSCRIBE) return reply(`cursor_${requests.length}`);
+      if (method === NAVIGATION_SUBSCRIBE) return reply(requests.length);
       return {};
     });
     const session = createAppServerSession(raw.connection);

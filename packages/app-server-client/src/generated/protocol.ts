@@ -163,10 +163,6 @@ export const TASK_ARCHIVE_OLDER = "task/archiveOlder" as const;
 
 export const TASK_RESTORE = "task/restore" as const;
 
-export const PERMISSION_REQUEST = "permission/request" as const;
-
-export const QUESTION_REQUEST = "question/request" as const;
-
 export const SECRET_READ = "secret/read" as const;
 export const SHELL_AUTH_TERMINAL = "shell/authTerminal" as const;
 export const SHELL_OPEN_EXTERNAL = "shell/openExternal" as const;
@@ -188,8 +184,6 @@ export type ClientInstanceId = string & { readonly __openaideBrand: "ClientInsta
 export type ClientMutationId = string & { readonly __openaideBrand: "ClientMutationId" };
 
 export type ClientRequestId = string & { readonly __openaideBrand: "ClientRequestId" };
-
-export type EventCursor = string & { readonly __openaideBrand: "EventCursor" };
 
 export type FileBrowserEntryId = string & { readonly __openaideBrand: "FileBrowserEntryId" };
 
@@ -365,7 +359,7 @@ export type StateSubscribeParams = { scope: SubscriptionScope,
  */
 knownVersion?: number, };
 
-export type StateSubscribeResult = { cursor: EventCursor, scope: SubscriptionScope, snapshot: SubscriptionSnapshot, };
+export type StateSubscribeResult = { scope: SubscriptionScope, snapshot: SubscriptionSnapshot, };
 
 export type TaskChatSync = { "kind": "current" } | { "kind": "deltas", changes: Array<TaskChatChange>, } | { "kind": "full" };
 
@@ -1052,8 +1046,6 @@ export type PermissionRequestOption = { optionId: string, name: string, kind: Pe
 
 export type PermissionRequestOptionKind = "allowOnce" | "allowAlways" | "rejectOnce" | "rejectAlways";
 
-export type PermissionRequestResponse = { optionId: string, };
-
 export type QuestionRequestParams = { message: string, fields: Array<QuestionField>, };
 
 export type QuestionField = { "kind": "string", key: string, title: string, description?: string | null, required: boolean, default?: string | null, minLength?: number | null, maxLength?: number | null, pattern?: string | null, format?: QuestionStringFormat | null, } | { "kind": "number", key: string, title: string, description?: string | null, required: boolean, default?: number | null, minimum?: number | null, maximum?: number | null, } | { "kind": "integer", key: string, title: string, description?: string | null, required: boolean, default?: number | null, minimum?: number | null, maximum?: number | null, } | { "kind": "boolean", key: string, title: string, description?: string | null, required: boolean, default?: boolean | null, } | { "kind": "singleSelect", key: string, title: string, description?: string | null, required: boolean, default?: string | null, options: Array<QuestionOption>, } | { "kind": "multiSelect", key: string, title: string, description?: string | null, required: boolean, default?: Array<string>, minItems?: number | null, maxItems?: number | null, options: Array<QuestionOption>, };
@@ -1488,13 +1480,7 @@ export type SupportRecoverStuckSessionsParams = Record<symbol, never>;
 
 export type SupportRecoverStuckSessionsResult = { recoveredTasks: Array<TaskSnapshot>, };
 
-export type AppServerEvent = {
-/**
- * Identifies the independently ordered subscription stream carrying this event.
- */
-subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
-
-export type EventScope = { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
+export type AppServerEvent = { subscription: SubscriptionScope, payload: AppServerEventPayload, };
 
 export type AppServerEventPayload = { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "navigationFrame", frame: NavigationFrame, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
 /**
@@ -1538,7 +1524,7 @@ removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
-export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope,
+export type ClientSnapshot = { server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope,
 /**
  * The complete global state, filtered to the client's Projects for VS Code (ADR-0086). Later
  * changes arrive as `sync` notifications.
@@ -1679,7 +1665,7 @@ historyLimits: Array<NavigationHistoryLimit>,
  */
 openRow?: NavigationRowRef, };
 
-export type NavigationSubscribeResult = { cursor: EventCursor,
+export type NavigationSubscribeResult = {
 /**
  * The baseline: every group of the view as a frame.
  */
@@ -1718,6 +1704,12 @@ hidden: number,
 undiscovered: boolean, discovery: NavigationDiscovery, };
 
 export type NavigationFrame = { section: TaskNavigationSection,
+/**
+ * Orders frames across views and subscriptions of one App Server run: it only grows, and a
+ * baseline carries the value current when it was computed. A client drops a frame whose
+ * revision is not above the one it holds, which discards frames sent before its baseline.
+ */
+revision: number,
 /**
  * The Project order, present when it changed (always in the baseline).
  */
@@ -2351,10 +2343,8 @@ export type ClientNotificationParamsByMethod = {
   [CLIENT_SECRET_KEYS_CHANGED]: ClientSecretKeysChangedParams;
 };
 
-export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;
+export type ServerRequestMethod = typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;
 export type ServerRequestParamsByMethod = {
-  [PERMISSION_REQUEST]: PermissionRequestParams;
-  [QUESTION_REQUEST]: QuestionRequestParams;
   [SECRET_READ]: SecretReadParams;
   [SHELL_AUTH_TERMINAL]: ShellAuthTerminalParams;
   [SHELL_OPEN_EXTERNAL]: ShellOpenExternalParams;
@@ -2363,8 +2353,6 @@ export type ServerRequestParamsByMethod = {
 };
 
 export type ServerRequestResponseResultByMethod = {
-  [PERMISSION_REQUEST]: PermissionRequestResponse;
-  [QUESTION_REQUEST]: QuestionRequestResponse;
   [SECRET_READ]: SecretReadResponse;
   [SHELL_AUTH_TERMINAL]: ShellAuthTerminalResponse;
   [SHELL_OPEN_EXTERNAL]: ShellOpenExternalResponse;

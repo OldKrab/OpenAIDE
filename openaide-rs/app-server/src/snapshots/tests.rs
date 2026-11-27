@@ -20,7 +20,6 @@ use super::{
 use crate::agent::registry::{AgentRegistry, CODEX_AGENT_ID};
 use crate::client_lifecycle::{ClientContext, ConnectionId};
 use crate::settings::SettingsCatalog;
-use crate::storage_runtime::CursorSequencer;
 
 #[test]
 fn global_state_includes_backend_owned_agent_collection() {
@@ -92,7 +91,6 @@ fn client_snapshot_includes_requested_task_for_task_surface() {
                 task_id: TaskId::from("task-1"),
             },
             global(),
-            &CursorSequencer::new().read_token(),
         )
         .unwrap();
 
@@ -117,7 +115,6 @@ fn client_snapshot_preserves_global_state_when_requested_task_is_missing() {
                 task_id: TaskId::from("task-missing"),
             },
             global(),
-            &CursorSequencer::new().read_token(),
         )
         .expect("a missing routed Task must not fail client initialization");
 
@@ -138,7 +135,6 @@ fn task_subscription_uses_backend_owned_task_snapshot() {
                 task_id: TaskId::from("task-1"),
             },
             None,
-            &CursorSequencer::new().read_token(),
         )
         .unwrap()
     else {

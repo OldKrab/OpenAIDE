@@ -275,3 +275,20 @@ fn a_checkpoint_beyond_the_log_fails_closed_instead_of_inventing_frames() {
     assert!(reopened.load(TASK).is_err());
     reopened.shutdown().unwrap();
 }
+
+#[test]
+fn a_loaded_projection_carries_the_durable_chat_frame_as_its_version() {
+    let root = TempDir::new().unwrap();
+    let (store, mut projection) = open_with_task(root.path());
+    accept_user_message(&store, &mut projection, "one");
+    accept_user_message(&store, &mut projection, "two");
+    let version = store.chat_version(TASK).unwrap();
+    store.shutdown().unwrap();
+
+    let (loaded, _) = crate::storage::task_journal::split::load_projection(&task_dir(root.path()))
+        .unwrap()
+        .expect("the Task is on disk");
+
+    assert_eq!(loaded.chat_version, version);
+    assert!(version > 0);
+}

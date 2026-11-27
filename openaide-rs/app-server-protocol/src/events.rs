@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{ClientInstanceId, EventCursor, MessageId, StateRootId, SubagentId, TaskId};
+use crate::ids::{MessageId, SubagentId, TaskId};
 use crate::snapshot::{
     AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot, PendingRequestSnapshot,
     SubagentCatalogSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
@@ -11,32 +11,15 @@ use crate::snapshot::{
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
 
+/// One `app/event` notification. `subscription` names the subscription that receives it. App
+/// Server sends a subscription's notifications in publish order after its subscribe reply
+/// (ADR-0086), so an event carries no cursor: Task, Subagent History and Tool detail payloads
+/// carry the entity's own revision, and a Navigation frame its view's revision.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppServerEvent {
-    /// Identifies the independently ordered subscription stream carrying this event.
     pub subscription: SubscriptionScope,
-    pub previous_cursor: EventCursor,
-    pub cursor: EventCursor,
-    pub scope: EventScope,
     pub payload: AppServerEventPayload,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum EventScope {
-    Client {
-        state_root_id: StateRootId,
-        client_instance_id: ClientInstanceId,
-    },
-    Task {
-        state_root_id: StateRootId,
-        task_id: TaskId,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

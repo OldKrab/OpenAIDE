@@ -102,7 +102,7 @@ describe("TaskView render isolation", () => {
         <TaskView
           {...taskViewProps(updated)}
           liveTextPresentation={{
-            agent: { messageId: "agent-1", eventCursor: "cursor-live-1" },
+            agent: { messageId: "agent-1", eventToken: "cursor-live-1" },
           }}
         />,
       );

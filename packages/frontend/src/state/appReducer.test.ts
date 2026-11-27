@@ -10,6 +10,20 @@ type PermissionChatMessage = ChatMessage & {
 };
 
 describe("app reducer composer state", () => {
+  it("drops a removed worktree repository and keeps the others", () => {
+    let state = createInitialState();
+    for (const repositoryId of ["repository_1", "repository_2"]) {
+      state = appReducer(state, {
+        type: "worktreeRepository",
+        repository: { repositoryId, revision: 1, worktrees: [] } as never,
+      });
+    }
+
+    state = appReducer(state, { type: "worktreeRepository:removed", repositoryId: "repository_1" });
+
+    expect(Object.keys(state.worktreeRepositories)).toEqual(["repository_2"]);
+  });
+
   it("dismisses a Task composer error without discarding its draft", () => {
     let state = createInitialState();
     state = {
@@ -108,7 +122,7 @@ describe("app reducer composer state", () => {
       type: "taskChat:liveText",
       taskId: "task_1",
       channel: "agent",
-      eventCursor: "cursor-live",
+      eventToken: "cursor-live",
       messageId: "agent-live",
     });
 
@@ -130,13 +144,13 @@ describe("app reducer composer state", () => {
       liveText: {
         messageId: "agent-live",
         channel: "agent",
-        eventCursor: "cursor-terminal-text",
+        eventToken: "cursor-terminal-text",
       },
     });
 
     expect(state.taskLiveTextPresentation.task_1?.agent).toEqual({
       messageId: "agent-live",
-      eventCursor: "cursor-terminal-text",
+      eventToken: "cursor-terminal-text",
     });
 
     state = appReducer(state, {
@@ -149,7 +163,7 @@ describe("app reducer composer state", () => {
 
   it("forgets a running task's text signal once its Chat is left", () => {
     const running = snapshot("task_1", [chatMessage("agent-live", "Complete")]);
-    const liveText = { messageId: "agent-live", channel: "agent" as const, eventCursor: "cursor-live" };
+    const liveText = { messageId: "agent-live", channel: "agent" as const, eventToken: "cursor-live" };
     let state = createInitialState();
     state = appReducer(state, {
       type: "snapshot",
@@ -165,8 +179,8 @@ describe("app reducer composer state", () => {
     // Returning shows the received text at once; only text that arrives afterwards is live again.
     state = appReducer(state, { type: "selection:set", taskId: "task_1" });
     expect(state.taskLiveTextPresentation.task_1).toBeUndefined();
-    state = appReducer(state, { type: "taskChat:liveText", taskId: "task_1", ...liveText, eventCursor: "cursor-next" });
-    expect(state.taskLiveTextPresentation.task_1?.agent?.eventCursor).toBe("cursor-next");
+    state = appReducer(state, { type: "taskChat:liveText", taskId: "task_1", ...liveText, eventToken: "cursor-next" });
+    expect(state.taskLiveTextPresentation.task_1?.agent?.eventToken).toBe("cursor-next");
   });
 
   it("applies a config result without replacing a pending permission request", () => {

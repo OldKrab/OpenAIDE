@@ -141,7 +141,7 @@ export type TaskChatScrollState = {
 
 export type LiveTextPresentationSignal = {
   messageId: string;
-  eventCursor: string;
+  eventToken: string;
 };
 
 export type TaskLiveTextPresentation = {

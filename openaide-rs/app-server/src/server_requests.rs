@@ -8,8 +8,9 @@ mod types;
 pub use broker::ServerRequestBroker;
 pub use runtime::ServerRequestRuntime;
 pub use types::{
-    OpenRequestOutcome, RequestLifecycleOutcome, RequestUnavailableReason, ResponseOutcome,
-    ServerRequestAnswer, ServerRequestDelivery, ServerRequestDraft,
+    is_task_state_request, OpenRequestOutcome, RequestLifecycleOutcome, RequestUnavailableReason,
+    ResponseOutcome, ServerRequestAnswer, ServerRequestDelivery, ServerRequestDraft,
+    PERMISSION_REQUEST_TAG, QUESTION_REQUEST_TAG,
 };
 
 #[cfg(test)]

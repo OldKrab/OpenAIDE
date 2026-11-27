@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use openaide_app_server_protocol::envelopes::RequestMeta;
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::methods::{
     NAVIGATION_SUBSCRIBE, NAVIGATION_UNSUBSCRIBE, NAVIGATION_UPDATE,
@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::navigation::FlushedFrames;
+use crate::state_sync::EventAddress;
 
 use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
 
@@ -63,8 +64,7 @@ impl RpcGateway {
         events
     }
 
-    /// Sends a frame through the client's own subscription chain, so a missed frame shows as a
-    /// cursor gap exactly like any other event.
+    /// Sends a frame to the one client whose view it is.
     fn publish_navigation_frame(
         &mut self,
         client: &ClientInstanceId,
@@ -72,10 +72,12 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Client {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                client_instance_id: client.clone(),
+        event_deliveries(self.state_stream.publish(
+            EventAddress::Client {
+                client: client.clone(),
+                scope: SubscriptionScope::TaskNavigation {
+                    section: frame.section,
+                },
             },
             AppServerEventPayload::NavigationFrame { frame },
             |client_id| client_hub.delivery_for(client_id),
@@ -106,14 +108,13 @@ impl RpcGateway {
                 responses::not_initialized(NAVIGATION_SUBSCRIBE.to_string()),
             );
         };
-        // Bring every existing view current first, so this subscription's baseline cursor
+        // Bring every existing view current first, so this subscription's baseline revision
         // orders after the frames those views were owed.
         let mut events = self.flush_navigation_unqueued(now);
         let section = params.section;
         let scope = SubscriptionScope::TaskNavigation { section };
         let newly_subscribed = !self.state_stream.is_subscribed(&ctx, &scope);
-        let cursor = self
-            .state_stream
+        self.state_stream
             .register_view_subscription(&ctx, scope.clone());
         let mut flushed = match self
             .navigation
@@ -134,6 +135,7 @@ impl RpcGateway {
             .map(|index| flushed.frames.remove(index).1)
             .unwrap_or_else(|| NavigationFrame {
                 section,
+                revision: self.navigation.revision(),
                 ..Default::default()
             });
         events.extend(self.publish_navigation_flush(flushed, now));
@@ -159,7 +161,7 @@ impl RpcGateway {
             connection_id,
             id,
             meta,
-            NavigationSubscribeResult { cursor, frame: own },
+            NavigationSubscribeResult { frame: own },
             events,
         )
     }

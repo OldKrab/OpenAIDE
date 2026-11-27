@@ -4,10 +4,7 @@ import {
   mapProtocolTaskSnapshot,
   type ProtocolMappingWarning,
 } from "./appServerProtocolMapping";
-import { agentCollectionAction } from "../services/appServerGlobalSync";
-import { mapProtocolAppPreferences } from "./appPreferencesMapping";
-import { mapProtocolRuntimeSettings } from "./runtimeSettingsMapping";
-import { mapSettingsSections } from "./settingsProjectionMapping";
+import { agentCollectionAction, settingsActions } from "../services/appServerGlobalSync";
 import {
   selectInitialNewTaskContext,
   selectInitialNewTaskProject,
@@ -81,26 +78,7 @@ export function actionsFromInitialSnapshot(
     });
   }
 
-  if (global.settings.runtime) {
-    actions.push({
-      type: "settings:runtimeSettings",
-      settings: mapProtocolRuntimeSettings(global.settings.runtime),
-    });
-  }
-
-  if (global.settings.sections.length) {
-    actions.push({
-      type: "settings:sections",
-      tabs: mapSettingsSections(global.settings.sections),
-    });
-  }
-
-  if (global.settings.preferences) {
-    actions.push({
-      type: "settings:preferences",
-      preferences: mapProtocolAppPreferences(global.settings.preferences),
-    });
-  }
+  actions.push(...settingsActions(global.settings));
 
   // The Frontend renders these areas live, so a baseline installs them as a change would.
   actions.push(agentCollectionAction(global.agents));

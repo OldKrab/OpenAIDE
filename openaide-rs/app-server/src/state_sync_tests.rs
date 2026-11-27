@@ -1,8 +1,8 @@
 use openaide_app_server_protocol::client::{
     ClientCapabilities, RequestedSurface, ShellDescriptor, ShellKind,
 };
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope, TaskChanges};
-use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
+use openaide_app_server_protocol::events::{AppServerEventPayload, TaskChanges};
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot;
 use openaide_app_server_protocol::state::SubscriptionScope;
 
@@ -12,74 +12,38 @@ use crate::snapshots::SnapshotBuilder;
 use super::*;
 
 #[test]
-fn subscribe_returns_scope_baseline_and_registers_subscription() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let cursor = stream.register_view_subscription(
-        &ctx("client-1", "conn-1"),
-        SubscriptionScope::TaskNavigation {
-            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-        },
-    );
+fn a_view_subscription_is_registered_once() {
+    let mut stream = StateStream::new();
+    let context = ctx("client-1", "conn-1");
+    stream.register_view_subscription(&context, nav_scope());
+    stream.register_view_subscription(&context, nav_scope());
 
-    assert_eq!(cursor.as_str(), "cursor-0");
     assert_eq!(stream.subscription_count(), 1);
 }
 
 #[test]
-fn unrelated_subscription_event_does_not_advance_task_cursor() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
+fn a_task_event_reaches_only_that_tasks_subscribers() {
+    let mut stream = StateStream::new();
     let context = ctx("client-1", "conn-1");
-    let task_baseline = stream
-        .subscribe(
-            &context,
-            task_scope("task-1"),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
-    stream
-        .subscribe(
-            &context,
-            task_scope("task-2"),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
+    stream.register_view_subscription(&context, nav_scope());
+    for scope in [task_scope("task-1"), task_scope("task-2")] {
+        stream
+            .subscribe(&context, scope, &snapshots(), AppServerTime(1))
+            .unwrap();
+    }
 
-    let other_event = stream.publish_committed(
-        task_event_scope("task-2"),
-        task_changed("task-2"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-    assert_eq!(other_event.deliveries.len(), 1);
-    assert_eq!(
-        other_event.deliveries[0].event.subscription,
-        task_scope("task-2")
-    );
+    let publish = publish_task(&mut stream, task_changed("task-1"));
 
-    let task_event = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(3),
-    );
-    assert_eq!(task_event.deliveries.len(), 1);
+    assert_eq!(publish.deliveries.len(), 1);
     assert_eq!(
-        task_event.deliveries[0].event.previous_cursor,
-        task_baseline.cursor
-    );
-    // Cursor values come from one sequence that every publication advances.
-    assert_eq!(task_event.deliveries[0].event.cursor.as_str(), "cursor-2");
-    assert_eq!(
-        task_event.deliveries[0].event.subscription,
+        publish.deliveries[0].event.subscription,
         task_scope("task-1")
     );
 }
 
 #[test]
-fn clients_sharing_one_scope_receive_the_same_cursor_link() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
+fn clients_sharing_one_scope_all_receive_the_event() {
+    let mut stream = StateStream::new();
     for client in ["client-1", "client-2"] {
         stream
             .subscribe(
@@ -91,22 +55,195 @@ fn clients_sharing_one_scope_receive_the_same_cursor_link() {
             .unwrap();
     }
 
-    let publish = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
+    let publish = publish_task(&mut stream, task_changed("task-1"));
 
     assert_eq!(publish.deliveries.len(), 2);
     assert!(publish
         .deliveries
         .iter()
-        .all(
-            |delivery| delivery.event.previous_cursor.as_str() == "cursor-0"
-                && delivery.event.cursor.as_str() == "cursor-1"
-                && delivery.event.subscription == task_scope("task-1")
-        ));
+        .all(|delivery| delivery.event.subscription == task_scope("task-1")));
+}
+
+#[test]
+fn resubscribing_keeps_one_subscription() {
+    let mut stream = StateStream::new();
+    let context = ctx("client-1", "conn-1");
+    for _ in 0..2 {
+        stream
+            .subscribe(
+                &context,
+                task_scope("task-1"),
+                &snapshots(),
+                AppServerTime(1),
+            )
+            .unwrap();
+    }
+
+    let publish = publish_task(&mut stream, task_changed("task-1"));
+
+    assert_eq!(stream.subscription_count(), 1);
+    assert_eq!(publish.deliveries.len(), 1);
+}
+
+#[test]
+fn a_subscriber_with_no_route_is_skipped() {
+    let mut stream = StateStream::new();
+    stream
+        .subscribe(
+            &ctx("client-1", "conn-1"),
+            task_scope("task-1"),
+            &snapshots(),
+            AppServerTime(1),
+        )
+        .unwrap();
+
+    let publish = stream.publish(
+        EventAddress::Subscribers(task_scope("task-1")),
+        task_changed("task-1"),
+        |_| None,
+        AppServerTime(2),
+    );
+
+    assert!(publish.deliveries.is_empty());
+}
+
+#[test]
+fn history_sync_reaches_the_task_subscription() {
+    let mut stream = StateStream::new();
+    let scope = task_scope("task-1");
+    stream
+        .subscribe(
+            &ctx("client-1", "conn-1"),
+            scope.clone(),
+            &snapshots(),
+            AppServerTime(1),
+        )
+        .unwrap();
+
+    let publish = publish_task(
+        &mut stream,
+        AppServerEventPayload::TaskHistorySyncUpdated {
+            task_id: TaskId::from("task-1"),
+            history_sync: TaskHistorySyncSnapshot::Syncing { generation: 1 },
+        },
+    );
+
+    assert_eq!(publish.deliveries.len(), 1);
+    assert_eq!(publish.deliveries[0].event.subscription, scope);
+}
+
+#[test]
+fn a_navigation_frame_reaches_only_the_client_whose_view_it_is() {
+    let mut stream = StateStream::new();
+    for client in ["client-1", "client-2"] {
+        stream.register_view_subscription(&ctx(client, &format!("conn-{client}")), nav_scope());
+    }
+
+    let publish = stream.publish(
+        EventAddress::Client {
+            client: ClientInstanceId::from("client-1"),
+            scope: nav_scope(),
+        },
+        nav_frame(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(2),
+    );
+
+    assert_eq!(publish.deliveries.len(), 1);
+    assert_eq!(
+        publish.deliveries[0].delivery.client_instance_id.as_str(),
+        "client-1"
+    );
+}
+
+#[test]
+fn a_removed_task_ends_its_task_subscriptions_after_the_last_event() {
+    let mut stream = StateStream::new();
+    let context = ctx("client-1", "conn-1");
+    stream.register_view_subscription(&context, nav_scope());
+    for scope in [task_scope("task-1"), task_scope("task-2")] {
+        stream
+            .subscribe(&context, scope, &snapshots(), AppServerTime(1))
+            .unwrap();
+    }
+
+    let removed = publish_task(
+        &mut stream,
+        AppServerEventPayload::TaskChanged {
+            task_id: TaskId::from("task-1"),
+            revision: 3,
+            changes: TaskChanges {
+                removed: true,
+                ..Default::default()
+            },
+        },
+    );
+    let after = publish_task(&mut stream, task_changed("task-1"));
+
+    assert_eq!(removed.deliveries.len(), 1);
+    assert!(after.deliveries.is_empty());
+    // The Navigation view and the other Task are untouched.
+    assert_eq!(stream.subscription_count(), 2);
+}
+
+#[test]
+fn a_removed_tasks_content_removal_ends_only_its_entity_subscriptions() {
+    let mut stream = StateStream::new();
+    let context = ctx("client-1", "conn-1");
+    let history = SubscriptionScope::SubagentHistory {
+        task_id: TaskId::from("task-1"),
+        subagent_id: "subagent-1".into(),
+    };
+    let tool = SubscriptionScope::ToolDetail {
+        task_id: TaskId::from("task-1"),
+        artifact_id: "artifact-1".to_string(),
+    };
+    let other_history = SubscriptionScope::SubagentHistory {
+        task_id: TaskId::from("task-2"),
+        subagent_id: "subagent-1".into(),
+    };
+    // Registered directly: the bare snapshot builder cannot serve history or Tool detail.
+    for scope in [task_scope("task-1"), history, tool, other_history] {
+        stream.register_view_subscription(&context, scope);
+    }
+
+    let publish = publish_task(
+        &mut stream,
+        AppServerEventPayload::TaskContentRemoved {
+            task_id: TaskId::from("task-1"),
+        },
+    );
+
+    assert_eq!(publish.deliveries.len(), 2);
+    // The Task's own subscription ends with its TaskChanged, not with this event.
+    assert_eq!(stream.subscription_count(), 2);
+}
+
+#[test]
+fn unsubscribe_removes_only_the_requested_scope() {
+    let mut stream = StateStream::new();
+    let context = ctx("client-1", "conn-1");
+    for scope in [task_scope("task-1"), task_scope("task-2")] {
+        stream
+            .subscribe(&context, scope, &snapshots(), AppServerTime(1))
+            .unwrap();
+    }
+    stream.unsubscribe(&context, task_scope("task-1"), AppServerTime(2));
+
+    let publish = publish_task(&mut stream, task_changed("task-1"));
+
+    assert!(publish.deliveries.is_empty());
+    assert_eq!(stream.subscription_count(), 1);
+}
+
+fn publish_task(stream: &mut StateStream, payload: AppServerEventPayload) -> PublishOutcome {
+    let address = EventAddress::of_task_payload(&payload).expect("a Task-owned payload");
+    stream.publish(
+        address,
+        payload,
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(2),
+    )
 }
 
 fn task_changed(task_id: &str) -> AppServerEventPayload {
@@ -133,6 +270,7 @@ fn nav_frame() -> AppServerEventPayload {
     AppServerEventPayload::NavigationFrame {
         frame: openaide_app_server_protocol::navigation::NavigationFrame {
             section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            revision: 1,
             group_order: None,
             removed_groups: Vec::new(),
             groups: Default::default(),
@@ -140,247 +278,8 @@ fn nav_frame() -> AppServerEventPayload {
     }
 }
 
-#[test]
-fn a_private_event_leaves_every_task_chain_unbroken() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let mut baselines = Vec::new();
-    for client in ["client-1", "client-2"] {
-        let context = ctx(client, &format!("conn-{client}"));
-        stream.register_view_subscription(&context, nav_scope());
-        baselines.push(
-            stream
-                .subscribe(
-                    &context,
-                    task_scope("task-1"),
-                    &snapshots(),
-                    AppServerTime(1),
-                )
-                .unwrap()
-                .cursor,
-        );
-    }
-
-    let private = stream.publish_committed(
-        EventScope::Client {
-            state_root_id: StateRootId::from("root-1"),
-            client_instance_id: ClientInstanceId::from("client-1"),
-        },
-        nav_frame(),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-    let shared = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(3),
-    );
-
-    assert_eq!(private.deliveries.len(), 1);
-    let link = |client: &str| {
-        shared
-            .deliveries
-            .iter()
-            .find(|delivery| delivery.delivery.client_instance_id.as_str() == client)
-            .map(|delivery| delivery.event.previous_cursor.clone())
-            .unwrap()
-    };
-    // The private frame is on its own Navigation chain, so neither Task chain moved.
-    assert_eq!(link("client-1"), baselines[0]);
-    assert_eq!(link("client-2"), baselines[1]);
-}
-
-#[test]
-fn resubscribing_rebases_the_chain_on_the_new_baseline() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let context = ctx("client-1", "conn-1");
-    stream
-        .subscribe(
-            &context,
-            task_scope("task-1"),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
-    let before = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-
-    let baseline = stream
-        .subscribe(
-            &context,
-            task_scope("task-1"),
-            &snapshots(),
-            AppServerTime(3),
-        )
-        .unwrap()
-        .cursor;
-    let after = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(4),
-    );
-
-    assert_eq!(stream.subscription_count(), 1);
-    // An event already sent for the old baseline is at or before the new one.
-    assert_eq!(before.deliveries[0].event.cursor, baseline);
-    assert_eq!(after.deliveries[0].event.previous_cursor, baseline);
-}
-
-#[test]
-fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let baseline = stream
-        .subscribe(
-            &ctx("client-1", "conn-1"),
-            task_scope("task-1"),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap()
-        .cursor;
-
-    let missed = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |_| None,
-        AppServerTime(2),
-    );
-    let next = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(3),
-    );
-
-    assert!(missed.deliveries.is_empty());
-    assert_ne!(next.deliveries[0].event.previous_cursor, baseline);
-}
-
-#[test]
-fn a_task_event_does_not_leak_into_navigation_or_other_task_subscriptions() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let context = ctx("client-1", "conn-1");
-    stream.register_view_subscription(&context, nav_scope());
-    for scope in [task_scope("task-1"), task_scope("task-2")] {
-        stream
-            .subscribe(&context, scope, &snapshots(), AppServerTime(1))
-            .unwrap();
-    }
-
-    let publish = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-
-    assert_eq!(publish.deliveries.len(), 1);
-    assert_eq!(
-        publish.deliveries[0].event.subscription,
-        task_scope("task-1")
-    );
-}
-
-#[test]
-fn history_sync_uses_the_matching_task_stream() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let scope = SubscriptionScope::Task {
-        task_id: TaskId::from("task-1"),
-    };
-    stream
-        .subscribe(
-            &ctx("client-1", "conn-1"),
-            scope.clone(),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
-
-    let publish = stream.publish_committed(
-        task_event_scope("task-1"),
-        AppServerEventPayload::TaskHistorySyncUpdated {
-            task_id: TaskId::from("task-1"),
-            history_sync: TaskHistorySyncSnapshot::Syncing { generation: 1 },
-        },
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-
-    assert_eq!(publish.deliveries.len(), 1);
-    assert_eq!(publish.deliveries[0].event.subscription, scope);
-}
-
-#[test]
-fn navigation_frame_is_delivered_only_to_its_navigation_scope() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    stream.register_view_subscription(
-        &ctx("client-1", "conn-1"),
-        SubscriptionScope::TaskNavigation {
-            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-        },
-    );
-
-    let publish = stream.publish_committed(
-        EventScope::Client {
-            state_root_id: StateRootId::from("root-1"),
-            client_instance_id: ClientInstanceId::from("client-1"),
-        },
-        AppServerEventPayload::NavigationFrame {
-            frame: openaide_app_server_protocol::navigation::NavigationFrame {
-                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                group_order: None,
-                removed_groups: Vec::new(),
-                groups: Default::default(),
-            },
-        },
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(2),
-    );
-
-    assert_eq!(publish.deliveries.len(), 1);
-    assert!(matches!(
-        publish.deliveries[0].event.subscription,
-        SubscriptionScope::TaskNavigation { .. }
-    ));
-}
-
-#[test]
-fn unsubscribe_removes_only_the_requested_scope() {
-    let mut stream = StateStream::new(StateRootId::from("root-1"));
-    let context = ctx("client-1", "conn-1");
-    stream
-        .subscribe(
-            &context,
-            task_scope("task-1"),
-            &snapshots(),
-            AppServerTime(1),
-        )
-        .unwrap();
-    stream.unsubscribe(&context, task_scope("task-1"), AppServerTime(2));
-
-    let publish = stream.publish_committed(
-        task_event_scope("task-1"),
-        task_changed("task-1"),
-        |client_id| Some(delivery(client_id)),
-        AppServerTime(3),
-    );
-    assert!(publish.deliveries.is_empty());
-}
-
 fn snapshots() -> SnapshotBuilder {
     SnapshotBuilder::new("server-1".into(), "root-1".into())
-}
-
-fn task_event_scope(task_id: &str) -> EventScope {
-    EventScope::Task {
-        state_root_id: StateRootId::from("root-1"),
-        task_id: TaskId::from(task_id),
-    }
 }
 
 fn ctx(client_id: &str, connection_id: &str) -> ClientContext {

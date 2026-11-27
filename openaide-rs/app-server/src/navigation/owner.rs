@@ -37,6 +37,8 @@ pub(crate) struct NavigationOwner {
     discovery: DiscoveryState,
     views: HashMap<(ClientInstanceId, TaskNavigationSection), View>,
     sections: HashMap<TaskNavigationSection, SectionRows>,
+    /// Stamped on each frame produced (see `NavigationFrame::revision`).
+    revision: u64,
 }
 
 impl NavigationOwner {
@@ -51,7 +53,13 @@ impl NavigationOwner {
             discovery,
             views: HashMap::new(),
             sections: HashMap::new(),
+            revision: 0,
         }
+    }
+
+    /// The revision of the latest frame produced; a baseline with no changes carries it.
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// An owner over no Projects, for gateways built without a Task store.
@@ -212,9 +220,13 @@ impl NavigationOwner {
     ) -> Option<NavigationFrame> {
         let rows = &self.sections.get(&key.1)?.projects;
         let source = &self.source;
-        self.views
+        let mut frame = self
+            .views
             .get_mut(key)?
-            .diff(rows, |project_id| source.discovery(project_id))
+            .diff(rows, |project_id| source.discovery(project_id))?;
+        self.revision += 1;
+        frame.revision = self.revision;
+        Some(frame)
     }
 
     /// Replaces the demand board from the Tasks views: the largest history limit any of them

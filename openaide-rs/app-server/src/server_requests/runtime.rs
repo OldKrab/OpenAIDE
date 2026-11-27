@@ -68,7 +68,7 @@ impl ServerRequestRuntime {
             scope: PendingRequestScope::Task {
                 task_id: TaskId::from(task_id.to_string()),
             },
-            method: "permission/request".to_string(),
+            method: super::PERMISSION_REQUEST_TAG.to_string(),
             title: request.title.clone(),
             params: permission_params(request),
         };

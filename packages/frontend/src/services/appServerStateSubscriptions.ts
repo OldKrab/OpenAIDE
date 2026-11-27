@@ -4,7 +4,6 @@ import {
   type AppServerSession,
   type ClientSnapshot,
   type ProjectSummary,
-  type SubscriptionIngestionContext,
   type SubscriptionScope,
   type ReplicaSnapshot,
   type NavigationReplica,
@@ -22,7 +21,7 @@ import type { AgentOption } from "../state/composerOptions";
 
 type StateSubscriptionConnection = Pick<AppServerSession, "subscribeState">;
 
-export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
+export type StateSubscriptionMappingContext = {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
   taskNavigations?: Partial<Record<"tasks" | "archive", NavigationReplica>>;
@@ -30,8 +29,6 @@ export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
   return {
-    stateRootId: snapshot.stateRoot.stateRootId,
-    clientInstanceId: snapshot.client.clientInstanceId,
     agents: snapshot.global.agents.agents,
     projects: snapshot.global.projects.projects,
   };
@@ -99,7 +96,7 @@ export function startAppServerStateSubscription({
             liveText: {
               messageId: liveText.messageId,
               channel: liveText.channel,
-              eventCursor: liveText.eventCursor,
+              eventToken: liveText.eventToken,
             },
           });
         } else {
@@ -135,7 +132,8 @@ function liveTextPresentationAction(
     taskId: payload.taskId,
     messageId,
     channel,
-    eventCursor: event.cursor,
+    // The Task revision is unique per event, so it tells a fresh live-text event from a replay.
+    eventToken: String(payload.revision),
   };
 }
 

@@ -3,7 +3,9 @@ import type {
   AppServerSession,
   DeviceCollectionSnapshot,
   GlobalStateChanges,
+  NewTaskDefaultsSnapshot,
   ProjectCollectionSnapshot,
+  SettingsSnapshot,
   TerminalCollectionSnapshot,
   WorktreeRepositorySnapshot,
 } from "@openaide/app-server-client";
@@ -12,6 +14,10 @@ import type { AppAction } from "../state/appReducer";
 import { agentSettingsStatusFromProtocol, agentSignInFlowFromProtocol } from "../intents/agentSettingsRecords";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import type { AgentOption } from "../state/composerOptions";
+import { mapProtocolAppPreferences } from "../state/appPreferencesMapping";
+import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
+import { mapSettingsSections } from "../state/settingsProjectionMapping";
+import { selectInitialNewTaskContext, type NewTaskContextIds } from "../state/newTaskSelectionDefaults";
 import type { StateSubscriptionMappingContext } from "./appServerStateSubscriptions";
 import { remappedTaskNavigationActions } from "./appServerStateSubscriptions";
 
@@ -24,7 +30,25 @@ export type GlobalAreas = {
   devices?: DeviceCollectionSnapshot | null;
   terminals?: TerminalCollectionSnapshot | null;
   worktrees?: WorktreeRepositorySnapshot[];
+  removedWorktreeRepositories?: string[];
+  settings?: SettingsSnapshot | null;
+  newTaskDefaults?: NewTaskDefaultsSnapshot | null;
 };
+
+/** The settings areas a snapshot or change carries, as reducer actions; shared by baselines and `sync`. */
+export function settingsActions(settings: SettingsSnapshot): AppAction[] {
+  const actions: AppAction[] = [];
+  if (settings.runtime) {
+    actions.push({ type: "settings:runtimeSettings", settings: mapProtocolRuntimeSettings(settings.runtime) });
+  }
+  if (settings.sections.length) {
+    actions.push({ type: "settings:sections", tabs: mapSettingsSections(settings.sections) });
+  }
+  if (settings.preferences) {
+    actions.push({ type: "settings:preferences", preferences: mapProtocolAppPreferences(settings.preferences) });
+  }
+  return actions;
+}
 
 export function projectsAction(projects: ProjectCollectionSnapshot): AppAction {
   return {
@@ -64,6 +88,10 @@ export function applyGlobalAreas(
     currentAgentId?: () => string;
     dispatch: Dispatch<AppAction>;
     setAgents?: (agents: AgentOption[]) => void;
+    /** Receives preferences the Frontend also mirrors outside the reducer. */
+    setPreferences?: (preferences: Extract<AppAction, { type: "settings:preferences" }>["preferences"]) => void;
+    /** The New Task choices the user holds now; a defaults change never overrides them. */
+    liveNewTaskContext?: () => NewTaskContextIds;
   },
 ) {
   const { dispatch } = deps;
@@ -84,26 +112,61 @@ export function applyGlobalAreas(
   if (areas.devices) dispatch({ type: "settings:devices", devices: areas.devices });
   if (areas.terminals) dispatch({ type: "terminals", terminals: areas.terminals });
   for (const repository of areas.worktrees ?? []) dispatch({ type: "worktreeRepository", repository });
+  for (const repositoryId of areas.removedWorktreeRepositories ?? []) {
+    dispatch({ type: "worktreeRepository:removed", repositoryId });
+  }
+  if (areas.settings) {
+    for (const action of settingsActions(areas.settings)) {
+      if (action.type === "settings:preferences") deps.setPreferences?.(action.preferences);
+      dispatch(action);
+    }
+  }
+  if (areas.newTaskDefaults) applyNewTaskDefaults(areas.newTaskDefaults, context, deps);
+}
+
+/**
+ * New Task defaults seed a New Task that has no choice yet. Selection runs through the same
+ * rule as initialization with the live choices retained, so a user's pick always wins.
+ */
+function applyNewTaskDefaults(
+  defaults: NewTaskDefaultsSnapshot,
+  context: StateSubscriptionMappingContext,
+  deps: { dispatch: Dispatch<AppAction>; liveNewTaskContext?: () => NewTaskContextIds },
+) {
+  const live = deps.liveNewTaskContext?.() ?? {};
+  const agents = context.agents ?? [];
+  const projects = projectsAction({ projects: context.projects ?? [] });
+  if (projects.type !== "projects") return;
+  const chosen = selectInitialNewTaskContext({ retained: live, defaults, projects: projects.projects, agents });
+  if (chosen.projectId && chosen.projectId !== live.projectId) {
+    deps.dispatch({ ...projects, initialProjectId: chosen.projectId });
+  }
+  if (chosen.agentId && chosen.agentId !== live.agentId) {
+    const agent = agents.find((candidate) => candidate.agentId === chosen.agentId);
+    deps.dispatch({ type: "newTask:agent", agentId: chosen.agentId, agentLabel: agent?.label ?? chosen.agentId });
+  }
 }
 
 /**
  * Maps `sync` notifications into presentation actions. The state itself arrives in the
  * `client/initialize` reply and each recovery baseline, which the controller applies.
- * TODO(state-sync phase 7): settings and New Task defaults changes from other clients are not
- * applied live (they were not before); apply them once the reducers keep in-progress edits.
  */
 export function startGlobalSyncSubscription({
   backendConnection,
   context,
   currentAgentId,
   dispatch,
+  liveNewTaskContext,
   setAgents,
+  setPreferences,
 }: {
   backendConnection: GlobalSyncConnection;
   context: StateSubscriptionMappingContext;
   currentAgentId?: () => string;
   dispatch: Dispatch<AppAction>;
+  liveNewTaskContext?: () => NewTaskContextIds;
   setAgents?: (agents: AgentOption[]) => void;
+  setPreferences?: (preferences: Extract<AppAction, { type: "settings:preferences" }>["preferences"]) => void;
 }) {
   return backendConnection.handleNotification("sync", (changes: GlobalStateChanges) => {
     applyGlobalAreas(
@@ -113,9 +176,12 @@ export function startGlobalSyncSubscription({
         devices: changes.devices,
         terminals: changes.terminals,
         worktrees: changes.worktrees,
+        removedWorktreeRepositories: changes.removedWorktreeRepositories,
+        settings: changes.settings,
+        newTaskDefaults: changes.newTaskDefaults,
       },
       context,
-      { currentAgentId, dispatch, setAgents },
+      { currentAgentId, dispatch, liveNewTaskContext, setAgents, setPreferences },
     );
   });
 }

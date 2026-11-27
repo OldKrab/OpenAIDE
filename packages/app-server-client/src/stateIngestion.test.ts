@@ -4,9 +4,7 @@ import type {
   AppServerEventPayload,
   AgentId,
   ChatItem,
-  EventCursor,
   ProjectId,
-  StateRootId,
   StateSubscribeResult,
   SubscriptionScope,
   TaskId,
@@ -15,13 +13,11 @@ import type {
 } from "./generated/protocol.js";
 import { applySubscriptionEvent, createSubscriptionIngestionState } from "./stateIngestion.js";
 
-const rootId = "root-1" as StateRootId;
-
 describe("scope-local state ingestion", () => {
   it("applies one atomic Task patch at the exact next Task revision", () => {
     const state = taskState("task-1", 4);
     const item = chatItem("agent-1", "Hello");
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -59,7 +55,7 @@ describe("scope-local state ingestion", () => {
 
   it("keeps the Chat version when a notification changes no Chat", () => {
     const state = taskState("task-1", 4);
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -73,7 +69,7 @@ describe("scope-local state ingestion", () => {
 
   it("follows the background command list through Task deltas", () => {
     const changed = (state: ReturnType<typeof taskState>, revision: number, changes: object) => {
-      const result = applySubscriptionEvent(state, taskEvent("task-1", `cursor-${revision - 4}`, `cursor-${revision - 3}`, {
+      const result = applySubscriptionEvent(state, taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision,
@@ -110,7 +106,7 @@ describe("scope-local state ingestion", () => {
 
   it("applies a Task-owned permission policy delta", () => {
     const state = taskState("task-1", 4);
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -130,7 +126,7 @@ describe("scope-local state ingestion", () => {
       usedTokens: 31_000,
       capacityTokens: 258_400,
     };
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -147,7 +143,7 @@ describe("scope-local state ingestion", () => {
     const plan = {
       entries: [{ content: "Implement", priority: "high" as const, status: "inProgress" as const }],
     };
-    const replaced = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const replaced = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -159,7 +155,7 @@ describe("scope-local state ingestion", () => {
 
     const cleared = applySubscriptionEvent(
       replaced.state,
-      taskEvent("task-1", "cursor-2", "cursor-3", {
+      taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision: 6,
@@ -183,7 +179,7 @@ describe("scope-local state ingestion", () => {
       }],
     };
 
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 5,
@@ -198,7 +194,7 @@ describe("scope-local state ingestion", () => {
   it("requires a fresh baseline for a missing Task revision", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 4),
-      taskEvent("task-1", "cursor-1", "cursor-2", {
+      taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision: 6,
@@ -210,7 +206,7 @@ describe("scope-local state ingestion", () => {
 
   it("ignores an already represented Task revision", () => {
     const state = taskState("task-1", 4);
-    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, taskEvent("task-1", {
       kind: "taskChanged",
       taskId: taskId("task-1"),
       revision: 4,
@@ -219,37 +215,26 @@ describe("scope-local state ingestion", () => {
     expect(result).toMatchObject({ kind: "applied", snapshotChanged: false });
   });
 
-  it("ignores another subscription without advancing this cursor", () => {
+  it("ignores an event addressed to another subscription", () => {
     const state = taskState("task-1", 4);
     const event: AppServerEvent = {
-      subscription: { kind: "agents" },
-      previousCursor: cursor("cursor-90"),
-      cursor: cursor("cursor-91"),
-      scope: { kind: "stateRoot", stateRootId: rootId },
-      payload: { kind: "agentCollectionUpdated", agents: { agents: [] } },
+      subscription: { kind: "task", taskId: taskId("task-2") },
+      payload: {
+        kind: "taskChanged",
+        taskId: taskId("task-2"),
+        revision: 5,
+        changes: {},
+      },
     };
     const result = applySubscriptionEvent(state, event);
     expect(result).toMatchObject({ kind: "ignored", reason: "subscriptionMismatch" });
-    expect(result.state.cursor).toBe("cursor-1");
-  });
-
-  it("requires a baseline when its own scope cursor skips", () => {
-    const result = applySubscriptionEvent(
-      taskState("task-1", 4),
-      taskEvent("task-1", "cursor-missing", "cursor-3", {
-        kind: "taskChanged",
-        taskId: taskId("task-1"),
-        revision: 5,
-        changes: {},
-      }),
-    );
-    expect(result).toMatchObject({ kind: "resyncRequired", reason: "cursorGap" });
+    expect(result.state).toBe(state);
   });
 
   it("applies an ordered Chat operation batch before exposing the replica", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 1),
-      taskEvent("task-1", "cursor-1", "cursor-2", {
+      taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision: 2,
@@ -271,7 +256,7 @@ describe("scope-local state ingestion", () => {
   it("requires resync when appended text has no base Chat item", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 1),
-      taskEvent("task-1", "cursor-1", "cursor-2", {
+      taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision: 2,
@@ -289,7 +274,7 @@ describe("scope-local state ingestion", () => {
     };
     const result = applySubscriptionEvent(
       taskState("task-1", 1),
-      taskEvent("task-1", "cursor-1", "cursor-2", {
+      taskEvent("task-1", {
         kind: "taskChanged",
         taskId: taskId("task-1"),
         revision: 2,
@@ -304,7 +289,7 @@ describe("scope-local state ingestion", () => {
   it("applies process-local history state without consuming Task revision", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 7),
-      taskEvent("task-1", "cursor-1", "cursor-2", {
+      taskEvent("task-1", {
         kind: "taskHistorySyncUpdated",
         taskId: taskId("task-1"),
         historySync: { state: "syncing", generation: 3 },
@@ -324,19 +309,15 @@ describe("scope-local state ingestion", () => {
     };
     const state = createSubscriptionIngestionState({
       scope,
-      cursor: cursor("cursor-1"),
       snapshot: {
         kind: "toolDetail",
         taskId: taskId("task-1"),
         artifactId: "artifact-1",
         details: { revision: 0, locations: [], content: [], terminalOutputs: [{ terminalId: "term-1", output: "a" }] },
       },
-    }, context());
+    });
     const event: AppServerEvent = {
       subscription: scope,
-      previousCursor: cursor("cursor-1"),
-      cursor: cursor("cursor-2"),
-      scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
       payload: {
         kind: "toolDetailChanged",
         taskId: taskId("task-1"),
@@ -358,11 +339,7 @@ describe("scope-local state ingestion", () => {
       { terminalId: "term-2", output: "c" },
     ]);
 
-    const duplicate = applySubscriptionEvent(result.state, {
-      ...event,
-      previousCursor: cursor("cursor-2"),
-      cursor: cursor("cursor-3"),
-    });
+    const duplicate = applySubscriptionEvent(result.state, event);
     expect(duplicate.kind).toBe("applied");
     if (duplicate.kind !== "applied" || duplicate.state.snapshot.kind !== "toolDetail") return;
     expect(duplicate.state.snapshot.details.terminalOutputs).toEqual([
@@ -373,7 +350,7 @@ describe("scope-local state ingestion", () => {
 
   it("requires a fresh Tool-detail baseline when an artifact revision is skipped", () => {
     const state = toolDetailState(0);
-    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, toolDetailEvent({
       kind: "toolDetailChanged",
       taskId: taskId("task-1"),
       artifactId: "artifact-1",
@@ -386,7 +363,7 @@ describe("scope-local state ingestion", () => {
 
   it("skips a Tool-detail notification the installed baseline already contains", () => {
     const state = toolDetailState(1);
-    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, toolDetailEvent({
       kind: "toolDetailChanged",
       taskId: taskId("task-1"),
       artifactId: "artifact-1",
@@ -399,7 +376,7 @@ describe("scope-local state ingestion", () => {
 
   it("applies the fields and terminal appends of one Tool-detail commit together", () => {
     const state = toolDetailState(1);
-    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+    const result = applySubscriptionEvent(state, toolDetailEvent({
       kind: "toolDetailChanged",
       taskId: taskId("task-1"),
       artifactId: "artifact-1",
@@ -427,10 +404,9 @@ describe("scope-local state ingestion", () => {
     ["toolDetail", { kind: "toolDetail", taskId: taskId("task-1"), artifactId: "artifact-1" }],
     ["subagentHistory", { kind: "subagentHistory", taskId: taskId("task-1"), subagentId: "subagent-1" as never }],
     ["subagentCatalog", { kind: "subagentCatalog", taskId: taskId("task-1") }],
-  ] as const)("hands a %s subscription its Task's removal and ignores another Task's", (_, scope) => {
+  ] as const)("hands a %s subscription its Task's removal", (_, scope) => {
     const state = createSubscriptionIngestionState({
       scope: scope as SubscriptionScope,
-      cursor: cursor("cursor-1"),
       snapshot: scope.kind === "toolDetail"
         ? { kind: "toolDetail", taskId: taskId("task-1"), artifactId: "artifact-1", details: { revision: 1, locations: [], content: [] } }
         : scope.kind === "subagentHistory"
@@ -445,17 +421,13 @@ describe("scope-local state ingestion", () => {
             },
           }
           : { kind: "subagentCatalog", catalog: { taskId: taskId("task-1"), revision: 1, entries: [] } },
-    }, context());
+    });
     const event = (id: string): AppServerEvent => ({
       subscription: scope as SubscriptionScope,
-      previousCursor: cursor("cursor-1"),
-      cursor: cursor("cursor-2"),
-      scope: { kind: "task", stateRootId: rootId, taskId: taskId(id) },
       payload: { kind: "taskContentRemoved", taskId: taskId(id) },
     });
 
     expect(applySubscriptionEvent(state, event("task-1"))).toMatchObject({ kind: "applied" });
-    expect(applySubscriptionEvent(state, event("task-2"))).toMatchObject({ kind: "ignored" });
   });
 });
 
@@ -467,19 +439,16 @@ function toolDetailState(revision: number) {
   };
   return createSubscriptionIngestionState({
     scope,
-    cursor: cursor("cursor-1"),
     snapshot: {
       kind: "toolDetail",
       taskId: taskId("task-1"),
       artifactId: "artifact-1",
       details: { revision, locations: [], content: [], terminalOutputs: [] },
     },
-  }, context());
+  });
 }
 
 function toolDetailEvent(
-  previous: string,
-  next: string,
   payload: AppServerEventPayload,
 ): AppServerEvent {
   const subscription: SubscriptionScope = {
@@ -489,9 +458,6 @@ function toolDetailEvent(
   };
   return {
     subscription,
-    previousCursor: cursor(previous),
-    cursor: cursor(next),
-    scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
     payload,
   };
 }
@@ -500,23 +466,17 @@ function taskState(id: string, revision: number) {
   const scope: SubscriptionScope = { kind: "task", taskId: taskId(id) };
   return createSubscriptionIngestionState({
     scope,
-    cursor: cursor("cursor-1"),
     snapshot: { kind: "task", task: taskSnapshot(id, revision), chatVersion: 0 },
-  }, context());
+  });
 }
 
 function taskEvent(
   id: string,
-  previous: string,
-  next: string,
   payload: AppServerEventPayload,
 ): AppServerEvent {
   const subscription: SubscriptionScope = { kind: "task", taskId: taskId(id) };
   return {
     subscription,
-    previousCursor: cursor(previous),
-    cursor: cursor(next),
-    scope: { kind: "task", stateRootId: rootId, taskId: taskId(id) },
     payload,
   };
 }
@@ -564,14 +524,7 @@ function chatItem(id: string, text: string, role: ChatItem["role"] = "agent"): C
   };
 }
 
-function context() {
-  return { stateRootId: rootId, clientInstanceId: "client-1" as never };
-}
-
 function taskId(value: string): TaskId {
   return value as TaskId;
 }
 
-function cursor(value: string): EventCursor {
-  return value as EventCursor;
-}

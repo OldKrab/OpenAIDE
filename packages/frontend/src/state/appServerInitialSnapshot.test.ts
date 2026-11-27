@@ -3,7 +3,6 @@ import type {
   AgentId,
   ClientInstanceId,
   ClientSnapshot,
-  EventCursor,
   ProjectId,
   ServerId,
   StateRootId,
@@ -133,7 +132,6 @@ describe("App Server initial snapshot ingestion", () => {
 
 function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot {
   return {
-    cursor: "cursor-1" as EventCursor,
     server: {
       serverId: "server-1" as ServerId,
       protocolVersion: { major: 1, minor: 0 },

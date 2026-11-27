@@ -103,7 +103,7 @@ export function useSubagentSessions({
           if (event?.payload.kind !== "subagentHistoryChanged") return;
           const presentation = latestTextPresentation(
             snapshot.history.chat.items,
-            event.cursor,
+            String(event.payload.revision),
           );
           if (presentation) setLiveTextPresentation(presentation);
         },
@@ -167,14 +167,14 @@ export function useSubagentSessions({
   };
 }
 
-function latestTextPresentation(items: ChatItem[], eventCursor: string): TaskLiveTextPresentation | undefined {
+function latestTextPresentation(items: ChatItem[], eventToken: string): TaskLiveTextPresentation | undefined {
   const presentation: TaskLiveTextPresentation = {};
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
     if (!item || (item.role !== "agent" && item.role !== "system")) continue;
     if (!item.parts.some((part) => part.kind === "text")) continue;
     const channel = item.role === "system" ? "thought" : "agent";
-    presentation[channel] ??= { messageId: item.messageId, eventCursor };
+    presentation[channel] ??= { messageId: item.messageId, eventToken };
     if (presentation.agent && presentation.thought) break;
   }
   return presentation.agent || presentation.thought ? presentation : undefined;

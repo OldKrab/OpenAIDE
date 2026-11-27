@@ -425,7 +425,9 @@ export function useAppControllerBackendLifecycle({
                   context: subscriptionContext,
                   currentAgentId: () => currentAgentId.current,
                   dispatch: dispatchForCurrentReplica,
+                  liveNewTaskContext: () => currentNewTaskContext.current,
                   setAgents,
+                  setPreferences,
                 }));
               }
               if (initialBootstrap.surface === "settings") {

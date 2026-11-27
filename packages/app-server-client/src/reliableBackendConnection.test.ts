@@ -11,7 +11,7 @@ import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
   CLIENT_PROBE,
-  PERMISSION_REQUEST,
+  SECRET_READ,
   STATE_SUBSCRIBE,
   TASK_LIST,
   TASK_SEND,
@@ -101,7 +101,7 @@ describe("ReliableBackendConnection", () => {
     const second = vi.fn();
     connection.handleNotification("app/event", first);
     connection.handleNotification("app/event", second);
-    const event = { cursor: "cursor-1" } as never;
+    const event = { payload: { kind: "marker" } } as never;
 
     for (const receive of listeners) receive({
       jsonrpc: "2.0",
@@ -232,8 +232,8 @@ describe("ReliableBackendConnection", () => {
     });
     const invalidations: string[] = [];
     connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
-    const permissionHandler = vi.fn(async () => ({ optionId: "allow-once" }));
-    connection.handleRequest(PERMISSION_REQUEST, permissionHandler);
+    const secretHandler = vi.fn(async () => ({ value: "secret" }));
+    connection.handleRequest(SECRET_READ, secretHandler);
     await connection.initialize({
       clientInstanceId: "client-1" as ClientInstanceId,
       shell: { kind: "web" },
@@ -259,9 +259,9 @@ describe("ReliableBackendConnection", () => {
         revision: 2,
       });
     }
-    transport.sendPermissionRequest("session-2");
-    await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(transport.permissionResponseSessions()).toEqual(["session-2"]));
+    transport.sendSecretRead("session-2");
+    await vi.waitFor(() => expect(secretHandler).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(transport.secretResponseSessions()).toEqual(["session-2"]));
     expect(transport.taskListSessions()).toEqual(["session-1", "session-2"]);
     expect(invalidations).toEqual([invalidationReason]);
     connection.close();
@@ -304,8 +304,8 @@ describe("ReliableBackendConnection", () => {
       retryDelayMs: 1,
       heartbeatIntervalMs: 5,
     });
-    const permissionHandler = vi.fn(async () => ({ optionId: "allow-once" }));
-    connection.handleRequest(PERMISSION_REQUEST, permissionHandler);
+    const secretHandler = vi.fn(async () => ({ value: "secret" }));
+    connection.handleRequest(SECRET_READ, secretHandler);
     await connection.initialize({
       clientInstanceId: "client-1" as ClientInstanceId,
       shell: { kind: "web" },
@@ -317,8 +317,8 @@ describe("ReliableBackendConnection", () => {
       "session-1",
       "session-2",
     ]));
-    transport.sendPermissionRequest("session-2");
-    await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
+    transport.sendSecretRead("session-2");
+    await vi.waitFor(() => expect(secretHandler).toHaveBeenCalledOnce());
     connection.close();
   });
 
@@ -331,9 +331,9 @@ describe("ReliableBackendConnection", () => {
       retryDelayMs: 1,
       heartbeatIntervalMs: 60_000,
     });
-    const baselines: Array<{ reason: string; cursor: string }> = [];
+    const baselines: Array<{ reason: string; tag: string | null | undefined }> = [];
     connection.handleRecoveryBaseline(({ reason, result }) => {
-      baselines.push({ reason, cursor: result.snapshot.cursor });
+      baselines.push({ reason, tag: result.snapshot.global.newTaskDefaults.projectId });
     });
     await connection.initialize({
       clientInstanceId: "client-1" as ClientInstanceId,
@@ -346,7 +346,7 @@ describe("ReliableBackendConnection", () => {
 
     await vi.waitFor(() => expect(baselines).toEqual([{
       reason: "clientLivenessExpired",
-      cursor: "cursor-2",
+      tag: "cursor-2",
     }]));
     connection.close();
   });
@@ -816,7 +816,7 @@ function createExpiringSessionTransport(
   const initialized: string[] = [];
   const taskLists: string[] = [];
   const sentMessages: string[] = [];
-  const permissionResponses: string[] = [];
+  const secretResponses: string[] = [];
   const heartbeats: string[] = [];
   const subscriptions: string[] = [];
   const openedEndpoints: string[] = [];
@@ -834,7 +834,7 @@ function createExpiringSessionTransport(
   let heldSessionOpen: { resolve: (value: ReturnType<typeof response>) => void; value: ReturnType<typeof response> }
     | undefined;
   let heldSubscriptionKind: "agents" | "projects" | undefined;
-  let heldSubscription: { id: string | number; sessionId: string; scope: { kind: "agents" | "projects" } }
+  let heldSubscription: { id: string | number; sessionId: string; scope: { kind: "subagentCatalog"; taskId: "agents" | "projects" } }
     | undefined;
 
   return {
@@ -904,7 +904,7 @@ function createExpiringSessionTransport(
         throw new Error("Test transport expected a JSON-RPC message with an id");
       }
       if (!("method" in message)) {
-        permissionResponses.push(sessionId);
+        secretResponses.push(sessionId);
         return response(204, "");
       }
       if (message.method === CLIENT_INITIALIZE) {
@@ -996,7 +996,7 @@ function createExpiringSessionTransport(
     initializedSessions: () => initialized,
     taskListSessions: () => taskLists,
     subscriptionSessions: () => subscriptions,
-    permissionResponseSessions: () => permissionResponses,
+    secretResponseSessions: () => secretResponses,
     freezeNextReceive() {
       freezeNextReceive = true;
     },
@@ -1033,16 +1033,12 @@ function createExpiringSessionTransport(
       enqueueSubscription(heldSubscription.sessionId, heldSubscription.id, heldSubscription.scope);
       heldSubscription = undefined;
     },
-    sendPermissionRequest(sessionId: string) {
+    sendSecretRead(sessionId: string) {
       enqueue(sessionId, {
         jsonrpc: "2.0",
-        id: "permission-1",
-        method: PERMISSION_REQUEST,
-        params: {
-          title: "Run command?",
-          toolCall: { id: "tool-1", title: "Run command" },
-          options: [{ optionId: "allow-once", name: "Allow", kind: "allowOnce" }],
-        },
+        id: "secret-1",
+        method: SECRET_READ,
+        params: { key: "agent.secret" },
       });
     },
   };
@@ -1075,7 +1071,7 @@ function createExpiringSessionTransport(
       jsonrpc: "2.0",
       id,
       result: {
-        result: { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "subagentCatalog", catalog: {} } },
+        result: { scope, snapshot: { kind: "subagentCatalog", catalog: {} } },
       },
     });
   }
@@ -1160,10 +1156,9 @@ function abortError() {
   return error;
 }
 
-function initializeResult(cursor = "cursor-1", serverId = "server-1") {
+function initializeResult(tag = "cursor-1", serverId = "server-1") {
   return {
     snapshot: {
-      cursor,
       server: { serverId, protocolVersion: "v1", capabilities: {} },
       stateRoot: { stateRootId: "root-1" },
       client: {
@@ -1171,8 +1166,7 @@ function initializeResult(cursor = "cursor-1", serverId = "server-1") {
         shellKind: "web" as const,
         surface: { kind: "home" as const },
       },
-      newTaskDefaults: { projectId: null, agentId: null, nativeSessionConfigOptions: [] },
-      pendingRequests: [],
+      global: { newTaskDefaults: { projectId: tag, agentId: null, nativeSessionConfigOptions: [] } },
     },
   };
 }

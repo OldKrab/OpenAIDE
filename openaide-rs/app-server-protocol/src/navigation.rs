@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{AgentId, EventCursor, ProjectId, TaskId};
+use crate::ids::{AgentId, ProjectId, TaskId};
 use crate::snapshot::TaskNavigationEntry;
 use crate::task::TaskNavigationSection;
 
@@ -60,7 +60,6 @@ pub struct NavigationViewParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct NavigationSubscribeResult {
-    pub cursor: EventCursor,
     /// The baseline: every group of the view as a frame.
     pub frame: NavigationFrame,
 }
@@ -123,6 +122,11 @@ pub struct NavigationGroupFrame {
 #[serde(rename_all = "camelCase")]
 pub struct NavigationFrame {
     pub section: TaskNavigationSection,
+    /// Orders frames across views and subscriptions of one App Server run: it only grows, and a
+    /// baseline carries the value current when it was computed. A client drops a frame whose
+    /// revision is not above the one it holds, which discards frames sent before its baseline.
+    #[serde(default)]
+    pub revision: u64,
     /// The Project order, present when it changed (always in the baseline).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

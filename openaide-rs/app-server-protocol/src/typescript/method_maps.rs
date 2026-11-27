@@ -524,10 +524,8 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type ClientNotificationParamsByMethod = {\n");
     output.push_str("  [CLIENT_SECRET_KEYS_CHANGED]: ClientSecretKeysChangedParams;\n");
     output.push_str("};\n\n");
-    output.push_str("export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
+    output.push_str("export type ServerRequestMethod = typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
     output.push_str("export type ServerRequestParamsByMethod = {\n");
-    output.push_str("  [PERMISSION_REQUEST]: PermissionRequestParams;\n");
-    output.push_str("  [QUESTION_REQUEST]: QuestionRequestParams;\n");
     output.push_str("  [SECRET_READ]: SecretReadParams;\n");
     output.push_str("  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalParams;\n");
     output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalParams;\n");
@@ -535,8 +533,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_REVEAL_FILE]: ShellRevealFileParams;\n");
     output.push_str("};\n\n");
     output.push_str("export type ServerRequestResponseResultByMethod = {\n");
-    output.push_str("  [PERMISSION_REQUEST]: PermissionRequestResponse;\n");
-    output.push_str("  [QUESTION_REQUEST]: QuestionRequestResponse;\n");
     output.push_str("  [SECRET_READ]: SecretReadResponse;\n");
     output.push_str("  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalResponse;\n");
     output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalResponse;\n");

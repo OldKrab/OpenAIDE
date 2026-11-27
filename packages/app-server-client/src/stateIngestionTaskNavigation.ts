@@ -26,6 +26,8 @@ export type NavigationGroupReplica = {
 /** A Navigation view's installed state: groups in server order. */
 export type NavigationReplica = {
   section: TaskNavigationSection;
+  /** The revision of the last frame applied; a frame at or below it is stale. */
+  revision: number;
   groups: NavigationGroupReplica[];
 };
 
@@ -36,6 +38,8 @@ export function navigationGroupRows(group: NavigationGroupReplica): NavigationRo
 
 export type NavigationFrameApplication =
   | { kind: "applied"; navigation: NavigationReplica }
+  /** The frame was sent before the baseline the client holds. */
+  | { kind: "stale" }
   | { kind: "resyncRequired"; reason: "missingNavigationRow" | "missingNavigationGroup" };
 
 /** Installs a `navigation/subscribe` reply, whose frame is the complete baseline. */
@@ -48,11 +52,14 @@ export function installNavigationReply(result: NavigationSubscribeResult): Navig
  * Applies one frame: each changed group's rows are `order.map(id => frame.rows[id] ?? previous[id])`.
  * There are no insert, remove or move operations, so a frame cannot leave the view in a state the
  * server did not compute. A row the frame omits and the client never held means a lost frame.
+ * A frame whose revision is not above the held one was sent before the client's baseline (it
+ * overtook the subscribe reply) and is dropped.
  */
 export function applyNavigationFrame(
   previous: NavigationReplica | undefined,
   frame: NavigationFrame,
 ): NavigationFrameApplication {
+  if (previous && frame.revision <= previous.revision) return { kind: "stale" };
   const known = new Map<ProjectId, NavigationGroupReplica>(
     (previous?.groups ?? []).map((group) => [group.projectId, group]),
   );
@@ -83,5 +90,5 @@ export function applyNavigationFrame(
     if (!group) return { kind: "resyncRequired", reason: "missingNavigationGroup" };
     groups.push(group);
   }
-  return { kind: "applied", navigation: { section: frame.section, groups } };
+  return { kind: "applied", navigation: { section: frame.section, revision: frame.revision, groups } };
 }

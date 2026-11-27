@@ -443,9 +443,6 @@ impl RpcGateway {
                     .expect("initialized client must have a delivery"),
                 now,
             );
-        let token = self
-            .state_stream
-            .read_token_for_client(&context.client_instance_id);
         let global = match self.global_state_for(&context) {
             Ok(global) => global,
             Err(error) => return self.error(connection_id, id, meta, error),
@@ -454,7 +451,6 @@ impl RpcGateway {
             &context,
             context.requested_surface.clone(),
             global,
-            &token,
         ) {
             Ok(snapshot) => snapshot,
             Err(error) => return self.error(connection_id, id, meta, error),

@@ -10,7 +10,6 @@ import {
   AppServerProtocolError,
   TransportLinkError,
   createAppServerSession,
-  PERMISSION_REQUEST,
   PROJECT_ADD,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
@@ -1467,9 +1466,6 @@ describe("app controller mounted lifecycle", () => {
     await act(async () => {
       for (const listener of eventListeners) listener({
         subscription: { kind: "task", taskId: "task_1" as never },
-        previousCursor: "cursor-1" as never,
-        cursor: "cursor-2" as never,
-        scope: { kind: "task", stateRootId: "state_root_1" as never, taskId: "task_1" as never },
         payload: { kind: "taskChanged", taskId: "task_1" as never, revision: 2, changes: { removed: true } },
       });
     });
@@ -1513,18 +1509,9 @@ describe("app controller mounted lifecycle", () => {
     });
 
     const historyEvent = (
-      previousCursor: string,
-      cursor: string,
       historySync: ProtocolTaskSnapshot["historySync"],
     ): AppServerEvent => ({
       subscription: { kind: "task", taskId: "task_1" as never },
-      previousCursor: previousCursor as never,
-      cursor: cursor as never,
-      scope: {
-        kind: "task",
-        stateRootId: "state_root_1" as never,
-        taskId: "task_1" as never,
-      },
       payload: {
         kind: "taskHistorySyncUpdated",
         taskId: "task_1" as never,
@@ -1533,8 +1520,8 @@ describe("app controller mounted lifecycle", () => {
     });
     await act(async () => {
       for (const listener of eventListeners) {
-        listener(historyEvent("cursor-1", "cursor-2", { state: "syncing", generation: 7 }));
-        listener(historyEvent("cursor-2", "cursor-3", { state: "idle", generation: 7 }));
+        listener(historyEvent({ state: "syncing", generation: 7 }));
+        listener(historyEvent({ state: "idle", generation: 7 }));
       }
       await Promise.resolve();
     });
@@ -4543,7 +4530,6 @@ function clientSnapshot(
   const includeTasks = options.includeTasks ?? true;
   const includeActiveTask = options.includeActiveTask ?? true;
   return {
-    cursor: "cursor_1" as never,
     server: {
       serverId: "server_1" as never,
       protocolVersion: { major: 1, minor: 0 },

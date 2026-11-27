@@ -38,6 +38,7 @@ function updateTaskNavigationSnapshot(
 ): SnapshotUpdate {
   if (payload.kind !== "navigationFrame") return unchanged(snapshot);
   const applied = applyNavigationFrame(snapshot.navigation, payload.frame);
+  if (applied.kind === "stale") return unchanged(snapshot);
   if (applied.kind === "resyncRequired") return { kind: "resyncRequired", reason: applied.reason };
   return changed({ kind: "taskNavigation", navigation: applied.navigation });
 }

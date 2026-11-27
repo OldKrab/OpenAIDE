@@ -42,8 +42,8 @@ use crate::methods::{
     FILE_VIEWER_SEARCH,
 };
 use crate::server_requests::{
-    PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_AUTH_TERMINAL, SHELL_OPEN_EXTERNAL,
-    SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
+    SECRET_READ, SHELL_AUTH_TERMINAL, SHELL_OPEN_EXTERNAL, SHELL_REVEAL_FILE,
+    SHELL_SHOW_NOTIFICATION,
 };
 
 pub(super) fn push_method_constants(output: &mut String) {
@@ -580,14 +580,6 @@ pub(super) fn push_method_constants(output: &mut String) {
         TASK_ARCHIVE,
         TASK_ARCHIVE_OLDER,
         TASK_RESTORE
-    ));
-    output.push_str(&format!(
-        "export const PERMISSION_REQUEST = {:?} as const;\n\n",
-        PERMISSION_REQUEST
-    ));
-    output.push_str(&format!(
-        "export const QUESTION_REQUEST = {:?} as const;\n\n",
-        QUESTION_REQUEST
     ));
     output.push_str(&format!(
         "export const SECRET_READ = {:?} as const;\n",

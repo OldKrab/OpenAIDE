@@ -6,7 +6,6 @@ use crate::client::SettingsSection;
 #[test]
 fn client_snapshot_carries_the_global_state_and_omits_an_absent_active_task() {
     let snapshot = ClientSnapshot {
-        cursor: "cursor-1".into(),
         server: ServerSnapshot {
             server_id: "server-1".into(),
             protocol_version: ProtocolVersion::V1,
@@ -53,7 +52,7 @@ fn client_snapshot_carries_the_global_state_and_omits_an_absent_active_task() {
 
     let value = serde_json::to_value(snapshot).unwrap();
 
-    assert_eq!(value["cursor"], json!("cursor-1"));
+    assert!(value.get("cursor").is_none());
     assert_eq!(value["global"]["projects"]["projects"], json!([]));
     assert!(value.get("activeTask").is_none());
     assert_eq!(value["server"]["protocolVersion"]["major"], json!(1));

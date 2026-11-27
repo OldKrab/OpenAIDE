@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::ids::{RequestId, TaskId};
 use openaide_app_server_protocol::server_requests::{
-    QuestionRequestParams, QuestionRequestResponse, QUESTION_REQUEST,
+    QuestionRequestParams, QuestionRequestResponse,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 
@@ -28,7 +28,7 @@ impl ServerRequestRuntime {
             scope: PendingRequestScope::Task {
                 task_id: TaskId::from(task_id.to_string()),
             },
-            method: QUESTION_REQUEST.to_string(),
+            method: crate::server_requests::QUESTION_REQUEST_TAG.to_string(),
             title: "Question".to_string(),
             params,
         };

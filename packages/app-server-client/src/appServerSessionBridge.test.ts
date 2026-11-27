@@ -40,21 +40,21 @@ describe("bridged App Server session", () => {
 
     const snapshot = vi.fn();
     const ready = vi.fn();
-    session.subscribeState({ kind: "projects" }, {
+    session.subscribeState({ kind: "subagentCatalog", taskId: "task-1" as never }, {
       onSnapshot: snapshot,
       onBaselineReady: ready,
     });
     bridge.receive({
       type: "appServer.session.snapshot",
       subscriptionId: "subscription-1",
-      snapshot: { kind: "projects", projects: { projects: [] } },
+      snapshot: { kind: "subagentCatalog", catalog: {} } as never,
     });
     bridge.receive({
       type: "appServer.session.baselineReady",
       subscriptionId: "subscription-1",
     });
     expect(snapshot).toHaveBeenCalledWith(
-      { kind: "projects", projects: { projects: [] } },
+      { kind: "subagentCatalog", catalog: {} },
       undefined,
       undefined,
     );

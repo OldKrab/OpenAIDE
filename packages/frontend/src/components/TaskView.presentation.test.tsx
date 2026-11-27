@@ -39,7 +39,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(updated)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-live-1" },
+            agent: { messageId: "agent-later", eventToken: "cursor-live-1" },
           }}
         />,
       );
@@ -86,7 +86,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(terminal)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-terminal-text" },
+            agent: { messageId: "agent-later", eventToken: "cursor-terminal-text" },
           }}
         />,
       );
@@ -117,7 +117,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(updated)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-large-chunk" },
+            agent: { messageId: "agent-later", eventToken: "cursor-large-chunk" },
           }}
         />,
       );
@@ -152,7 +152,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(firstUpdate)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-continuous-1" },
+            agent: { messageId: "agent-later", eventToken: "cursor-continuous-1" },
           }}
         />,
       );
@@ -175,7 +175,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(secondUpdate)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-continuous-2" },
+            agent: { messageId: "agent-later", eventToken: "cursor-continuous-2" },
           }}
         />,
       );
@@ -218,7 +218,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(updated)}
           liveTextPresentation={{
-            agent: { messageId: "agent-later", eventCursor: "cursor-hidden" },
+            agent: { messageId: "agent-later", eventToken: "cursor-hidden" },
           }}
         />,
       );
@@ -233,7 +233,7 @@ describe("TaskView timeline presentation", () => {
     const { TaskView } = await import("./TaskView");
     const initial = snapshotWithAuthoritativeTail(false);
     const signal = {
-      agent: { messageId: "agent-later", eventCursor: "cursor-live-before-snapshot" },
+      agent: { messageId: "agent-later", eventToken: "cursor-live-before-snapshot" },
     };
     let tree!: ReactTestRenderer;
     act(() => {
@@ -282,7 +282,7 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(lateOldThought)}
           liveTextPresentation={{
-            thought: { messageId: "thought-old", eventCursor: "cursor-thought-old" },
+            thought: { messageId: "thought-old", eventToken: "cursor-thought-old" },
           }}
         />,
       );
@@ -304,8 +304,8 @@ describe("TaskView timeline presentation", () => {
         <TaskView
           {...taskViewProps(liveLatest)}
           liveTextPresentation={{
-            agent: { messageId: "agent-latest", eventCursor: "cursor-agent-live" },
-            thought: { messageId: "thought-latest", eventCursor: "cursor-thought-live" },
+            agent: { messageId: "agent-latest", eventToken: "cursor-agent-live" },
+            thought: { messageId: "thought-latest", eventToken: "cursor-thought-live" },
           }}
         />,
       );

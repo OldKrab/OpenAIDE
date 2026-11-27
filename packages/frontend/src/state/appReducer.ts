@@ -84,15 +84,16 @@ type AppActionPayload =
       type: "snapshot";
       snapshot: TaskSnapshot;
       intent: SnapshotIntent;
-      liveText?: { messageId: string; channel: "agent" | "thought"; eventCursor: string };
+      liveText?: { messageId: string; channel: "agent" | "thought"; eventToken: string };
       confirmedPermissionPolicy?: TaskPermissionPolicy;
     }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
-  | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
+  | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventToken: string }
   | { type: "prompt"; prompt: string }
   | { type: "newTask:error:clear" }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "worktreeRepository"; repository: import("@openaide/app-server-client").WorktreeRepositorySnapshot }
+  | { type: "worktreeRepository:removed"; repositoryId: string }
   | { type: "terminals"; terminals: import("@openaide/app-server-client").TerminalCollectionSnapshot }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
   | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[] }
@@ -242,6 +243,7 @@ type GlobalAction = Extract<
   | { type: "taskChat:liveText" }
   | { type: "projects" }
   | { type: "worktreeRepository" }
+  | { type: "worktreeRepository:removed" }
   | { type: "terminals" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
@@ -299,6 +301,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "taskChat:liveText":
     case "projects":
     case "worktreeRepository":
+    case "worktreeRepository:removed":
     case "terminals":
     case "workspace:roots":
     case "search:set":
@@ -565,6 +568,10 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           [action.repository.repositoryId]: action.repository,
         },
       };
+    case "worktreeRepository:removed": {
+      const { [action.repositoryId]: _removed, ...worktreeRepositories } = state.worktreeRepositories;
+      return { ...state, worktreeRepositories };
+    }
     case "terminals":
       return { ...state, terminals: action.terminals };
     case "workspace:roots": {
@@ -635,7 +642,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
 function applyTaskLiveTextPresentation(
   state: AppState,
   taskId: string,
-  signal: { messageId: string; channel: "agent" | "thought"; eventCursor: string },
+  signal: { messageId: string; channel: "agent" | "thought"; eventToken: string },
 ): AppState {
   return {
     ...state,
@@ -645,7 +652,7 @@ function applyTaskLiveTextPresentation(
         ...state.taskLiveTextPresentation[taskId],
         [signal.channel]: {
           messageId: signal.messageId,
-          eventCursor: signal.eventCursor,
+          eventToken: signal.eventToken,
         },
       },
     },

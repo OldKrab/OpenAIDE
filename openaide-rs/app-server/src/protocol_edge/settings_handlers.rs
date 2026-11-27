@@ -37,7 +37,6 @@ impl RpcGateway {
             .into_iter()
             .flat_map(|task| {
                 self.publish_task_payload(
-                    &task.task_id,
                     AppServerEventPayload::TaskChanged {
                         task_id: task.task_id.clone(),
                         revision: task.next_revision,

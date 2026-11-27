@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use openaide_app_server_protocol::envelopes::ServerRequestEnvelope;
 use openaide_app_server_protocol::ids::{ClientInstanceId, RequestId};
 use openaide_app_server_protocol::server_requests::{
-    PermissionRequestParams, QuestionRequestParams, PERMISSION_REQUEST, QUESTION_REQUEST,
+    PermissionRequestParams, QuestionRequestParams,
 };
 use openaide_app_server_protocol::snapshot::{
     PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
@@ -272,7 +272,7 @@ fn classify_request_method(method: &str) -> Option<PendingRequestKind> {
 }
 
 fn question_snapshot(method: &str, params: &serde_json::Value) -> Option<QuestionRequestParams> {
-    if method != QUESTION_REQUEST {
+    if method != super::types::QUESTION_REQUEST_TAG {
         return None;
     }
     serde_json::from_value(params.clone()).ok()
@@ -282,7 +282,7 @@ fn permission_snapshot(
     method: &str,
     params: &serde_json::Value,
 ) -> Option<PermissionRequestParams> {
-    if method != PERMISSION_REQUEST {
+    if method != super::types::PERMISSION_REQUEST_TAG {
         return None;
     }
     serde_json::from_value(params.clone()).ok()
@@ -300,8 +300,9 @@ fn filter_eligible_deliveries(
             .collect(),
         PendingRequestScope::Task { .. } => deliveries,
     };
+    // A Permission or Question reaches clients as Task state only.
+    if super::types::is_task_state_request(method) {
+        return Vec::new();
+    }
     deliveries
-        .into_iter()
-        .filter(|delivery| delivery.supports_method(method))
-        .collect()
 }

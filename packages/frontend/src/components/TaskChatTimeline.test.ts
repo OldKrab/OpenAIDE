@@ -7,7 +7,7 @@ describe("TaskChatTimeline live text ownership", () => {
     const previous = agentMessage("agent-previous");
     const current = agentMessage("agent-current");
     const presentation = {
-      agent: { eventCursor: "cursor-current", messageId: current.message_id },
+      agent: { eventToken: "cursor-current", messageId: current.message_id },
     };
 
     expect(isLiveTextMessage(presentation, previous)).toBe(false);

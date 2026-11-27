@@ -1432,7 +1432,7 @@ function mappingContext() {
 }
 
 function replica(groups: NavigationGroupReplica[]): NavigationReplica {
-  return { section: "tasks", groups };
+  return { section: "tasks", revision: 1, groups };
 }
 
 function taskRow(task: ProtocolTaskSummary, live = false): NavigationRow {

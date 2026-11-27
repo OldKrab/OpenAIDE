@@ -173,7 +173,11 @@ fn subscribe_answers_with_the_baseline_and_a_cursor_that_links_the_next_frame() 
         .gateway
         .drain_event_deliveries_for_connection(&setup.connection_id);
     assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0].previous_cursor, subscribed.cursor);
+    // The frame orders after the baseline the client holds.
+    let AppServerEventPayload::NavigationFrame { frame } = &events[0].payload else {
+        panic!("expected a Navigation frame");
+    };
+    assert!(frame.revision > subscribed.frame.revision);
 }
 
 #[test]

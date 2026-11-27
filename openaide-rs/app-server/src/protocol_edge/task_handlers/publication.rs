@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::snapshot::TaskStatus;
 
@@ -7,6 +7,7 @@ use crate::task_events::{CommittedTaskChange, TaskUpdate, TaskUpdateKind};
 
 use super::RpcGateway;
 use crate::protocol_edge::{event_deliveries, GatewayEventDelivery};
+use crate::state_sync::EventAddress;
 
 impl RpcGateway {
     /// Publishes one committed Task update to its subscribers and the outbox. Navigation is
@@ -36,7 +37,6 @@ impl RpcGateway {
                 now,
             ),
             TaskUpdateKind::SubagentCatalogChanged { catalog } => self.publish_task_payload(
-                &task_id,
                 AppServerEventPayload::SubagentCatalogUpdated {
                     catalog: catalog.clone(),
                 },
@@ -47,7 +47,6 @@ impl RpcGateway {
                 chat,
                 current_plan,
             } => self.publish_task_payload(
-                &task_id,
                 AppServerEventPayload::SubagentHistoryChanged {
                     task_id: task_id.clone(),
                     subagent_id: subagent_id.clone(),
@@ -81,7 +80,6 @@ impl RpcGateway {
             // Task stream so live clients cannot retain stale request controls.
             self.record_published_task_requests(&task_id, &pending_requests, "task_update");
             events.extend(self.publish_task_payload(
-                &task_id,
                 AppServerEventPayload::TaskRequestsUpdated {
                     task_id: task_id.clone(),
                     requests: pending_requests,
@@ -102,7 +100,6 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         self.publish_task_payload(
-            task_id,
             AppServerEventPayload::TaskHistorySyncUpdated {
                 task_id: task_id.clone(),
                 history_sync,
@@ -119,7 +116,6 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let mut events = self.publish_task_payload(
-            task_id,
             AppServerEventPayload::TaskChanged {
                 task_id: task_id.clone(),
                 revision,
@@ -131,7 +127,6 @@ impl RpcGateway {
             // Subscriptions to the Task's Subagent catalog, Subagent Histories and Tool details
             // end with the Task.
             events.extend(self.publish_task_payload(
-                task_id,
                 AppServerEventPayload::TaskContentRemoved {
                     task_id: task_id.clone(),
                 },
@@ -139,7 +134,6 @@ impl RpcGateway {
             ));
         }
 
-        let client_hub = self.client_hub.clone();
         for detail in &change.tool_details {
             let mut deltas = vec![
                 openaide_app_server_protocol::events::ToolDetailDelta::ReplaceDetails {
@@ -152,37 +146,36 @@ impl RpcGateway {
                     data: append.data.clone(),
                 }
             }));
-            events.extend(event_deliveries(self.state_stream.publish_committed(
-                EventScope::Task {
-                    state_root_id: self.state_stream.state_root_id().clone(),
-                    task_id: task_id.clone(),
-                },
+            events.extend(self.publish_task_payload(
                 AppServerEventPayload::ToolDetailChanged {
                     task_id: task_id.clone(),
                     artifact_id: detail.artifact_id.clone(),
                     revision: detail.details.revision,
                     deltas,
                 },
-                |client_id| client_hub.delivery_for(client_id),
                 now,
-            )));
+            ));
         }
 
         events
     }
 
+    /// Publishes a payload a Task owns to the subscriptions its payload kind addresses.
     pub(crate) fn publish_task_payload(
         &mut self,
-        task_id: &TaskId,
         payload: AppServerEventPayload,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
+        let Some(address) = EventAddress::of_task_payload(&payload) else {
+            crate::logging::warn(
+                "task_payload_without_task_address",
+                serde_json::json!({ "operation": "publish_task_payload", "outcome": "dropped" }),
+            );
+            return Vec::new();
+        };
         let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Task {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                task_id: task_id.clone(),
-            },
+        event_deliveries(self.state_stream.publish(
+            address,
             payload,
             |client_id| client_hub.delivery_for(client_id),
             now,
@@ -197,20 +190,14 @@ impl RpcGateway {
         deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Task {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                task_id: task_id.clone(),
-            },
+        self.publish_task_payload(
             AppServerEventPayload::ToolDetailChanged {
                 task_id: task_id.clone(),
                 artifact_id: artifact_id.to_string(),
                 revision,
                 deltas,
             },
-            |client_id| client_hub.delivery_for(client_id),
             now,
-        ))
+        )
     }
 }

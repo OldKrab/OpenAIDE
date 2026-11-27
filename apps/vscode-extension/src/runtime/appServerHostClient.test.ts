@@ -486,7 +486,6 @@ function fetchResponse(body: unknown, status = 200) {
 function initializeResult() {
   return {
     snapshot: {
-      cursor: "cursor-1",
       server: { serverId: "server-1", protocolVersion: { major: 1, minor: 0 } },
       stateRoot: { stateRootId: "root-1" },
       client: {

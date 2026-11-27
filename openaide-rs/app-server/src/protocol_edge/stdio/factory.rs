@@ -137,7 +137,7 @@ pub(super) fn gateway(
     let gateway = RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10_000, 30_000)),
         AppLifecycle::new(),
-        StateStream::new(state_root_id.clone().into()),
+        StateStream::new(),
         server_requests,
         shell_file_reveals,
         SnapshotBuilder::with_sources(

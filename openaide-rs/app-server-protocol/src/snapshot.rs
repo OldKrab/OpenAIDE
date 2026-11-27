@@ -3,8 +3,7 @@ use ts_rs::TS;
 
 use crate::client::{RequestedSurface, ShellKind};
 use crate::ids::{
-    AgentId, ClientInstanceId, EventCursor, ProjectId, ServerId, StateRootId, WorktreeId,
-    WorktreeRepositoryId,
+    AgentId, ClientInstanceId, ProjectId, ServerId, StateRootId, WorktreeId, WorktreeRepositoryId,
 };
 
 pub(crate) mod chat;
@@ -22,7 +21,6 @@ pub use task::*;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientSnapshot {
-    pub cursor: EventCursor,
     pub server: ServerSnapshot,
     pub state_root: StateRootSnapshot,
     pub client: ClientSnapshotScope,

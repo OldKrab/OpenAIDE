@@ -187,6 +187,8 @@ impl View {
         }
         let frame = NavigationFrame {
             section: self.section(),
+            // The owner stamps the revision.
+            revision: 0,
             group_order: order_changed.then(|| group_order.clone()),
             removed_groups,
             groups,

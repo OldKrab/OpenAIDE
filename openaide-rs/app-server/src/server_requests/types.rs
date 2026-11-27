@@ -5,6 +5,17 @@ use serde_json::Value;
 
 use crate::client_lifecycle::Delivery;
 
+/// Tags naming a Permission or Question request's kind inside App Server. They never appear on
+/// the wire: such a request reaches clients only as Task state and is answered with
+/// `pendingRequest/resolve` (ADR-0086).
+pub const PERMISSION_REQUEST_TAG: &str = "permission/request";
+pub const QUESTION_REQUEST_TAG: &str = "question/request";
+
+/// Whether a request with this tag is delivered as Task state instead of a server request.
+pub fn is_task_state_request(tag: &str) -> bool {
+    matches!(tag, PERMISSION_REQUEST_TAG | QUESTION_REQUEST_TAG)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerRequestDraft {
     pub scope: PendingRequestScope,

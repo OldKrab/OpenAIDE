@@ -44,7 +44,7 @@ export const ChatRow = memo(function ChatRow({
   compactionLive = false,
   compactionLiveStartedAt,
   showStreamingCaret = false,
-  liveTextEventCursor,
+  liveTextEventToken,
   presentLiveText = false,
   hurryLiveText = false,
 }: {
@@ -68,7 +68,7 @@ export const ChatRow = memo(function ChatRow({
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
   showStreamingCaret?: boolean;
-  liveTextEventCursor?: string;
+  liveTextEventToken?: string;
   presentLiveText?: boolean;
   /** A Permission or Question is waiting, so live text must not trail it. */
   hurryLiveText?: boolean;
@@ -107,7 +107,7 @@ export const ChatRow = memo(function ChatRow({
       <AgentMessageRow
         body={body}
         hurryLiveText={hurryLiveText}
-        liveTextEventCursor={liveTextEventCursor}
+        liveTextEventToken={liveTextEventToken}
         onCloseImage={() => setOpenImage(undefined)}
         onOpenImage={setOpenImage}
         openImage={openImage}
@@ -188,7 +188,7 @@ export const ChatRow = memo(function ChatRow({
 function AgentMessageRow({
   body,
   hurryLiveText,
-  liveTextEventCursor,
+  liveTextEventToken,
   onCloseImage,
   onOpenImage,
   openImage,
@@ -197,7 +197,7 @@ function AgentMessageRow({
 }: {
   body: Extract<ChatMessage["message"], { kind: "agent_message" }>;
   hurryLiveText: boolean;
-  liveTextEventCursor?: string;
+  liveTextEventToken?: string;
   onCloseImage: () => void;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
   openImage?: AttachmentImagePreviewSource;
@@ -206,7 +206,7 @@ function AgentMessageRow({
 }) {
   const presentation = useLiveMessagePresentation({
     enabled: presentLiveText,
-    eventCursor: liveTextEventCursor,
+    eventToken: liveTextEventToken,
     parts: body.parts,
     urgent: hurryLiveText,
   });

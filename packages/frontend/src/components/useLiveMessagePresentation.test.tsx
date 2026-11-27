@@ -10,7 +10,7 @@ function Row(props: { cursor?: string; text: string; urgent?: boolean }) {
   const parts: AgentMessagePart[] = [{ kind: "text", text: props.text }];
   const presentation = useLiveMessagePresentation({
     enabled: true,
-    eventCursor: props.cursor,
+    eventToken: props.cursor,
     parts,
     urgent: props.urgent,
   });

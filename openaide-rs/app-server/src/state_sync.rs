@@ -1,21 +1,107 @@
-use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, EventCursor, StateRootId, TaskId};
+use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload};
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::state::{
     StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope,
 };
 
 use crate::client_lifecycle::{AppServerTime, ClientContext, Delivery};
 use crate::snapshots::SnapshotProvider;
-use crate::storage_runtime::{CursorSequencer, SnapshotReadToken};
 
-/// One client's subscription and the cursor of the last event it was sent, or of its baseline.
-/// Each record links its own chain, so a client's chain never skips an event that was meant for
-/// another client, and a cursor gap on the client means App Server lost an event.
+/// One client's subscription to a scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscriptionRecord {
     pub client_instance_id: ClientInstanceId,
     pub scope: SubscriptionScope,
-    cursor: EventCursor,
+}
+
+/// Who a published event is for. Each payload names its audience explicitly; there is no
+/// matching of payloads against subscriptions (ADR-0086).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventAddress {
+    /// Every client subscribed to the scope.
+    Subscribers(SubscriptionScope),
+    /// One client's subscription, for a Navigation view's frame.
+    Client {
+        client: ClientInstanceId,
+        scope: SubscriptionScope,
+    },
+    /// The Task is deleted: its own subscribers receive the event, and their subscriptions end.
+    TaskRemoved(TaskId),
+    /// The Task is deleted: its Subagent catalog, Subagent History and Tool detail subscriptions
+    /// receive the event, and end.
+    TaskContentRemoved(TaskId),
+}
+
+impl EventAddress {
+    /// The audience of a payload a Task owns. `None` for a Navigation frame, whose audience is
+    /// one client's view and which the Navigation publisher addresses itself.
+    pub fn of_task_payload(payload: &AppServerEventPayload) -> Option<Self> {
+        let scope = |scope| Some(Self::Subscribers(scope));
+        match payload {
+            AppServerEventPayload::TaskChanged {
+                task_id, changes, ..
+            } if changes.removed => Some(Self::TaskRemoved(task_id.clone())),
+            AppServerEventPayload::TaskChanged { task_id, .. }
+            | AppServerEventPayload::TaskHistorySyncUpdated { task_id, .. }
+            | AppServerEventPayload::TaskRequestsUpdated { task_id, .. } => {
+                scope(SubscriptionScope::Task {
+                    task_id: task_id.clone(),
+                })
+            }
+            AppServerEventPayload::SubagentCatalogUpdated { catalog } => {
+                scope(SubscriptionScope::SubagentCatalog {
+                    task_id: catalog.task_id.clone(),
+                })
+            }
+            AppServerEventPayload::SubagentHistoryChanged {
+                task_id,
+                subagent_id,
+                ..
+            } => scope(SubscriptionScope::SubagentHistory {
+                task_id: task_id.clone(),
+                subagent_id: subagent_id.clone(),
+            }),
+            AppServerEventPayload::ToolDetailChanged {
+                task_id,
+                artifact_id,
+                ..
+            } => scope(SubscriptionScope::ToolDetail {
+                task_id: task_id.clone(),
+                artifact_id: artifact_id.clone(),
+            }),
+            AppServerEventPayload::TaskContentRemoved { task_id } => {
+                Some(Self::TaskContentRemoved(task_id.clone()))
+            }
+            AppServerEventPayload::NavigationFrame { .. } => None,
+        }
+    }
+
+    fn reaches(&self, record: &SubscriptionRecord) -> bool {
+        match self {
+            Self::Subscribers(scope) => &record.scope == scope,
+            Self::Client { client, scope } => {
+                &record.client_instance_id == client && &record.scope == scope
+            }
+            Self::TaskRemoved(task_id) => {
+                matches!(&record.scope, SubscriptionScope::Task { task_id: t } if t == task_id)
+            }
+            Self::TaskContentRemoved(task_id) => is_task_content_of(&record.scope, task_id),
+        }
+    }
+
+    /// Whether delivering to a subscription ends it.
+    fn ends(&self) -> bool {
+        matches!(self, Self::TaskRemoved(_) | Self::TaskContentRemoved(_))
+    }
+}
+
+fn is_task_content_of(scope: &SubscriptionScope, task_id: &TaskId) -> bool {
+    matches!(
+        scope,
+        SubscriptionScope::SubagentCatalog { task_id: t }
+            | SubscriptionScope::SubagentHistory { task_id: t, .. }
+            | SubscriptionScope::ToolDetail { task_id: t, .. } if t == task_id
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,27 +109,21 @@ pub struct PublishOutcome {
     pub deliveries: Vec<StateEventDelivery>,
 }
 
-/// One client transport delivery with a cursor link scoped to that client's observed stream.
+/// One event for one client's transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateEventDelivery {
     pub delivery: Delivery,
     pub event: AppServerEvent,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StateStream {
-    state_root_id: StateRootId,
-    /// Advances once per publication. Subscription records take their cursor values from it, so
-    /// every value is unique and a baseline is ordered against every event.
-    cursors: CursorSequencer,
     subscriptions: Vec<SubscriptionRecord>,
 }
 
 impl StateStream {
-    pub fn new(state_root_id: StateRootId) -> Self {
+    pub fn new() -> Self {
         Self {
-            state_root_id,
-            cursors: CursorSequencer::new(),
             subscriptions: Vec::new(),
         }
     }
@@ -71,35 +151,22 @@ impl StateStream {
     ) -> Result<(StateSubscribeResult, bool), openaide_app_server_protocol::errors::ProtocolError>
     {
         // TODO: Build the baseline outside the protocol lock if `chat_page_build_slow` shows it
-        // stalling delivery on an optimized build. This needs the subscription registered first
-        // and events held until the reply, because ADR-0023 pairs each baseline with its cursor.
-        let token = self.cursors.read_token();
-        let snapshot = snapshot_provider.snapshot(ctx, &scope, known_version, &token)?;
-        let subscription_added = self.upsert_subscription(
-            ctx.client_instance_id.clone(),
-            scope.clone(),
-            token.cursor().clone(),
-        );
-        Ok((
-            StateSubscribeResult {
-                cursor: token.cursor().clone(),
-                scope,
-                snapshot,
-            },
-            subscription_added,
-        ))
+        // stalling delivery on an optimized build. The subscription would be registered first
+        // and its events held until the reply.
+        let snapshot = snapshot_provider.snapshot(ctx, &scope, known_version)?;
+        let subscription_added =
+            self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
+        Ok((StateSubscribeResult { scope, snapshot }, subscription_added))
     }
 
-    /// Registers a view subscription at the current cursor. The caller computes the baseline
-    /// frame itself, because a view's content is not an entity snapshot.
+    /// Registers a view subscription. The caller computes the baseline frame itself, because a
+    /// view's content is not an entity snapshot.
     pub(crate) fn register_view_subscription(
         &mut self,
         ctx: &ClientContext,
         scope: SubscriptionScope,
-    ) -> EventCursor {
-        let cursor = self.cursors.read_token().cursor().clone();
-        self.upsert_subscription(ctx.client_instance_id.clone(), scope, cursor.clone());
-        cursor
+    ) {
+        self.upsert_subscription(ctx.client_instance_id.clone(), scope);
     }
 
     pub(crate) fn is_subscribed(&self, ctx: &ClientContext, scope: &SubscriptionScope) -> bool {
@@ -121,36 +188,21 @@ impl StateStream {
         StateUnsubscribeResult { scope }
     }
 
-    pub fn publish_committed(
+    /// Delivers one event to the subscriptions `address` names, in publish order. A removal's
+    /// event is the last one its subscriptions receive: they end right after it.
+    pub fn publish(
         &mut self,
-        scope: EventScope,
+        address: EventAddress,
         payload: AppServerEventPayload,
         deliveries: impl Fn(&ClientInstanceId) -> Option<Delivery>,
         _now: AppServerTime,
     ) -> PublishOutcome {
-        let (_, cursor) = self.cursors.advance();
-        // A deleted Task ends its subscriptions: the event that reports the removal is the last
-        // one they receive. The Task's own subscriptions end with `TaskChanged { removed }`,
-        // its entity subscriptions with `TaskContentRemoved`.
-        let removed_task = match (&scope, &payload) {
-            (
-                EventScope::Task { task_id, .. },
-                AppServerEventPayload::TaskChanged { changes, .. },
-            ) if changes.removed => Some((task_id.clone(), true)),
-            (
-                EventScope::Task { task_id, .. },
-                AppServerEventPayload::TaskContentRemoved { .. },
-            ) => Some((task_id.clone(), false)),
-            _ => None,
-        };
         let mut published = Vec::new();
-        for subscription in self.subscriptions.iter_mut() {
-            if !event_matches_subscription(&scope, &payload, subscription, &self.state_root_id) {
-                continue;
-            }
-            // The record moves even when its client has no route, so a client that somehow
-            // missed this event sees the gap on its next one.
-            let previous_cursor = std::mem::replace(&mut subscription.cursor, cursor.clone());
+        for subscription in self
+            .subscriptions
+            .iter()
+            .filter(|subscription| address.reaches(subscription))
+        {
             let Some(delivery) = deliveries(&subscription.client_instance_id) else {
                 continue;
             };
@@ -158,31 +210,17 @@ impl StateStream {
                 delivery,
                 event: AppServerEvent {
                     subscription: subscription.scope.clone(),
-                    previous_cursor,
-                    cursor: cursor.clone(),
-                    scope: scope.clone(),
                     payload: payload.clone(),
                 },
             });
         }
-        if let Some((task_id, is_task_scope)) = removed_task {
-            self.end_task_subscriptions(&task_id, is_task_scope);
+        if address.ends() {
+            self.subscriptions
+                .retain(|subscription| !address.reaches(subscription));
         }
         PublishOutcome {
             deliveries: published,
         }
-    }
-
-    /// Drops a deleted Task's subscriptions: the Task's own when `task_scope`, else its entities'.
-    fn end_task_subscriptions(&mut self, task_id: &TaskId, task_scope: bool) {
-        let ends = |scope: &SubscriptionScope| match scope {
-            SubscriptionScope::Task { task_id: t } => task_scope && t == task_id,
-            SubscriptionScope::SubagentCatalog { task_id: t }
-            | SubscriptionScope::SubagentHistory { task_id: t, .. }
-            | SubscriptionScope::ToolDetail { task_id: t, .. } => !task_scope && t == task_id,
-            _ => false,
-        };
-        self.subscriptions.retain(|s| !ends(&s.scope));
     }
 
     pub fn subscribers_for_scope(&self, scope: &SubscriptionScope) -> Vec<ClientInstanceId> {
@@ -223,137 +261,23 @@ impl StateStream {
             .count()
     }
 
-    pub fn read_token(&self) -> SnapshotReadToken {
-        self.cursors.read_token()
-    }
-
-    /// Client snapshots use a coarse cursor only as an initialization marker.
-    pub fn read_token_for_client(
-        &mut self,
-        _client_instance_id: &ClientInstanceId,
-    ) -> SnapshotReadToken {
-        self.cursors.read_token()
-    }
-
-    pub fn state_root_id(&self) -> &StateRootId {
-        &self.state_root_id
-    }
-
-    /// Registers the subscription, or rebases an existing one, at its new baseline's cursor.
-    /// Events for the old baseline that are already queued link to an older cursor, so the
-    /// client recognizes and drops them. Returns whether the subscription is new.
+    /// Registers the subscription. Returns whether it is new.
     fn upsert_subscription(
         &mut self,
         client_instance_id: ClientInstanceId,
         scope: SubscriptionScope,
-        baseline: EventCursor,
     ) -> bool {
-        if let Some(existing) = self.subscriptions.iter_mut().find(|subscription| {
+        if self.subscriptions.iter().any(|subscription| {
             subscription.client_instance_id == client_instance_id && subscription.scope == scope
         }) {
-            existing.cursor = baseline;
             return false;
         }
         self.subscriptions.push(SubscriptionRecord {
             client_instance_id,
             scope,
-            cursor: baseline,
         });
         true
     }
-}
-
-fn event_matches_subscription(
-    event_scope: &EventScope,
-    payload: &AppServerEventPayload,
-    subscription: &SubscriptionRecord,
-    state_root_id: &StateRootId,
-) -> bool {
-    let subscription_scope = &subscription.scope;
-    let scope_matches = match event_scope {
-        EventScope::Client {
-            state_root_id: event_state_root,
-            client_instance_id,
-        } => {
-            event_state_root == state_root_id
-                && client_instance_id == &subscription.client_instance_id
-                && matches!(subscription_scope, SubscriptionScope::TaskNavigation { .. })
-        }
-        EventScope::Task {
-            state_root_id: event_state_root,
-            task_id,
-        } => {
-            event_state_root == state_root_id
-                && matches!(
-                    subscription_scope,
-                    SubscriptionScope::Task { task_id: subscribed }
-                        | SubscriptionScope::ToolDetail { task_id: subscribed, .. }
-                        | SubscriptionScope::SubagentCatalog { task_id: subscribed }
-                        | SubscriptionScope::SubagentHistory { task_id: subscribed, .. }
-                        if subscribed == task_id
-                )
-        }
-    };
-    scope_matches && payload_matches_subscription(payload, subscription_scope)
-}
-
-fn payload_matches_subscription(
-    payload: &AppServerEventPayload,
-    subscription_scope: &SubscriptionScope,
-) -> bool {
-    match subscription_scope {
-        SubscriptionScope::TaskNavigation { section } => matches!(
-            payload,
-            AppServerEventPayload::NavigationFrame { frame } if frame.section == *section
-        ),
-        SubscriptionScope::Task { .. } => matches!(
-            payload,
-            AppServerEventPayload::TaskChanged { .. }
-                | AppServerEventPayload::TaskHistorySyncUpdated { .. }
-                | AppServerEventPayload::TaskRequestsUpdated { .. }
-        ),
-        // A deleted Task ends each of its entity subscriptions with this notification.
-        SubscriptionScope::SubagentCatalog { task_id } => {
-            matches!(
-                payload,
-                AppServerEventPayload::SubagentCatalogUpdated { catalog }
-                    if &catalog.task_id == task_id
-            ) || task_content_removed(payload, task_id)
-        }
-        SubscriptionScope::SubagentHistory {
-            task_id,
-            subagent_id,
-        } => {
-            matches!(
-                payload,
-                AppServerEventPayload::SubagentHistoryChanged {
-                    task_id: changed_task_id,
-                    subagent_id: changed_subagent_id,
-                    ..
-                } if changed_task_id == task_id && changed_subagent_id == subagent_id
-            ) || task_content_removed(payload, task_id)
-        }
-        SubscriptionScope::ToolDetail {
-            task_id,
-            artifact_id,
-        } => {
-            matches!(
-                payload,
-                AppServerEventPayload::ToolDetailChanged {
-                    task_id: updated_task_id,
-                    artifact_id: updated_artifact_id,
-                    ..
-                } if updated_task_id == task_id && updated_artifact_id == artifact_id
-            ) || task_content_removed(payload, task_id)
-        }
-    }
-}
-
-fn task_content_removed(payload: &AppServerEventPayload, task_id: &TaskId) -> bool {
-    matches!(
-        payload,
-        AppServerEventPayload::TaskContentRemoved { task_id: removed } if removed == task_id
-    )
 }
 
 #[cfg(test)]

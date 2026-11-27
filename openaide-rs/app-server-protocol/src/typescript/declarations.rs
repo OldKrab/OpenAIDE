@@ -70,7 +70,7 @@ use crate::envelopes::{
 };
 use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use crate::events::{
-    AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange, ToolDetailDelta,
+    AppServerEvent, AppServerEventPayload, TaskChanges, TaskChatChange, ToolDetailDelta,
 };
 use crate::file_viewer::{
     FileViewerError, FileViewerKind, FileViewerOpenFromHandleParams, FileViewerOpenParams,
@@ -78,10 +78,10 @@ use crate::file_viewer::{
 };
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
-    ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
-    FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId,
-    ServerId, StateRootId, SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId,
-    WorktreeOperationId, WorktreeRepositoryId,
+    ClientInstanceId, ClientMutationId, ClientRequestId, FileBrowserEntryId, FileBrowserRootId,
+    FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
+    SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId,
+    WorktreeRepositoryId,
 };
 use crate::navigation::{
     NavigationDiscovery, NavigationFrame, NavigationGroupFrame, NavigationHistoryLimit,
@@ -95,9 +95,9 @@ use crate::project::{
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
-    PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
-    QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
-    SecretReadParams, SecretReadResponse, ShellAuthTerminalParams, ShellAuthTerminalResponse,
+    PermissionToolCallRef, QuestionField, QuestionOption, QuestionRequestParams,
+    QuestionRequestResponse, QuestionStringFormat, QuestionValue, SecretReadParams,
+    SecretReadResponse, ShellAuthTerminalParams, ShellAuthTerminalResponse,
     ShellNotificationAction, ShellNotificationLevel, ShellOpenExternalParams,
     ShellOpenExternalResponse, ShellResolveFileRevealParams, ShellResolveFileRevealResult,
     ShellRevealFileParams, ShellRevealFileResponse, ShellShowNotificationParams,
@@ -214,7 +214,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientInstanceId>(output, config);
     push_decl::<ClientMutationId>(output, config);
     push_decl::<ClientRequestId>(output, config);
-    push_decl::<EventCursor>(output, config);
     push_decl::<FileBrowserEntryId>(output, config);
     push_decl::<FileBrowserRootId>(output, config);
     push_decl::<FileViewerHandleId>(output, config);
@@ -519,7 +518,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<PermissionToolCallRef>(output, config);
     push_decl::<PermissionRequestOption>(output, config);
     push_decl::<PermissionRequestOptionKind>(output, config);
-    push_decl::<PermissionRequestResponse>(output, config);
     push_decl::<QuestionRequestParams>(output, config);
     push_decl::<QuestionField>(output, config);
     push_decl::<QuestionStringFormat>(output, config);
@@ -671,7 +669,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<SupportRecoverStuckSessionsResult>(output, config);
 
     push_decl::<AppServerEvent>(output, config);
-    push_decl::<EventScope>(output, config);
     push_decl::<AppServerEventPayload>(output, config);
     push_decl::<ToolDetailDelta>(output, config);
     push_decl::<TaskChanges>(output, config);

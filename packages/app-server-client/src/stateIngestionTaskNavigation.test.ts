@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type {
   AppServerEvent,
-  EventCursor,
   NavigationFrame,
   NavigationGroupFrame,
   NavigationRow,
   ProjectId,
-  StateRootId,
   SubscriptionScope,
   TaskId,
   TaskSummary,
@@ -18,7 +16,6 @@ import {
   navigationGroupRows,
 } from "./stateIngestionTaskNavigation.js";
 
-const rootId = "root-1" as StateRootId;
 const scope: SubscriptionScope = { kind: "taskNavigation", section: "tasks" };
 const one = "project-1" as ProjectId;
 const two = "project-2" as ProjectId;
@@ -26,7 +23,6 @@ const two = "project-2" as ProjectId;
 describe("Navigation frame ingestion", () => {
   it("installs the baseline in the server's group and row order", () => {
     const navigation = installNavigationReply({
-      cursor: cursor("c1"),
       frame: frame({
         groupOrder: [two, one],
         groups: [group(one, ["b", "a"]), group(two, ["c"])],
@@ -38,10 +34,9 @@ describe("Navigation frame ingestion", () => {
 
   it("carries unchanged rows over and replaces changed ones by the frame's order", () => {
     const base = installNavigationReply({
-      cursor: cursor("c1"),
       frame: frame({ groupOrder: [one], groups: [group(one, ["a", "b"])] }),
     })!;
-    const next = applyNavigationFrame(base, frame({
+    const next = applyNavigationFrame(base, frame({ revision: 2,
       groups: [{ ...group(one, ["b", "a"]), rows: { "task:a": row("a", { unread: true }) } }],
     }));
     expect(next.kind).toBe("applied");
@@ -54,18 +49,16 @@ describe("Navigation frame ingestion", () => {
 
   it("leaves groups the frame does not mention untouched and drops removed groups", () => {
     const base = installNavigationReply({
-      cursor: cursor("c1"),
       frame: frame({ groupOrder: [one, two], groups: [group(one, ["a"]), group(two, ["b"])] }),
     })!;
-    const next = applyNavigationFrame(base, frame({ groupOrder: [one], removedGroups: [two] }));
+    const next = applyNavigationFrame(base, frame({ revision: 2, groupOrder: [one], removedGroups: [two] }));
     expect(next.kind === "applied" && next.navigation.groups.map((entry) => entry.projectId)).toEqual([one]);
-    const untouched = applyNavigationFrame(base, frame({ groups: [] }));
+    const untouched = applyNavigationFrame(base, frame({ revision: 2, groups: [] }));
     expect(untouched.kind === "applied" && untouched.navigation.groups[0]).toBe(base.groups[0]);
   });
 
   it("carries counts, discovery and undiscovered state from the frame", () => {
     const next = installNavigationReply({
-      cursor: cursor("c1"),
       frame: frame({
         groupOrder: [one],
         groups: [{ ...group(one, ["a"]), total: 9, hidden: 8, undiscovered: true, discovery: "failed" }],
@@ -76,35 +69,48 @@ describe("Navigation frame ingestion", () => {
 
   it("asks for a resync when a frame omits a row the client never held", () => {
     const base = installNavigationReply({
-      cursor: cursor("c1"),
       frame: frame({ groupOrder: [one], groups: [group(one, ["a"])] }),
     })!;
-    expect(applyNavigationFrame(base, frame({
+    expect(applyNavigationFrame(base, frame({ revision: 2,
       groups: [{ ...group(one, ["a", "lost"]), rows: {} }],
     }))).toEqual({ kind: "resyncRequired", reason: "missingNavigationRow" });
-    expect(applyNavigationFrame(base, frame({ groupOrder: [one, two] })))
+    expect(applyNavigationFrame(base, frame({ revision: 2, groupOrder: [one, two] })))
       .toEqual({ kind: "resyncRequired", reason: "missingNavigationGroup" });
   });
 
-  it("ingests frames of its section through the cursor chain and ignores other sections", () => {
+  it("ingests the frames of its subscription", () => {
     const state = installNavigationSubscribeReply({
-      cursor: cursor("c1"),
       frame: frame({ groupOrder: [one], groups: [group(one, ["a"])] }),
-    }, scope, { stateRootId: rootId, clientInstanceId: "client-1" as never })!;
-    const applied = applySubscriptionEvent(state, event("c1", "c2", frame({
+    }, scope)!;
+    const applied = applySubscriptionEvent(state, event(frame({
+      revision: 2,
       groups: [{ ...group(one, ["a", "b"]), total: 2 }],
     })));
     expect(applied.kind).toBe("applied");
     if (applied.kind !== "applied" || applied.state.snapshot.kind !== "taskNavigation") return;
     expect(applied.state.snapshot.navigation.groups[0]?.order).toEqual(["task:a", "task:b"]);
 
-    const other = applySubscriptionEvent(state, event("c1", "c2", frame({ section: "archive" })));
-    expect(other.kind).toBe("ignored");
+  });
+
+  it("drops a frame sent before the baseline it would overtake", () => {
+    const state = installNavigationSubscribeReply({
+      frame: frame({ revision: 5, groupOrder: [one], groups: [group(one, ["a"])] }),
+    }, scope)!;
+
+    const stale = applySubscriptionEvent(state, event(frame({
+      revision: 4,
+      groups: [{ ...group(one, ["z"]), total: 1 }],
+    })));
+
+    expect(stale.kind).toBe("applied");
+    if (stale.kind !== "applied") return;
+    expect(stale.snapshotChanged).toBe(false);
+    expect(stale.state.snapshot).toBe(state.snapshot);
   });
 });
 
 function frame(overrides: Partial<NavigationFrame>): NavigationFrame {
-  return { section: "tasks", removedGroups: [], groups: [], ...overrides };
+  return { section: "tasks", revision: 1, removedGroups: [], groups: [], ...overrides };
 }
 
 function group(projectId: ProjectId, ids: string[]): NavigationGroupFrame {
@@ -128,12 +134,9 @@ function rowTaskId(value: NavigationRow) {
   return value.entry.kind === "task" ? value.entry.task.taskId : undefined;
 }
 
-function event(previous: string, next: string, navigation: NavigationFrame): AppServerEvent {
+function event(navigation: NavigationFrame): AppServerEvent {
   return {
     subscription: scope,
-    previousCursor: cursor(previous),
-    cursor: cursor(next),
-    scope: { kind: "client", stateRootId: rootId, clientInstanceId: "client-1" as never },
     payload: { kind: "navigationFrame", frame: navigation },
   } as AppServerEvent;
 }
@@ -154,6 +157,3 @@ function summary(id: string): TaskSummary {
   };
 }
 
-function cursor(value: string): EventCursor {
-  return value as EventCursor;
-}

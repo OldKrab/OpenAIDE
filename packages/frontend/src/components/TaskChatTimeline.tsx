@@ -226,7 +226,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                       isLiveCompaction(row.message, taskStatus) ? workingStartedAt : undefined
                     }
                     hurryLiveText={awaitsUserAnswer}
-                    liveTextEventCursor={liveTextCursorForMessage(
+                    liveTextEventToken={liveTextTokenForMessage(
                       liveTextPresentation,
                       latestTextMessageIds,
                       row.message,
@@ -365,7 +365,7 @@ export function chatRowKey(message: ChatMessage) {
   return message.message_id;
 }
 
-function liveTextCursorForMessage(
+function liveTextTokenForMessage(
   presentation: TaskLiveTextPresentation | undefined,
   latestMessageIds: Partial<Record<"agent" | "thought", string>>,
   message: ChatMessage,
@@ -373,7 +373,7 @@ function liveTextCursorForMessage(
   if (message.message.kind !== "agent_message") return undefined;
   if (latestMessageIds[message.message.role] !== message.message_id) return undefined;
   const signal = presentation?.[message.message.role];
-  return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
+  return signal?.messageId === message.message_id ? signal.eventToken : undefined;
 }
 
 /**

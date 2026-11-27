@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::events::TaskChatChange;
-use crate::ids::{EventCursor, SubagentId, TaskId};
+use crate::ids::{SubagentId, TaskId};
 use crate::snapshot::{SubagentCatalogSnapshot, SubagentHistorySnapshot, TaskSnapshot};
 use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
@@ -24,7 +24,6 @@ pub struct StateSubscribeParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct StateSubscribeResult {
-    pub cursor: EventCursor,
     pub scope: SubscriptionScope,
     pub snapshot: SubscriptionSnapshot,
 }

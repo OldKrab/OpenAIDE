@@ -16,7 +16,6 @@ use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapsho
 
 use crate::client_lifecycle::ClientContext;
 use crate::settings::{SettingsCatalog, SettingsSnapshotSource};
-use crate::storage_runtime::SnapshotReadToken;
 
 mod agent_collection;
 mod project_collection;
@@ -41,7 +40,6 @@ pub trait SnapshotProvider {
         ctx: &ClientContext,
         scope: &SubscriptionScope,
         known_version: Option<u64>,
-        token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError>;
 }
 
@@ -203,7 +201,6 @@ impl SnapshotBuilder {
         ctx: &ClientContext,
         requested_surface: RequestedSurface,
         global: GlobalState,
-        token: &SnapshotReadToken,
     ) -> Result<ClientSnapshot, ProtocolError> {
         let active_task = match &requested_surface {
             RequestedSurface::Task { task_id } => {
@@ -221,7 +218,6 @@ impl SnapshotBuilder {
             _ => None,
         };
         Ok(ClientSnapshot {
-            cursor: token.cursor().clone(),
             server: ServerSnapshot {
                 server_id: self.server_id.clone(),
                 protocol_version: openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION,
@@ -316,7 +312,6 @@ impl SnapshotProvider for SnapshotBuilder {
         ctx: &ClientContext,
         scope: &SubscriptionScope,
         known_version: Option<u64>,
-        _token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError> {
         Ok(match scope {
             // Navigation is a view subscription (`navigation/subscribe`), not an entity snapshot.

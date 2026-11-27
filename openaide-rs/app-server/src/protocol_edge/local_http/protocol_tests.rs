@@ -4,7 +4,7 @@ use openaide_app_server_protocol::client::{RequestedSurface, ShellKind};
 use openaide_app_server_protocol::envelopes::{
     ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
 };
-use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, CLIENT_INITIALIZE,
 };
@@ -167,10 +167,7 @@ fn product_request_dispatches_a_notification_without_a_reply() {
             connection_id: connection_id.clone(),
             id: String::new(),
             response: GatewayResponse::Result(Value::Null),
-            events: vec![event_delivery(
-                &connection_id,
-                app_event("cursor-1", "cursor-2"),
-            )],
+            events: vec![event_delivery(&connection_id, app_event("event-2"))],
             server_requests: Vec::new(),
         }
     });
@@ -239,10 +236,7 @@ fn product_transport_answers_an_accepted_client_response_with_its_events_only() 
         connection_id: connection_id.clone(),
         id: String::new(),
         response: GatewayResponse::Result(Value::Null),
-        events: vec![event_delivery(
-            &connection_id,
-            app_event("cursor-2", "cursor-3"),
-        )],
+        events: vec![event_delivery(&connection_id, app_event("event-3"))],
         server_requests: Vec::new(),
     });
 
@@ -250,7 +244,7 @@ fn product_transport_answers_an_accepted_client_response_with_its_events_only() 
 
     assert_eq!(status, 200);
     assert_eq!(body.as_array().unwrap().len(), 1);
-    assert_eq!(body[0]["params"]["cursor"], "cursor-3");
+    assert_eq!(body[0]["params"]["payload"]["taskId"], "event-3");
 }
 
 #[test]
@@ -265,13 +259,13 @@ fn product_transport_returns_everything_queued_for_the_connection_in_order() {
     });
     exchange.outbox.push(
         &connection_id,
-        OutboundMessage::Event(Box::new(app_event("cursor-1", "cursor-2"))),
+        OutboundMessage::Event(Box::new(app_event("event-2"))),
     );
 
     let (status, body) = http(&request("1", "task/list", json!({})), &exchange);
 
     assert_eq!(status, 200);
-    assert_eq!(body[0]["params"]["cursor"], "cursor-2");
+    assert_eq!(body[0]["params"]["payload"]["taskId"], "event-2");
     assert_eq!(body[1]["id"], "1");
     assert_eq!(body.as_array().unwrap().len(), 2);
 }
@@ -476,7 +470,7 @@ fn reliable_session_carries_a_connections_messages_in_queue_order() {
     });
     exchange.outbox.push(
         &connection_id,
-        OutboundMessage::Event(Box::new(app_event("cursor-1", "cursor-2"))),
+        OutboundMessage::Event(Box::new(app_event("event-2"))),
     );
 
     upload(
@@ -488,16 +482,22 @@ fn reliable_session_carries_a_connections_messages_in_queue_order() {
     );
     exchange.outbox.push(
         &connection_id,
-        OutboundMessage::Event(Box::new(app_event("cursor-2", "cursor-3"))),
+        OutboundMessage::Event(Box::new(app_event("event-3"))),
     );
     let polled = poll(&sessions, &session_id, &exchange);
 
     let batch: Value = serde_json::from_str(&polled.body).unwrap();
     let frames = batch["frames"].as_array().unwrap();
     assert_eq!(frames.len(), 3);
-    assert_eq!(frames[0]["message"]["params"]["cursor"], "cursor-2");
+    assert_eq!(
+        frames[0]["message"]["params"]["payload"]["taskId"],
+        "event-2"
+    );
     assert_eq!(frames[1]["message"]["id"], "request-1");
-    assert_eq!(frames[2]["message"]["params"]["cursor"], "cursor-3");
+    assert_eq!(
+        frames[2]["message"]["params"]["payload"]["taskId"],
+        "event-3"
+    );
 }
 
 #[test]
@@ -918,7 +918,6 @@ impl crate::agent::product_api::AgentAuthenticateWorkflow for CancelReleasesAuth
 
 fn client_snapshot() -> ClientSnapshot {
     ClientSnapshot {
-        cursor: "cursor-1".into(),
         server: ServerSnapshot {
             server_id: "server-1".into(),
             protocol_version: ProtocolVersion::V1,
@@ -937,19 +936,14 @@ fn client_snapshot() -> ClientSnapshot {
     }
 }
 
-fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
+/// An event whose payload names `marker`, so tests can tell events apart on the wire.
+fn app_event(marker: &str) -> AppServerEvent {
     AppServerEvent {
         subscription: openaide_app_server_protocol::state::SubscriptionScope::Task {
             task_id: "task-1".into(),
         },
-        previous_cursor: previous_cursor.into(),
-        cursor: cursor.into(),
-        scope: EventScope::Task {
-            state_root_id: "root-1".into(),
-            task_id: "task-1".into(),
-        },
         payload: AppServerEventPayload::TaskContentRemoved {
-            task_id: "task-1".into(),
+            task_id: marker.into(),
         },
     }
 }

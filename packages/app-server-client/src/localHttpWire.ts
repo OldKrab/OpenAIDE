@@ -11,8 +11,6 @@ import type {
   TypedServerRequest,
 } from "./generated/protocol.js";
 import {
-  PERMISSION_REQUEST,
-  QUESTION_REQUEST,
   SECRET_READ,
   SHELL_AUTH_TERMINAL,
   SHELL_OPEN_EXTERNAL,
@@ -98,8 +96,6 @@ function isPendingRequestScope(value: unknown): value is PendingRequestScope {
 
 function isServerRequestMethod(method: string): method is ServerRequestMethod {
   return (
-    method === PERMISSION_REQUEST ||
-    method === QUESTION_REQUEST ||
     method === SECRET_READ ||
     method === SHELL_AUTH_TERMINAL ||
     method === SHELL_OPEN_EXTERNAL ||
@@ -110,47 +106,6 @@ function isServerRequestMethod(method: string): method is ServerRequestMethod {
 
 function validateServerRequestParams(method: ServerRequestMethod, params: unknown) {
   const object = recordParams(method, params);
-  if (method === PERMISSION_REQUEST) {
-    requiredString(method, object, "title");
-    const toolCall = recordParams(method, object.toolCall, "toolCall");
-    requiredString(method, toolCall, "id");
-    requiredString(method, toolCall, "title");
-    const options = object.options;
-    if (!Array.isArray(options)) throw new Error(`${method} params.options must be an array`);
-    for (const [index, option] of options.entries()) {
-      const item = recordParams(method, option, `options[${index}]`);
-      requiredString(method, item, "optionId", `options[${index}].optionId`);
-      requiredString(method, item, "name", `options[${index}].name`);
-      requiredString(method, item, "kind", `options[${index}].kind`);
-    }
-    return;
-  }
-  if (method === QUESTION_REQUEST) {
-    requiredString(method, object, "message");
-    const fields = object.fields;
-    if (!Array.isArray(fields)) throw new Error(`${method} params.fields must be an array`);
-    for (const [index, field] of fields.entries()) {
-      const item = recordParams(method, field, `fields[${index}]`);
-      const kind = requiredString(method, item, "kind", `fields[${index}].kind`);
-      requiredString(method, item, "key", `fields[${index}].key`);
-      requiredString(method, item, "title", `fields[${index}].title`);
-      if (typeof item.required !== "boolean") {
-        throw new Error(`${method} params.fields[${index}].required must be a boolean`);
-      }
-      if (kind === "singleSelect" || kind === "multiSelect") {
-        const options = item.options;
-        if (!Array.isArray(options)) {
-          throw new Error(`${method} params.fields[${index}].options must be an array`);
-        }
-        for (const [optionIndex, option] of options.entries()) {
-          const choice = recordParams(method, option, `fields[${index}].options[${optionIndex}]`);
-          requiredString(method, choice, "value", `fields[${index}].options[${optionIndex}].value`);
-          requiredString(method, choice, "label", `fields[${index}].options[${optionIndex}].label`);
-        }
-      }
-    }
-    return;
-  }
   if (method === SECRET_READ) {
     requiredString(method, object, "key");
     return;
