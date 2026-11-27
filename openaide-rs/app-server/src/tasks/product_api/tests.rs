@@ -59,6 +59,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[path = "adopt_native_session_tests.rs"]
+mod adopt_native_session_tests;
+
 #[path = "native_catalog_refresh_tests.rs"]
 mod native_catalog_refresh_tests;
 
@@ -8728,6 +8731,12 @@ fn set_config_option_applies_to_running_task_live_session() {
         .snapshot()
         .into_iter()
         .filter(|entry| entry["fields"]["task_id"] == "task-config-diagnostics")
+        .filter(|entry| {
+            entry["event"]
+                .as_str()
+                .unwrap()
+                .starts_with("task_config_option_")
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         config_events
@@ -9754,6 +9763,7 @@ struct RecordingAgent {
     filter_listed_sessions_by_cwd: bool,
     listed_sessions: Mutex<Vec<AgentListedSession>>,
     replayed_messages: Mutex<Vec<NormalizedMessage>>,
+    replayed_subagents: Mutex<Vec<crate::agent::events::AgentReplayedSubagentEvent>>,
     fail_start: bool,
     fail_attach: bool,
     fail_close: bool,
@@ -10095,7 +10105,7 @@ impl AgentRuntime for RecordingAgent {
         Ok(AgentLoadedSession {
             session,
             replayed_messages: self.replayed_messages.lock().unwrap().clone(),
-            replayed_subagents: Vec::new(),
+            replayed_subagents: self.replayed_subagents.lock().unwrap().clone(),
         })
     }
 

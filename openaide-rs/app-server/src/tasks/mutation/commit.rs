@@ -139,13 +139,25 @@ pub(super) fn create_task_with_validation_and_writer(
         Err(RuntimeError::TaskNotFound(_)) => {}
         Err(error) => return Err(error),
     }
+    let started = std::time::Instant::now();
     validate(&TaskCreationValidationContext::new(&target.store))?;
     let facts = persist_new_task(target, &mut task, initial_messages, write_task)?;
+    let persisted_ms = started.elapsed().as_millis() as u64;
     notify_task_changed(target, &facts);
+    let snapshot_started = std::time::Instant::now();
     let snapshot = match options.response_snapshot_tail_limit {
         Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),
         None => None,
     };
+    crate::logging::info(
+        "task_create_committed",
+        serde_json::json!({
+            "task_id": task_id,
+            "validate_and_persist_ms": persisted_ms,
+            "snapshot_ms": snapshot_started.elapsed().as_millis() as u64,
+            "total_ms": started.elapsed().as_millis() as u64,
+        }),
+    );
     Ok(TaskCommitResult {
         outcome: TaskCommitOutcome::Committed(facts),
         response_snapshot: snapshot,

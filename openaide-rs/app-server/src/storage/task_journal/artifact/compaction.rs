@@ -75,6 +75,10 @@ fn compact_one(
         return Ok(None);
     }
     let path = artifact_path(tasks_root, task_id, artifact_id)?;
+    if !path.try_exists()? {
+        // Only a pack record: one frame, nothing superseded, and a pack is never rewritten.
+        return Ok(None);
+    }
     let replayed: ReplayedFrames<ArtifactFrame> = frame::replay(&path)?;
     let committed_frames = usize::try_from(committed_head)
         .map_err(|_| RuntimeError::Storage("Tool artifact head exceeds memory".to_string()))?;

@@ -11,8 +11,8 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
     FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN,
-    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH, TASK_IMAGE,
-    TASK_NAVIGATION_SEARCH,
+    FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH,
+    TASK_ADOPT_NATIVE_SESSION, TASK_IMAGE, TASK_NAVIGATION_SEARCH, TASK_RELOAD_NATIVE_SESSION,
 };
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
@@ -40,10 +40,14 @@ use super::{
 const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
 
 mod lock_free;
+mod native_session;
 mod navigation_search;
 mod relay;
 mod task_image;
 mod uploads;
+
+#[cfg(test)]
+type ReadHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Clone)]
 pub struct SharedRpcGateway {
@@ -52,6 +56,9 @@ pub struct SharedRpcGateway {
     outbox: Outbox,
     deliveries: DeliverySignal,
     slow_lock_wait: Duration,
+    /// Lets a test hold a concurrent read where its slow work would run.
+    #[cfg(test)]
+    read_hook: Option<ReadHook>,
 }
 
 /// A handled inbound message: the outcome, and the protocol lock it was produced under. The
@@ -125,7 +132,17 @@ impl SharedRpcGateway {
             gateway: Arc::new(Mutex::new(gateway)),
             deliveries: DeliverySignal::default(),
             slow_lock_wait: SLOW_LOCK_WAIT,
+            #[cfg(test)]
+            read_hook: None,
         }
+    }
+
+    /// Runs `hook` with the method name at the start of each concurrent read, before it takes
+    /// any lock, so a test can park the read the way a slow disk or git call would.
+    #[cfg(test)]
+    pub(crate) fn with_read_hook(mut self, hook: impl Fn(&str) + Send + Sync + 'static) -> Self {
+        self.read_hook = Some(Arc::new(hook));
+        self
     }
 
     #[cfg(test)]
@@ -248,6 +265,14 @@ impl SharedRpcGateway {
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
     ) -> Handled<'_> {
+        #[cfg(test)]
+        if let (Some(hook), InboundProtocolMessage::ClientRequest { method, .. }) =
+            (&self.read_hook, &message)
+        {
+            if super::concurrent_reads::is_concurrent_read(method) {
+                hook(method);
+            }
+        }
         if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
             if matches!(method.as_str(), FILE_VIEWER_LIST_DIRECTORY | FILE_VIEWER_SEARCH | FILE_VIEWER_EXISTING_FILES | FILE_VIEWER_CHANGES | FILE_VIEWER_DIFF))
         {
@@ -280,6 +305,16 @@ impl SharedRpcGateway {
         if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == TASK_IMAGE)
         {
             return self.handle_task_image_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
+            if matches!(method.as_str(), TASK_ADOPT_NATIVE_SESSION | TASK_RELOAD_NATIVE_SESSION))
+        {
+            return self.handle_native_session_without_protocol_lock(
                 connection_id,
                 message,
                 now,

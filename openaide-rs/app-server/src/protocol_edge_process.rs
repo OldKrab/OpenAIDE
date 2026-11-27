@@ -80,6 +80,17 @@ pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
         if line.trim().is_empty() {
             continue;
         }
+        // Read-only requests run beside this loop so a slow one cannot hold up the lines
+        // behind it; see `concurrent_reads` for why wire order still holds.
+        let claimed = lock(&dispatcher).claim_concurrent_read(&line);
+        if let Some(read) = claimed {
+            let outbound = outbound.clone();
+            let stdout = stdout.clone();
+            read.start(move || {
+                outbound.flush(|lines| write_lines(&stdout, lines));
+            });
+            continue;
+        }
         lock(&dispatcher).dispatch_line(&line);
         if !outbound.flush(|lines| write_lines(&stdout, lines)) {
             return;

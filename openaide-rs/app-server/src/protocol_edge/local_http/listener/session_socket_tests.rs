@@ -1,12 +1,16 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+
+use openaide_app_server_protocol::methods::FILE_VIEWER_CHANGES;
 
 use serde_json::{json, Value};
 
 use crate::protocol_edge::local_http::listener::{handle_app_stream, SessionSocketTimeouts};
 use crate::protocol_edge::local_http::LocalHttpAppHandler;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
+use crate::protocol_edge::SharedRpcGateway;
 use crate::storage_runtime::StateRoot;
 
 const CONNECTION_ID: &str = "socket-client-1";
@@ -25,9 +29,17 @@ impl Server {
     }
 
     fn start_with(timeouts: SessionSocketTimeouts) -> Self {
+        Self::start_with_gateway(timeouts, |gateway| gateway)
+    }
+
+    fn start_with_gateway(
+        timeouts: SessionSocketTimeouts,
+        configure: impl FnOnce(SharedRpcGateway) -> SharedRpcGateway,
+    ) -> Self {
         let state_dir = tempfile::TempDir::new().expect("state dir");
         let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
-        let gateway = ProtocolEdgeStdioDispatcher::new_for_test(state_root).shared_gateway();
+        let gateway =
+            configure(ProtocolEdgeStdioDispatcher::new_for_test(state_root).shared_gateway());
         let (shutdown_sender, shutdown) = mpsc::channel();
         let handler = LocalHttpAppHandler::new(
             gateway,
@@ -386,4 +398,46 @@ fn a_silent_client_is_dropped_at_the_idle_deadline() {
         json!(crate::test_sync::EXPIRES.as_millis()),
         "{closed}"
     );
+}
+
+/// A slow read-only request must not hold up the frames behind it, and a request that
+/// finished before it must already have been answered: replies are written as they are
+/// produced, not when the dispatch goes idle. The read arrives after the later replies, which
+/// is why clients match replies by id.
+#[test]
+fn a_slow_read_does_not_hold_up_later_requests_on_the_link() {
+    let parked = Arc::new(AtomicBool::new(false));
+    let released = Arc::new(AtomicBool::new(false));
+    let server = Server::start_with_gateway(SessionSocketTimeouts::default(), {
+        let (parked, released) = (parked.clone(), released.clone());
+        move |gateway| {
+            gateway.with_read_hook(move |method| {
+                if method == FILE_VIEWER_CHANGES {
+                    parked.store(true, Ordering::SeqCst);
+                    crate::test_sync::hold_while(|| !released.load(Ordering::SeqCst));
+                }
+            })
+        }
+    });
+    let (mut client, _) = server.open(hello(None));
+    client.initialize();
+
+    client.send(&frame(2, "before", "client/heartbeat", json!({})));
+    client.send(&frame(3, "slow", FILE_VIEWER_CHANGES, json!({})));
+    client.send(&frame(4, "after", "client/heartbeat", json!({})));
+
+    // The read is parked until `released`, so only the other two replies can arrive.
+    let mut answered = Vec::new();
+    while answered.len() < 2 {
+        let reply = client.receive_type("frame");
+        answered.push(reply["message"]["id"].as_str().unwrap().to_string());
+    }
+    assert_eq!(answered, ["before", "after"]);
+    assert!(parked.load(Ordering::SeqCst), "the read was never started");
+
+    released.store(true, Ordering::SeqCst);
+    let slow = client.receive_type("frame");
+    assert_eq!(slow["message"]["id"], "slow");
+    // Frames keep one gapless sequence even though the replies left request order.
+    assert_eq!(slow["sequence"], 4);
 }

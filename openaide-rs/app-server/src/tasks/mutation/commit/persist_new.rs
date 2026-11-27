@@ -13,6 +13,7 @@ pub(super) fn persist_new_task(
     initial_messages: Vec<NormalizedMessage>,
     write_task: impl FnOnce(&Store, &TaskRecord) -> Result<(), RuntimeError>,
 ) -> Result<TaskCommitFacts, RuntimeError> {
+    let started = std::time::Instant::now();
     let runtime_revision = target
         .runtime_state
         .lock()
@@ -21,6 +22,7 @@ pub(super) fn persist_new_task(
     // Only a Task created by a live prompt witnessed its first rows; an adopted
     // native session arrives as history and stays untimed.
     let witnessed_live = task.active_turn_started_at.is_some();
+    let initial_count = initial_messages.len();
     let mut stored_messages = Vec::with_capacity(initial_messages.len());
     let mut artifact_replacements = Vec::new();
     for (index, mut message) in initial_messages.into_iter().enumerate() {
@@ -45,6 +47,8 @@ pub(super) fn persist_new_task(
             },
         });
     }
+    let message_count = initial_count;
+    let prepared_ms = started.elapsed().as_millis() as u64;
     let message_meta = crate::storage::records::MessageMeta {
         task_id: task.task_id.clone(),
         version: stored_messages.len() as u64,
@@ -89,6 +93,8 @@ pub(super) fn persist_new_task(
         chat_version: 0,
     };
     let changes = project_committed_changes(target, &projected, &projection, fields, Vec::new())?;
+    let journal_started = std::time::Instant::now();
+    let artifact_count = artifact_replacements.len();
     target
         .store
         .task_journal()
@@ -107,6 +113,17 @@ pub(super) fn persist_new_task(
             ),
         )?
         .wait()?;
+    crate::logging::info(
+        "task_create_persisted",
+        serde_json::json!({
+            "task_id": task.task_id,
+            "message_count": message_count,
+            "artifact_count": artifact_count,
+            "prepare_ms": prepared_ms,
+            "projection_ms": (journal_started - started).as_millis() as u64 - prepared_ms,
+            "journal_ms": journal_started.elapsed().as_millis() as u64,
+        }),
+    );
     target
         .runtime_state
         .lock()

@@ -73,6 +73,7 @@ mod devices;
 mod entity_subscription;
 mod gateway_lock_wait;
 mod global_state;
+mod native_session;
 mod navigation_publication;
 mod navigation_search;
 mod outbound_order;

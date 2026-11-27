@@ -80,6 +80,7 @@ pub(super) async fn open_acp_session<'a>(
                     .map(|catalog| catalog.options.len())
                     .unwrap_or(0),
                 "replayed_message_count": opened.replayed_messages.len(),
+                "replayed_subagent_event_count": opened.replayed_subagents.len(),
             }),
         ),
         Err(_) => crate::logging::warn(

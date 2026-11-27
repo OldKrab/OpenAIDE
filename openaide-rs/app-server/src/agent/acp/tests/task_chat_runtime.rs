@@ -717,14 +717,16 @@ fn adopting_a_native_session_restores_its_replayed_subagents() {
         .expect("adopt replayed ACP session");
     let task_id = adopted.task.task_id;
 
-    let child = store
-        .subagent_record_by_native(task_id.as_str(), "child-1")
-        .expect("the replayed child is a Subagent");
+    // The restore runs after the reply, so the child arrives once its outcome is recorded.
+    let child = crate::test_sync::wait_for("the replayed child completes", || {
+        store
+            .subagent_record_by_native(task_id.as_str(), "child-1")
+            .ok()
+            .filter(|child| {
+                child.status == crate::storage::subagents::SubagentStatusRecord::Completed
+            })
+    });
     assert_eq!(child.name, "Reviewer");
-    assert_eq!(
-        child.status,
-        crate::storage::subagents::SubagentStatusRecord::Completed
-    );
     let history = store
         .subagent_history(task_id.as_str(), &child.subagent_id)
         .expect("read the replayed child history");

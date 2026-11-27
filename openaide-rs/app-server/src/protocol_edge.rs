@@ -9,6 +9,7 @@ mod attachment_handlers;
 mod background_command_handlers;
 mod client_diagnostics_handlers;
 mod client_handlers;
+pub(crate) mod concurrent_reads;
 mod delivery_signal;
 mod device_handlers;
 mod diagnostics_handlers;

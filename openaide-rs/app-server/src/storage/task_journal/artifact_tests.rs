@@ -250,3 +250,96 @@ fn load_returns_the_appends_after_a_known_sequence_in_order() {
     let (_, none) = load_since(root.path(), "task_1", "artifact_1", 3, 3).expect("load at head");
     assert!(none.is_empty());
 }
+
+fn staged_replacement(text: &str) -> crate::storage::task_journal::model::ArtifactFrame {
+    crate::storage::task_journal::model::ArtifactFrame {
+        format_version: 1,
+        sequence: 1,
+        operations: vec![ArtifactOperation::ReplaceDetails {
+            details: Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: vec![crate::protocol::model::ActivityToolContent::Text {
+                    text: text.to_string(),
+                }],
+                input: None,
+                output: None,
+            }),
+        }],
+    }
+}
+
+fn write_staged_pack(root: &std::path::Path, text: &str) {
+    let mut creates = super::ArtifactCreates::default();
+    for id in ["artifact_a", "artifact_b", "artifact_c"] {
+        creates
+            .stage(
+                artifact_path(root, "task_1", id).unwrap(),
+                id,
+                staged_replacement(&format!("{text} {id}")),
+            )
+            .unwrap();
+    }
+    creates
+        .sync(JournalKind::Artifact, &FaultInjector::disabled())
+        .unwrap();
+}
+
+fn loaded_text(root: &std::path::Path, id: &str) -> String {
+    match &load(root, "task_1", id, 1)
+        .unwrap()
+        .details
+        .unwrap()
+        .content[0]
+    {
+        crate::protocol::model::ActivityToolContent::Text { text } => text.clone(),
+        other => panic!("unexpected content {other:?}"),
+    }
+}
+
+#[test]
+fn the_newest_pack_holding_an_artifact_wins_over_an_uncommitted_older_one() {
+    // A crash after a pack is durable but before its Task frame leaves it behind; a later
+    // commit that creates the same artifact ids writes another pack.
+    let root = Builder::new().prefix("pack-newest").tempdir().unwrap();
+    write_staged_pack(root.path(), "orphan");
+    write_staged_pack(root.path(), "committed");
+
+    assert_eq!(
+        loaded_text(root.path(), "artifact_b"),
+        "committed artifact_b"
+    );
+}
+
+#[test]
+fn an_incomplete_newer_pack_is_skipped_for_an_older_complete_one() {
+    let root = Builder::new().prefix("pack-skip").tempdir().unwrap();
+    write_staged_pack(root.path(), "complete");
+    let directory = root.path().join("task_1/artifacts");
+    let newest = directory.join("pack-2.pack");
+    let bytes = fs::read(directory.join("pack-1.pack")).unwrap();
+    fs::write(&newest, &bytes[..bytes.len() - 5]).unwrap();
+
+    assert_eq!(
+        loaded_text(root.path(), "artifact_c"),
+        "complete artifact_c"
+    );
+}
+
+#[test]
+fn a_packed_artifact_reconciles_at_its_committed_head_without_a_file() {
+    let root = Builder::new().prefix("pack-reconcile").tempdir().unwrap();
+    write_staged_pack(root.path(), "packed");
+
+    assert_eq!(
+        super::reconcile_one(root.path(), "task_1", "artifact_a", 1).unwrap(),
+        1
+    );
+    assert_eq!(
+        super::reconcile_one(root.path(), "task_1", "artifact_a", 0).unwrap(),
+        0
+    );
+    super::reconcile_one(root.path(), "task_1", "artifact_a", 2)
+        .expect_err("a head beyond the pack record has no bytes");
+    super::reconcile_one(root.path(), "task_1", "artifact_missing", 1)
+        .expect_err("an artifact in no pack is missing");
+}

@@ -7,6 +7,10 @@ use std::sync::Mutex;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+mod deferred_creates;
+
+pub(in crate::storage::task_journal) use deferred_creates::DeferredCreates;
+
 use crate::protocol::errors::RuntimeError;
 
 pub(super) const MAGIC: &[u8; 8] = b"OAIDETJ\0";
@@ -14,7 +18,7 @@ pub(super) const FORMAT_VERSION: u16 = 1;
 pub(crate) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
 const FRAME_LENGTH_LEN: usize = size_of::<u64>();
 const FRAME_CHECKSUM_LEN: usize = size_of::<u32>();
-const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
+pub(super) const MAX_FRAME_BYTES: usize = 256 * 1024 * 1024;
 
 /// Identifies the durable file whose boundary is being exercised. Keeping the
 /// scope explicit lets restart tests distinguish an artifact prepare from the
@@ -800,17 +804,35 @@ pub(super) fn json_error(stage: &'static str, error: serde_json::Error) -> Runti
     RuntimeError::Storage(format!("Task journal {stage} failed (kind={kind})"))
 }
 
+/// CRC-32 (IEEE, reflected) over `bytes`. Table-driven: every frame is checksummed on write
+/// and again on replay, and a bitwise loop dominated the cost of writing a large Chat log.
 pub(super) fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = u32::MAX;
     for byte in bytes {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            let mask = 0_u32.wrapping_sub(crc & 1);
-            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
-        }
+        crc = (crc >> 8) ^ CRC32_TABLE[((crc ^ u32::from(*byte)) & 0xff) as usize];
     }
     !crc
 }
+
+const CRC32_TABLE: [u32; 256] = {
+    let mut table = [0_u32; 256];
+    let mut index = 0;
+    while index < 256 {
+        let mut crc = index as u32;
+        let mut bit = 0;
+        while bit < 8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+            bit += 1;
+        }
+        table[index] = crc;
+        index += 1;
+    }
+    table
+};
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
