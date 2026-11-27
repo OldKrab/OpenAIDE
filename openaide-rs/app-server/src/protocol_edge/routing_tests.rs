@@ -6,6 +6,7 @@ use crate::protocol_edge::messages::InboundProtocolMessage;
 fn request(method: &str, params: serde_json::Value) -> InboundProtocolMessage {
     InboundProtocolMessage::ClientRequest {
         id: "1".to_string(),
+        wire_id: json!("1"),
         method: method.to_string(),
         params,
         meta: Default::default(),

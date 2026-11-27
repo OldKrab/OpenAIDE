@@ -94,8 +94,7 @@ impl RpcGateway {
         if let Err(error) = serde_json::from_value::<ClientHeartbeatParams>(params) {
             return self.error(connection_id, id, meta, responses::invalid_params(error));
         }
-        let events = self.drain_event_deliveries_for_connection(&connection_id);
-        responses::result_with_events(connection_id, id, meta, ClientHeartbeatResult {}, events)
+        responses::result(connection_id, id, meta, ClientHeartbeatResult {})
     }
 
     /// Explicit host shutdown bypasses reconnect grace so the last VS Code closes the server.

@@ -1,3 +1,5 @@
+use std::cell::{Cell, RefCell};
+
 use openaide_app_server_protocol::client::{RequestedSurface, ShellKind};
 use openaide_app_server_protocol::envelopes::{
     ErrorEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta,
@@ -14,7 +16,84 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
-use crate::protocol_edge::{GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
+use crate::protocol_edge::outbox::{OutboundMessage, Outbox, ReplyRoute};
+use crate::protocol_edge::{
+    GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway,
+};
+
+/// A stand-in App Server: `respond` decides each message's outcome, which joins the fake's own
+/// outbox through the same `push_outcome` the gateway uses.
+struct FakeExchange<F> {
+    outbox: Outbox,
+    respond: RefCell<F>,
+    live: bool,
+    observed: Cell<bool>,
+}
+
+impl<F> ProtocolExchange for FakeExchange<F>
+where
+    F: FnMut(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+{
+    fn dispatch(&self, connection_id: ConnectionId, message: InboundProtocolMessage) -> bool {
+        let route = ReplyRoute::for_message(&message);
+        let outcome = (self.respond.borrow_mut())(connection_id, message);
+        self.outbox.push_outcome(outcome, route)
+    }
+
+    fn observe_link(&self, _connection_id: &ConnectionId) -> bool {
+        self.observed.set(true);
+        self.live
+    }
+
+    fn transfer<R>(
+        &self,
+        connection_id: &ConnectionId,
+        write: impl FnOnce(Vec<OutboundMessage>) -> R,
+    ) -> R {
+        self.outbox.transfer(connection_id, write)
+    }
+}
+
+fn exchange<F>(respond: F) -> FakeExchange<F>
+where
+    F: FnMut(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+{
+    FakeExchange {
+        outbox: Outbox::default(),
+        respond: RefCell::new(respond),
+        live: true,
+        observed: Cell::new(false),
+    }
+}
+
+fn noop() -> FakeExchange<impl FnMut(ConnectionId, InboundProtocolMessage) -> GatewayOutcome> {
+    exchange(|_, _| GatewayOutcome::Noop)
+}
+
+fn http(body: &str, exchange: &impl ProtocolExchange) -> (u16, Value) {
+    let response = handle_local_http_protocol(
+        Some("Bearer token"),
+        "token",
+        Some("client-1"),
+        body,
+        exchange,
+    );
+    let body = if response.body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(&response.body).unwrap()
+    };
+    (response.status, body)
+}
+
+fn client_response_body() -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": "server-request-1",
+        "result": { "optionId": "allow-once" }
+    })
+    .to_string()
+}
 
 #[test]
 fn product_request_requires_connection_id_header() {
@@ -23,8 +102,7 @@ fn product_request_requires_connection_id_header() {
         "token",
         None,
         &request("1", "client/initialize", json!({})),
-        |_, _| GatewayOutcome::Noop,
-        |_| Vec::new(),
+        &noop(),
     );
 
     assert_eq!(response.status, 400);
@@ -38,40 +116,37 @@ fn product_request_requires_connection_id_header() {
 
 #[test]
 fn product_request_dispatches_with_stable_local_http_connection_id() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
+    let exchange = exchange(|connection_id, message| {
+        assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
+        assert!(matches!(
+            message,
+            InboundProtocolMessage::ClientRequest { method, .. } if method == "client/initialize"
+        ));
+        GatewayOutcome::Respond {
+            connection_id,
+            id: "1".to_string(),
+            response: GatewayResponse::Result(
+                serde_json::to_value(ResponseEnvelope::new(
+                    client_snapshot(),
+                    ResponseMeta::default(),
+                ))
+                .unwrap(),
+            ),
+            events: Vec::new(),
+            server_requests: Vec::new(),
+        }
+    });
+
+    let (status, body) = http(
         &request(
             "1",
             "client/initialize",
             json!({"clientInstanceId": "client-1"}),
         ),
-        |connection_id, message| {
-            assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
-            assert!(matches!(
-                message,
-                InboundProtocolMessage::ClientRequest { method, .. } if method == "client/initialize"
-            ));
-            GatewayOutcome::Respond {
-                connection_id,
-                id: "1".to_string(),
-                response: GatewayResponse::Result(
-                    serde_json::to_value(ResponseEnvelope::new(
-                        client_snapshot(),
-                        ResponseMeta::default(),
-                    ))
-                    .unwrap(),
-                ),
-                events: Vec::new(),
-                server_requests: Vec::new(),
-            }
-        },
-        |_| Vec::new(),
+        &exchange,
     );
 
-    assert_eq!(response.status, 200);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(status, 200);
     assert!(body.as_array().is_some_and(|messages| messages.len() == 1));
     assert_eq!(body[0]["jsonrpc"], "2.0");
     assert_eq!(body[0]["id"], "1");
@@ -82,98 +157,75 @@ fn product_request_dispatches_with_stable_local_http_connection_id() {
 }
 
 #[test]
-fn product_request_rejects_notifications() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "jsonrpc": "2.0",
-            "method": "state/subscribe",
-            "params": {}
-        })
-        .to_string(),
-        |_, _| GatewayOutcome::Noop,
-        |_| Vec::new(),
+fn product_request_dispatches_a_notification_without_a_reply() {
+    let exchange = exchange(|connection_id, message| {
+        assert!(matches!(
+            message,
+            InboundProtocolMessage::ClientNotification { method, .. } if method == "client/example"
+        ));
+        GatewayOutcome::Respond {
+            connection_id: connection_id.clone(),
+            id: String::new(),
+            response: GatewayResponse::Result(Value::Null),
+            events: vec![event_delivery(
+                &connection_id,
+                app_event("cursor-1", "cursor-2"),
+            )],
+            server_requests: Vec::new(),
+        }
+    });
+
+    let (status, body) = http(
+        &json!({ "jsonrpc": "2.0", "method": "client/example", "params": {} }).to_string(),
+        &exchange,
     );
 
-    assert_eq!(response.status, 400);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
-    assert!(body["error"]["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("notifications"));
+    assert_eq!(status, 200);
+    let messages = body.as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["method"], "app/event");
 }
 
 #[test]
 fn product_transport_accepts_client_response_for_server_request() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "optionId": "allow-once" }
-        })
-        .to_string(),
-        |connection_id, message| {
-            assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
-            assert!(matches!(
-                message,
-                InboundProtocolMessage::ClientResponse { request_id, .. }
-                    if request_id == "server-request-1"
-            ));
-            GatewayOutcome::Noop
-        },
-        |_| Vec::new(),
-    );
+    let exchange = exchange(|connection_id, message| {
+        assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
+        assert!(matches!(
+            message,
+            InboundProtocolMessage::ClientResponse { request_id, .. }
+                if request_id == "server-request-1"
+        ));
+        GatewayOutcome::Noop
+    });
 
-    assert_eq!(response.status, 200);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    let (status, body) = http(&client_response_body(), &exchange);
+
+    assert_eq!(status, 200);
     assert!(body.as_array().is_some_and(Vec::is_empty));
 }
 
 #[test]
 fn product_transport_returns_error_when_client_response_is_rejected() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "optionId": "allow-once" }
-        })
-        .to_string(),
-        |connection_id, message| {
-            assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
-            assert!(matches!(
-                message,
-                InboundProtocolMessage::ClientResponse { request_id, .. }
-                    if request_id == "server-request-1"
-            ));
-            GatewayOutcome::Respond {
-                connection_id,
-                id: "server-request-1".to_string(),
-                response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
-                    openaide_app_server_protocol::errors::ProtocolError {
-                        code: openaide_app_server_protocol::errors::ProtocolErrorCode::RequestAlreadyResolved,
-                        message: "Permission request is no longer answerable.".to_string(),
-                        recoverable: false,
-                        target: None,
-                    },
-                    ResponseMeta::default(),
-                ))),
-                events: Vec::new(),
-                server_requests: Vec::new(),
-            }
-        },
-        |_| Vec::new(),
-    );
+    let exchange = exchange(|connection_id, _message| GatewayOutcome::Respond {
+        connection_id,
+        id: "server-request-1".to_string(),
+        response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
+            openaide_app_server_protocol::errors::ProtocolError {
+                code:
+                    openaide_app_server_protocol::errors::ProtocolErrorCode::RequestAlreadyResolved,
+                message: "Permission request is no longer answerable.".to_string(),
+                recoverable: false,
+                target: None,
+            },
+            ResponseMeta::default(),
+        ))),
+        events: Vec::new(),
+        server_requests: Vec::new(),
+    });
 
-    assert_eq!(response.status, 200);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    let (status, body) = http(&client_response_body(), &exchange);
+
+    assert_eq!(status, 200);
     assert_eq!(body[0]["id"], "server-request-1");
     assert_eq!(
         body[0]["error"]["error"]["message"],
@@ -182,97 +234,69 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
 }
 
 #[test]
-fn product_transport_leaves_queued_events_for_the_push_channel_after_client_response() {
-    let mut drained_events = false;
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "optionId": "allow-once" }
-        })
-        .to_string(),
-        |connection_id, _message| {
-            assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
-            GatewayOutcome::Noop
-        },
-        |connection_id| {
-            drained_events = true;
-            vec![crate::protocol_edge::GatewayEventDelivery {
-                delivery: crate::client_lifecycle::Delivery {
-                    client_instance_id: "client-1".into(),
-                    connection_id: connection_id.clone(),
-                    request_capabilities: Vec::new(),
-                },
-                event: app_event("cursor-1", "cursor-2"),
-            }]
-        },
-    );
+fn product_transport_answers_an_accepted_client_response_with_its_events_only() {
+    let exchange = exchange(|connection_id, _message| GatewayOutcome::Respond {
+        connection_id: connection_id.clone(),
+        id: String::new(),
+        response: GatewayResponse::Result(Value::Null),
+        events: vec![event_delivery(
+            &connection_id,
+            app_event("cursor-2", "cursor-3"),
+        )],
+        server_requests: Vec::new(),
+    });
 
-    assert_eq!(response.status, 200);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
-    assert_eq!(body, json!([]));
-    assert!(!drained_events);
-}
+    let (status, body) = http(&client_response_body(), &exchange);
 
-#[test]
-fn product_transport_returns_only_events_caused_by_a_client_response() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "optionId": "allow-once" }
-        })
-        .to_string(),
-        |connection_id, _message| {
-            assert_eq!(connection_id, ConnectionId::new("local-http:client-1"));
-            GatewayOutcome::Respond {
-                connection_id: connection_id.clone(),
-                id: String::new(),
-                response: crate::protocol_edge::GatewayResponse::Result(serde_json::Value::Null),
-                events: vec![event_delivery(
-                    &connection_id,
-                    app_event("cursor-2", "cursor-3"),
-                )],
-                server_requests: Vec::new(),
-            }
-        },
-        |connection_id| {
-            vec![event_delivery(
-                connection_id,
-                app_event("cursor-1", "cursor-2"),
-            )]
-        },
-    );
-
-    assert_eq!(response.status, 200);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(status, 200);
     assert_eq!(body.as_array().unwrap().len(), 1);
     assert_eq!(body[0]["params"]["cursor"], "cursor-3");
 }
 
 #[test]
+fn product_transport_returns_everything_queued_for_the_connection_in_order() {
+    let connection_id = ConnectionId::new("local-http:client-1");
+    let exchange = exchange(|connection_id, _message| GatewayOutcome::Respond {
+        connection_id,
+        id: "1".to_string(),
+        response: GatewayResponse::Result(json!({ "result": {} })),
+        events: Vec::new(),
+        server_requests: Vec::new(),
+    });
+    exchange.outbox.push(
+        &connection_id,
+        OutboundMessage::Event(Box::new(app_event("cursor-1", "cursor-2"))),
+    );
+
+    let (status, body) = http(&request("1", "task/list", json!({})), &exchange);
+
+    assert_eq!(status, 200);
+    assert_eq!(body[0]["params"]["cursor"], "cursor-2");
+    assert_eq!(body[1]["id"], "1");
+    assert_eq!(body.as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn product_request_without_a_reply_is_an_internal_error() {
+    let (status, body) = http(&request("1", "task/list", json!({})), &noop());
+
+    assert_eq!(status, 500);
+    assert_eq!(body["code"], "request_produced_no_response");
+    assert_eq!(body["id"], "1");
+}
+
+#[test]
 fn product_transport_rejects_client_response_without_jsonrpc_version() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
+    let (status, body) = http(
         &json!({
             "id": "server-request-1",
             "result": { "optionId": "allow-once" }
         })
         .to_string(),
-        |_, _| GatewayOutcome::Noop,
-        |_| Vec::new(),
+        &noop(),
     );
 
-    assert_eq!(response.status, 400);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(status, 400);
     assert!(body["error"]["error"]["message"]
         .as_str()
         .unwrap()
@@ -281,10 +305,7 @@ fn product_transport_rejects_client_response_without_jsonrpc_version() {
 
 #[test]
 fn product_transport_rejects_client_response_with_result_and_error() {
-    let response = handle_local_http_protocol(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
+    let (status, body) = http(
         &json!({
             "jsonrpc": "2.0",
             "id": "server-request-1",
@@ -292,12 +313,10 @@ fn product_transport_rejects_client_response_with_result_and_error() {
             "error": { "code": -32000, "message": "denied" }
         })
         .to_string(),
-        |_, _| GatewayOutcome::Noop,
-        |_| Vec::new(),
+        &noop(),
     );
 
-    assert_eq!(response.status, 400);
-    let body: Value = serde_json::from_str(&response.body).unwrap();
+    assert_eq!(status, 400);
     assert!(body["error"]["error"]["message"]
         .as_str()
         .unwrap()
@@ -320,89 +339,175 @@ fn product_protocol_rejections_have_safe_reason_codes() {
             r#"{"jsonrpc":"1.0","id":"1","method":"task/list"}"#,
             "invalid_jsonrpc_version",
         ),
+        (r#"{"jsonrpc":"2.0","id":"1"}"#, "missing_method"),
     ];
 
     for (body, expected_code) in cases {
-        let response = handle_local_http_protocol(
-            Some("Bearer token"),
-            "token",
-            Some("client-1"),
-            body,
-            |_, _| GatewayOutcome::Noop,
-            |_| Vec::new(),
-        );
+        let (status, body) = http(body, &noop());
 
-        assert_eq!(response.status, 400);
-        assert_eq!(
-            serde_json::from_str::<Value>(&response.body).unwrap()["code"],
-            expected_code
-        );
+        assert_eq!(status, 400);
+        assert_eq!(body["code"], expected_code);
     }
 }
 
-#[test]
-fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
-    let sessions = ReliableSessionRegistry::new("server-1");
+fn open_session(sessions: &ReliableSessionRegistry) -> String {
     let opened =
-        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), &sessions);
+        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), sessions);
     let handshake: Value = serde_json::from_str(&opened.body).unwrap();
-    let session_id = handshake["sessionId"].as_str().unwrap();
+    handshake["sessionId"].as_str().unwrap().to_string()
+}
 
-    let upload = handle_reliable_session_upload(
+fn upload(
+    sessions: &ReliableSessionRegistry,
+    session_id: &str,
+    sequence: u64,
+    message: Value,
+    exchange: &impl ProtocolExchange,
+) -> LocalHttpResponse {
+    handle_reliable_session_upload(
         Some("Bearer token"),
         "token",
         Some("client-1"),
-        &json!({
-            "sessionId": session_id,
-            "sequence": 1,
-            "message": {
-                "jsonrpc": "2.0",
-                "id": "request-1",
-                "method": "task/list",
-                "params": {}
-            }
-        })
-        .to_string(),
-        &sessions,
-        |connection_id, message| {
-            assert!(matches!(
-                message,
-                InboundProtocolMessage::ClientRequest { .. }
-            ));
-            GatewayOutcome::Respond {
-                connection_id,
-                id: "request-1".to_string(),
-                response: GatewayResponse::Result(json!({"result": {"tasks": []}})),
-                events: Vec::new(),
-                server_requests: Vec::new(),
-            }
-        },
-    );
-    let mut observed_liveness = false;
-    let poll = handle_reliable_session_poll(
+        &json!({ "sessionId": session_id, "sequence": sequence, "message": message }).to_string(),
+        sessions,
+        exchange,
+    )
+}
+
+fn poll(
+    sessions: &ReliableSessionRegistry,
+    session_id: &str,
+    exchange: &impl ProtocolExchange,
+) -> LocalHttpResponse {
+    handle_reliable_session_poll(
         Some("Bearer token"),
         "token",
         Some("client-1"),
         session_id,
         0,
-        &sessions,
-        |connection_id| {
-            assert_eq!(connection_id, &ConnectionId::new("local-http:client-1"));
-            observed_liveness = true;
-            Some((Vec::new(), Vec::new()))
-        },
-    );
+        sessions,
+        exchange,
+    )
+}
 
-    assert_eq!(upload.status, 204);
-    assert!(upload.body.is_empty());
-    assert!(observed_liveness);
-    let batch: Value = serde_json::from_str(&poll.body).unwrap();
+#[test]
+fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let session_id = open_session(&sessions);
+    let exchange = exchange(|connection_id, message| {
+        assert!(matches!(
+            message,
+            InboundProtocolMessage::ClientRequest { .. }
+        ));
+        GatewayOutcome::Respond {
+            connection_id,
+            id: "request-1".to_string(),
+            response: GatewayResponse::Result(json!({"result": {"tasks": []}})),
+            events: Vec::new(),
+            server_requests: Vec::new(),
+        }
+    });
+
+    let uploaded = upload(
+        &sessions,
+        &session_id,
+        1,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "request-1",
+            "method": "task/list",
+            "params": {}
+        }),
+        &exchange,
+    );
+    let polled = poll(&sessions, &session_id, &exchange);
+
+    assert_eq!(uploaded.status, 204);
+    assert!(uploaded.body.is_empty());
+    assert!(exchange.observed.get());
+    let batch: Value = serde_json::from_str(&polled.body).unwrap();
     assert_eq!(batch["frames"][0]["sequence"], 1);
     assert_eq!(batch["frames"][0]["message"]["id"], "request-1");
     assert_eq!(
         batch["frames"][0]["message"]["result"]["result"]["tasks"],
         json!([])
     );
+}
+
+#[test]
+fn reliable_upload_accepts_a_notification_and_sends_no_reply() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let session_id = open_session(&sessions);
+    let dispatched = Cell::new(false);
+    let exchange = exchange(|_, message| {
+        assert!(matches!(
+            message,
+            InboundProtocolMessage::ClientNotification { .. }
+        ));
+        dispatched.set(true);
+        GatewayOutcome::Noop
+    });
+
+    let uploaded = upload(
+        &sessions,
+        &session_id,
+        1,
+        json!({ "jsonrpc": "2.0", "method": "client/example", "params": {} }),
+        &exchange,
+    );
+    let polled = poll(&sessions, &session_id, &exchange);
+
+    assert_eq!(uploaded.status, 204);
+    assert!(dispatched.get());
+    assert_eq!(polled.status, 204);
+}
+
+#[test]
+fn reliable_session_carries_a_connections_messages_in_queue_order() {
+    let connection_id = ConnectionId::new("local-http:client-1");
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let session_id = open_session(&sessions);
+    let exchange = exchange(|connection_id, _message| GatewayOutcome::Respond {
+        connection_id,
+        id: "request-1".to_string(),
+        response: GatewayResponse::Result(json!({ "result": {} })),
+        events: Vec::new(),
+        server_requests: Vec::new(),
+    });
+    exchange.outbox.push(
+        &connection_id,
+        OutboundMessage::Event(Box::new(app_event("cursor-1", "cursor-2"))),
+    );
+
+    upload(
+        &sessions,
+        &session_id,
+        1,
+        json!({ "jsonrpc": "2.0", "id": "request-1", "method": "task/list", "params": {} }),
+        &exchange,
+    );
+    exchange.outbox.push(
+        &connection_id,
+        OutboundMessage::Event(Box::new(app_event("cursor-2", "cursor-3"))),
+    );
+    let polled = poll(&sessions, &session_id, &exchange);
+
+    let batch: Value = serde_json::from_str(&polled.body).unwrap();
+    let frames = batch["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 3);
+    assert_eq!(frames[0]["message"]["params"]["cursor"], "cursor-2");
+    assert_eq!(frames[1]["message"]["id"], "request-1");
+    assert_eq!(frames[2]["message"]["params"]["cursor"], "cursor-3");
+}
+
+#[test]
+fn reliable_poll_of_a_connection_without_a_client_ends_the_session() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let session_id = open_session(&sessions);
+    let mut exchange = noop();
+    exchange.live = false;
+
+    assert_eq!(poll(&sessions, &session_id, &exchange).status, 410);
 }
 
 #[test]
@@ -496,7 +601,7 @@ fn reliable_upload_reports_an_invalid_connection_id() {
         Some("invalid/connection"),
         "{}",
         &sessions,
-        |_, _| GatewayOutcome::Noop,
+        &noop(),
     );
 
     assert_eq!(response.status, 400);
@@ -516,7 +621,7 @@ fn reliable_upload_reports_an_invalid_upload_envelope() {
         Some("client-1"),
         "{}",
         &sessions,
-        |_, _| GatewayOutcome::Noop,
+        &noop(),
     );
 
     assert_eq!(response.status, 400);
@@ -529,33 +634,20 @@ fn reliable_upload_reports_an_invalid_upload_envelope() {
 #[test]
 fn reliable_upload_preserves_the_nested_protocol_rejection_code() {
     let sessions = ReliableSessionRegistry::new("server-1");
-    let opened =
-        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), &sessions);
-    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
-    let session_id = handshake["sessionId"].as_str().unwrap();
+    let session_id = open_session(&sessions);
 
-    let response = handle_reliable_session_upload(
-        Some("Bearer token"),
-        "token",
-        Some("client-1"),
-        &json!({
-            "sessionId": session_id,
-            "sequence": 1,
-            "message": {
-                "jsonrpc": "2.0",
-                "method": "state/subscribe",
-                "params": {}
-            }
-        })
-        .to_string(),
+    let response = upload(
         &sessions,
-        |_, _| GatewayOutcome::Noop,
+        &session_id,
+        1,
+        json!({ "jsonrpc": "1.0", "id": "1", "method": "task/list" }),
+        &noop(),
     );
 
     assert_eq!(response.status, 400);
     assert_eq!(
         serde_json::from_str::<Value>(&response.body).unwrap()["code"],
-        "unsupported_notification"
+        "invalid_jsonrpc_version"
     );
 }
 
@@ -624,7 +716,7 @@ fn reliable_poll_reports_an_invalid_connection_id() {
         session_id,
         0,
         &sessions,
-        |_| None,
+        &noop(),
     );
 
     assert_eq!(response.status, 400);

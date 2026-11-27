@@ -125,15 +125,87 @@ describe("AppServerSession", () => {
       },
     });
 
-    // The baseline ends at revision 1, but only revision 3 reaches the client.
-    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+    // Revision 2 follows the baseline, but the next event skips revision 3's link.
+    raw.emit(taskEvent("cursor_1", "cursor_2", 2));
+    raw.emit(taskEvent("cursor_3", "cursor_4", 4));
     initial.resolve(taskSubscription("cursor_1", 1));
     try {
       await vi.waitFor(() => expect(subscribeCount).toBe(2));
       expect(ready).not.toHaveBeenCalled();
+      replacement.resolve(taskSubscription("cursor_4", 4));
+      await vi.waitFor(() => expect(snapshots.at(-1)).toBe(4));
+      expect(ready).toHaveBeenCalledOnce();
+    } finally {
+      session.close();
+    }
+  });
+
+  it("drops buffered events the baseline already contains and applies those that follow it", async () => {
+    const initial = deferred<StateSubscribeResult>();
+    const raw = fakeConnection(async (method) => {
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      return initial.promise;
+    });
+    const logger = recordingLogger();
+    const session = createAppServerSession(raw.connection, logger);
+    await session.initialize(initializeParams());
+    const snapshots: number[] = [];
+    session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+      onSnapshot(snapshot) {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+
+    // App Server sends the subscription's earlier events before its reply, and later ones after.
+    raw.emit(taskEvent("cursor_1", "cursor_2", 2));
+    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+    // Cursor values are unique, not consecutive: other subscriptions' events take values too.
+    raw.emit(taskEvent("cursor_3", "cursor_5", 4));
+    initial.resolve(taskSubscription("cursor_3", 3));
+    try {
+      await vi.waitFor(() => expect(snapshots).toEqual([3, 4]));
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith(
+        "app_server_state_baseline_ready",
+        expect.objectContaining({ dropped_pending_event_count: 2 }),
+      );
+    } finally {
+      session.close();
+    }
+  });
+
+  it("logs a cursor gap as an error and resyncs", async () => {
+    const replacement = deferred<StateSubscribeResult>();
+    let subscribeCount = 0;
+    const raw = fakeConnection(async (method) => {
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      subscribeCount += 1;
+      return subscribeCount === 1 ? taskSubscription("cursor_1", 1) : replacement.promise;
+    });
+    const logger = recordingLogger();
+    const session = createAppServerSession(raw.connection, logger);
+    await session.initialize(initializeParams());
+    const snapshots: number[] = [];
+    session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+      onSnapshot(snapshot) {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+    await vi.waitFor(() => expect(snapshots).toEqual([1]));
+
+    raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+    try {
+      await vi.waitFor(() => expect(subscribeCount).toBe(2));
+      expect(logger.error).toHaveBeenCalledWith(
+        "app_server_state_cursor_gap",
+        expect.objectContaining({
+          expected_previous_cursor: "cursor_1",
+          previous_cursor: "cursor_2",
+          cursor: "cursor_3",
+        }),
+      );
       replacement.resolve(taskSubscription("cursor_3", 3));
       await vi.waitFor(() => expect(snapshots.at(-1)).toBe(3));
-      expect(ready).toHaveBeenCalledOnce();
     } finally {
       session.close();
     }
@@ -195,7 +267,8 @@ describe("AppServerSession", () => {
           if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
         },
       });
-      raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+      raw.emit(taskEvent("cursor_1", "cursor_2", 2));
+      raw.emit(taskEvent("cursor_3", "cursor_4", 4));
       initial.resolve(taskSubscription("cursor_1", 1));
       await vi.advanceTimersByTimeAsync(0);
       expect(failed).toHaveBeenCalledOnce();
@@ -204,9 +277,9 @@ describe("AppServerSession", () => {
       await vi.advanceTimersByTimeAsync(500);
       expect(subscribeCount).toBe(3);
       expect(ready).not.toHaveBeenCalled();
-      replacement.resolve(taskSubscription("cursor_3", 3));
+      replacement.resolve(taskSubscription("cursor_4", 4));
       await vi.advanceTimersByTimeAsync(0);
-      expect(snapshots.at(-1)).toBe(3);
+      expect(snapshots.at(-1)).toBe(4);
       expect(ready).toHaveBeenCalledOnce();
     } finally {
       session.close();
@@ -413,6 +486,10 @@ function taskSubscription(cursor: string, revision: number): StateSubscribeResul
       },
     },
   };
+}
+
+function recordingLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
 function taskEvent(previousCursor: string, cursor: string, revision: number): AppServerEvent {

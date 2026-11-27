@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, EventCursor, StateRootId, TaskId};
 use openaide_app_server_protocol::state::{
     StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope, SubscriptionSnapshot,
     TaskResumeSnapshot,
@@ -18,10 +18,14 @@ mod task_change_log;
 
 use task_change_log::{ChangesSince, TaskChangeLog};
 
+/// One client's subscription and the cursor of the last event it was sent, or of its baseline.
+/// Each record links its own chain, so a client's chain never skips an event that was meant for
+/// another client, and a cursor gap on the client means App Server lost an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscriptionRecord {
     pub client_instance_id: ClientInstanceId,
     pub scope: SubscriptionScope,
+    cursor: EventCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,9 +99,9 @@ impl TaskSubscriptionPresence {
 #[derive(Debug, Clone)]
 pub struct StateStream {
     state_root_id: StateRootId,
-    // Client snapshots retain a coarse process cursor; live subscriptions use independent cursors.
+    /// Advances once per publication. Subscription records take their cursor values from it, so
+    /// every value is unique and a baseline is ordered against every event.
     cursors: CursorSequencer,
-    scope_cursors: HashMap<SubscriptionScope, CursorSequencer>,
     subscriptions: Vec<SubscriptionRecord>,
     task_subscription_presence: TaskSubscriptionPresence,
     task_changes: TaskChangeLog,
@@ -115,7 +119,6 @@ impl StateStream {
         Self {
             state_root_id,
             cursors: CursorSequencer::new(),
-            scope_cursors: HashMap::new(),
             subscriptions: Vec::new(),
             task_subscription_presence,
             task_changes: TaskChangeLog::default(),
@@ -147,15 +150,18 @@ impl StateStream {
         // TODO: Build the baseline outside the protocol lock if `chat_page_build_slow` shows it
         // stalling delivery on an optimized build. This needs the subscription registered first
         // and events held until the reply, because ADR-0023 pairs each baseline with its cursor.
-        let token = self.read_token_for_scope(&scope);
+        let token = self.cursors.read_token();
         let snapshot = match &scope {
             SubscriptionScope::Task { task_id } => {
                 self.task_snapshot(ctx, task_id, known_revision, snapshot_provider, &token)?
             }
             _ => snapshot_provider.snapshot(ctx, &scope, &token)?,
         };
-        let subscription_added =
-            self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
+        let subscription_added = self.upsert_subscription(
+            ctx.client_instance_id.clone(),
+            scope.clone(),
+            token.cursor().clone(),
+        );
         if subscription_added {
             if let SubscriptionScope::Task { task_id } = &scope {
                 self.task_subscription_presence
@@ -198,7 +204,7 @@ impl StateStream {
         deliveries: impl Fn(&ClientInstanceId) -> Option<Delivery>,
         _now: AppServerTime,
     ) -> PublishOutcome {
-        self.cursors.advance();
+        let (_, cursor) = self.cursors.advance();
         if let (
             EventScope::Task { task_id, .. },
             AppServerEventPayload::TaskChanged {
@@ -209,50 +215,27 @@ impl StateStream {
             // Every Task change passes here, so the log sees the exact published stream.
             self.task_changes.record(task_id, *revision, changes);
         }
-        let matching = self
-            .subscriptions
-            .iter()
-            .filter(|subscription| {
-                event_matches_subscription(&scope, &payload, subscription, &self.state_root_id)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut by_scope = Vec::<(SubscriptionScope, Vec<ClientInstanceId>)>::new();
-        for subscription in matching {
-            if let Some((_, clients)) = by_scope
-                .iter_mut()
-                .find(|(candidate, _)| candidate == &subscription.scope)
-            {
-                if !clients.contains(&subscription.client_instance_id) {
-                    clients.push(subscription.client_instance_id);
-                }
-            } else {
-                by_scope.push((subscription.scope, vec![subscription.client_instance_id]));
-            }
-        }
-
         let mut published = Vec::new();
-        for (subscription, clients) in by_scope {
-            let (previous_cursor, cursor) = self
-                .scope_cursors
-                .entry(subscription.clone())
-                .or_default()
-                .advance();
-            for client_id in clients {
-                let Some(delivery) = deliveries(&client_id) else {
-                    continue;
-                };
-                published.push(StateEventDelivery {
-                    delivery,
-                    event: AppServerEvent {
-                        subscription: subscription.clone(),
-                        previous_cursor: previous_cursor.clone(),
-                        cursor: cursor.clone(),
-                        scope: scope.clone(),
-                        payload: payload.clone(),
-                    },
-                });
+        for subscription in self.subscriptions.iter_mut() {
+            if !event_matches_subscription(&scope, &payload, subscription, &self.state_root_id) {
+                continue;
             }
+            // The record moves even when its client has no route, so a client that somehow
+            // missed this event sees the gap on its next one.
+            let previous_cursor = std::mem::replace(&mut subscription.cursor, cursor.clone());
+            let Some(delivery) = deliveries(&subscription.client_instance_id) else {
+                continue;
+            };
+            published.push(StateEventDelivery {
+                delivery,
+                event: AppServerEvent {
+                    subscription: subscription.scope.clone(),
+                    previous_cursor,
+                    cursor: cursor.clone(),
+                    scope: scope.clone(),
+                    payload: payload.clone(),
+                },
+            });
         }
         PublishOutcome {
             deliveries: published,
@@ -315,21 +298,27 @@ impl StateStream {
         &self.state_root_id
     }
 
+    /// Registers the subscription, or rebases an existing one, at its new baseline's cursor.
+    /// Events for the old baseline that are already queued link to an older cursor, so the
+    /// client recognizes and drops them. Returns whether the subscription is new.
     fn upsert_subscription(
         &mut self,
         client_instance_id: ClientInstanceId,
         scope: SubscriptionScope,
+        baseline: EventCursor,
     ) -> bool {
-        if !self.subscriptions.iter().any(|subscription| {
+        if let Some(existing) = self.subscriptions.iter_mut().find(|subscription| {
             subscription.client_instance_id == client_instance_id && subscription.scope == scope
         }) {
-            self.subscriptions.push(SubscriptionRecord {
-                client_instance_id,
-                scope,
-            });
-            return true;
+            existing.cursor = baseline;
+            return false;
         }
-        false
+        self.subscriptions.push(SubscriptionRecord {
+            client_instance_id,
+            scope,
+            cursor: baseline,
+        });
+        true
     }
 
     /// Answers a Task subscription with a resume when the client's known revision can
@@ -388,13 +377,6 @@ impl StateStream {
                 workspace_available: basis.workspace_available,
             },
         })
-    }
-
-    fn read_token_for_scope(&mut self, scope: &SubscriptionScope) -> SnapshotReadToken {
-        self.scope_cursors
-            .entry(scope.clone())
-            .or_default()
-            .read_token()
     }
 }
 

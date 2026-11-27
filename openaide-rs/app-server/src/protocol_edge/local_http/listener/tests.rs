@@ -90,40 +90,6 @@ fn handles_post_and_delegates_authorization_and_body() {
 }
 
 #[test]
-fn streams_event_data_without_waiting_for_a_json_rpc_response() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-
-    let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        handle_stream_with_push(
-            &mut stream,
-            |_request| panic!("event stream must not enter JSON-RPC handling"),
-            |stream, request| {
-                assert_eq!(request.authorization.as_deref(), Some("Bearer token"));
-                assert_eq!(request.connection_id.as_deref(), Some("client-1"));
-                write_event_stream_headers(stream)?;
-                write_event_stream_data(
-                    stream,
-                    r#"[{"jsonrpc":"2.0","method":"app/event","params":{"cursor":"2"}}]"#,
-                )
-            },
-        )
-        .unwrap();
-    });
-
-    let response = send(
-        addr,
-        "POST /probe HTTP/1.1\r\nAuthorization: Bearer token\r\nX-OpenAIDE-Connection-Id: client-1\r\nAccept: text/event-stream\r\nContent-Length: 0\r\n\r\n",
-    );
-    server.join().unwrap();
-
-    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
-    assert!(response.contains("Content-Type: text/event-stream\r\n"));
-    assert!(response.contains("data: [{\"jsonrpc\":\"2.0\",\"method\":\"app/event\""));
-}
-
-#[test]
 fn get_routes_to_reliable_session_receive_with_acknowledgement() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -133,7 +99,6 @@ fn get_routes_to_reliable_session_receive_with_acknowledgement() {
         handle_stream_with_routes(
             &mut stream,
             |_request| panic!("GET must not enter upload handling"),
-            |_stream, _request| panic!("GET must not enter event-stream handling"),
             |_stream, request| {
                 assert_eq!(request.session_id.as_deref(), Some("session-1"));
                 assert_eq!(request.after_sequence, Some(7));
@@ -275,7 +240,6 @@ fn upload_route_does_not_apply_the_json_body_limit_or_buffer_the_file() {
         handle_stream_with_routes(
             &mut stream,
             |_request| panic!("upload must not enter JSON-RPC handling"),
-            |_stream, _request| panic!("upload must not enter event-stream handling"),
             |_stream, _request| panic!("upload must not enter session polling"),
             |stream, request| {
                 assert_eq!(request.content_length, 10 * 1024 * 1024 + 1);
@@ -313,7 +277,6 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
         handle_stream_with_routes(
             &mut stream,
             |_request| panic!("chunk upload must not enter JSON-RPC handling"),
-            |_stream, _request| panic!("chunk upload must not enter event-stream handling"),
             |_stream, _request| panic!("chunk upload must not enter session polling"),
             |stream, request| {
                 assert_eq!(request.upload_id.as_deref(), Some("upload-1"));
@@ -357,7 +320,6 @@ fn file_download_allows_the_desktop_webview_origin_to_read_the_response() {
         handle_stream_with_routes(
             &mut stream,
             |_request| panic!("download must not enter JSON-RPC handling"),
-            |_stream, _request| panic!("download must not enter event-stream handling"),
             |_stream, _request| panic!("download must not enter session polling"),
             |_stream, _request| panic!("download must not enter file upload handling"),
             |stream, request| {
@@ -445,7 +407,6 @@ fn reliable_receive_rejection(request: &str) -> String {
         handle_stream_with_routes(
             &mut stream,
             |_request| panic!("GET must not enter upload handling"),
-            |_stream, _request| panic!("GET must not enter event-stream handling"),
             |_stream, request| Ok(reliable_session_poll_request_error(&request).unwrap()),
             |_stream, _request| panic!("session GET must not enter file upload handling"),
             |_stream, _request| panic!("session GET must not enter file download handling"),

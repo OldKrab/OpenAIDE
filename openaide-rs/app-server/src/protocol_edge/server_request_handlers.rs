@@ -142,11 +142,18 @@ impl RpcGateway {
             "client_detach_started",
             serde_json::json!({ "client_instance_id": client_instance_id }),
         );
+        let connection_id = self
+            .client_hub
+            .client_by_instance(client_instance_id)
+            .map(|client| client.connection_id);
         let crate::client_lifecycle::DetachOutcome::Detached { last_client, .. } =
             self.client_hub.detach(client_instance_id)
         else {
             return;
         };
+        if let Some(connection_id) = connection_id {
+            self.outbox.discard(&connection_id, "client_detached");
+        }
         self.server_requests
             .observe_client_expired(client_instance_id, now);
         self.state_stream
@@ -173,6 +180,10 @@ impl RpcGateway {
         client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
         now: AppServerTime,
     ) -> ClientExpiryOutcome {
+        let connection_id = self
+            .client_hub
+            .client_by_instance(client_instance_id)
+            .map(|client| client.connection_id);
         let outcome = self.client_hub.expire_after_grace(client_instance_id, now);
         crate::logging::info(
             "client_reconnect_grace_evaluated",
@@ -182,6 +193,9 @@ impl RpcGateway {
             }),
         );
         if let ClientExpiryOutcome::Expired { .. } = &outcome {
+            if let Some(connection_id) = &connection_id {
+                self.outbox.discard(connection_id, "client_expired");
+            }
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
             self.state_stream
@@ -228,6 +242,9 @@ impl RpcGateway {
                     "last_client_expired": batch.last_client_expired,
                 }),
             );
+        }
+        for connection_id in &batch.expired_connections {
+            self.outbox.discard(connection_id, "client_expired");
         }
         let mut projects_changed = false;
         for client_instance_id in &batch.expired {
@@ -298,24 +315,25 @@ impl RpcGateway {
 
     fn queue_project_collection_update(&mut self, now: AppServerTime) {
         if let Some(events) = self.publish_project_collection_update(now) {
-            self.pending_event_deliveries.extend(events);
+            self.outbox.push_events(events);
         }
     }
 
+    /// Takes the connection's queued events and drops anything else queued for it.
+    #[cfg(test)]
     pub(crate) fn drain_event_deliveries_for_connection(
         &mut self,
         connection_id: &ConnectionId,
-    ) -> Vec<GatewayEventDelivery> {
-        let mut drained = Vec::new();
-        self.pending_event_deliveries.retain(|event| {
-            if &event.delivery.connection_id == connection_id {
-                drained.push(event.clone());
-                false
-            } else {
-                true
-            }
-        });
-        drained
+    ) -> Vec<openaide_app_server_protocol::events::AppServerEvent> {
+        self.outbox.transfer(connection_id, |messages| {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    super::outbox::OutboundMessage::Event(event) => Some(*event),
+                    _ => None,
+                })
+                .collect()
+        })
     }
 
     #[cfg(test)]

@@ -15,6 +15,8 @@ mod diagnostics_handlers;
 mod file_viewer_handlers;
 pub mod local_http;
 mod messages;
+mod notification_handlers;
+pub(crate) mod outbox;
 mod project_handlers;
 pub(crate) mod reliable_session;
 mod responses;
@@ -80,7 +82,9 @@ pub struct RpcGateway {
     pub(crate) lifecycle: AppLifecycle,
     pub(crate) state_stream: StateStream,
     pub(crate) server_requests: ServerRequestRuntime,
-    pub(crate) pending_event_deliveries: Vec<GatewayEventDelivery>,
+    /// Every connection's outbound sequence. Publications append here under the protocol lock;
+    /// transports drain it through `SharedRpcGateway::transfer_outbound`.
+    pub(crate) outbox: outbox::Outbox,
     /// Tasks whose pending requests a client may still be showing. Request resolution is not
     /// itself a Task update, so the next Task update withdraws a set it no longer contains.
     pub(crate) tasks_with_visible_requests:
@@ -216,7 +220,7 @@ impl RpcGateway {
             lifecycle,
             state_stream,
             server_requests,
-            pending_event_deliveries: Vec::new(),
+            outbox: outbox::Outbox::default(),
             tasks_with_visible_requests: Default::default(),
             ready_catalog_agents: Default::default(),
             shell_file_reveals,
@@ -375,9 +379,18 @@ impl RpcGateway {
             &params.client_instance_id,
             params.workspace_roots.iter().map(|root| root.path.clone()),
         );
+        let previous_connection = self
+            .client_hub
+            .client_by_instance(&params.client_instance_id)
+            .map(|client| client.connection_id)
+            .filter(|previous| previous != &connection_id);
         let outcome = self
             .client_hub
             .initialize(connection_id.clone(), params, now);
+        if let Some(previous) = previous_connection {
+            // The client now reads only this connection; the old queue predates its new baseline.
+            self.outbox.discard(&previous, "client_reattached");
+        }
         let (context, reattached) = match outcome {
             crate::client_lifecycle::InitializeClientOutcome::NewClient { context } => {
                 (context, false)

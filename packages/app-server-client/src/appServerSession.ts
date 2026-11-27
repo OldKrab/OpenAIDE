@@ -33,6 +33,11 @@ type ScopeReplica = {
   scope: SubscriptionScope;
   observers: Set<AppServerStateObserver>;
   state?: SubscriptionIngestionState;
+  /**
+   * Events that arrive while no baseline is installed: those sent before the subscribe reply,
+   * and those after it in the same transport batch, which is delivered before the reply's
+   * continuation runs.
+   */
   pendingEvents: AppServerEvent[];
   refreshing: boolean;
   refreshGeneration?: number;
@@ -358,7 +363,7 @@ export function createAppServerSession(
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
-        replayPendingEvents(replica);
+        const droppedPendingCount = replayPendingEvents(replica);
         // Replay can invalidate the baseline while this refresh still owns the
         // promise. Keep that owner running until the buffered stream is coherent.
         if (replica.refreshing) continue;
@@ -369,6 +374,7 @@ export function createAppServerSession(
           attempt,
           reply_kind: result.snapshot.kind,
           missed_change_count: result.snapshot.kind === "taskResume" ? result.snapshot.resume.changes.length : 0,
+          dropped_pending_event_count: droppedPendingCount,
           duration_ms: Date.now() - startedAt,
         });
         return;
@@ -417,11 +423,23 @@ export function createAppServerSession(
       return true;
     }
     if (result.kind === "resyncRequired") {
-      logger.warn("app_server_state_event_rejected", {
-        ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
-        generation,
-        reason: result.reason,
-      });
+      if (result.reason === "cursorGap") {
+        // Each subscription's chain links every event App Server sent it, in wire order, so a
+        // gap means an event was lost or reordered: a bug, not a race. Resync still recovers.
+        logger.error("app_server_state_cursor_gap", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation,
+          expected_previous_cursor: replica.state.cursor,
+          previous_cursor: event.previousCursor,
+          cursor: event.cursor,
+        });
+      } else {
+        logger.warn("app_server_state_event_rejected", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation,
+          reason: result.reason,
+        });
+      }
       invalidateReplica(replica);
       void refreshReplica(replica, generation);
       return false;
@@ -438,16 +456,25 @@ export function createAppServerSession(
     return true;
   }
 
+  /**
+   * Applies the events buffered while the baseline was in flight and returns how many it
+   * dropped. App Server sends events in publish order and sends a subscription's earlier events
+   * before its subscribe reply, so the first event after the baseline links to the baseline's
+   * cursor; every buffered event before it is already in the baseline.
+   */
   function replayPendingEvents(replica: ScopeReplica) {
-    if (!replica.state || replica.pendingEvents.length === 0) return;
-    const cursorIndex = replica.pendingEvents.findIndex((event) => event.cursor === replica.state?.cursor);
-    const events = cursorIndex === -1 ? replica.pendingEvents : replica.pendingEvents.slice(cursorIndex + 1);
+    if (!replica.state || replica.pendingEvents.length === 0) return 0;
+    const baseline = replica.state.cursor;
+    const firstAfterBaseline = replica.pendingEvents.findIndex((event) => event.previousCursor === baseline);
+    const events = firstAfterBaseline === -1 ? [] : replica.pendingEvents.slice(firstAfterBaseline);
+    const dropped = replica.pendingEvents.length - events.length;
     replica.pendingEvents = [];
     for (const [index, event] of events.entries()) {
       if (applyEvent(replica, event)) continue;
       for (const pending of events.slice(index + 1)) queuePendingEvent(replica, pending);
       break;
     }
+    return dropped;
   }
 
   function queuePendingEvent(replica: ScopeReplica, event: AppServerEvent) {

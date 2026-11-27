@@ -76,6 +76,8 @@ pub struct ClientExpiryBatch {
     /// Clients whose heartbeats stopped, with the end of their new reconnect grace.
     pub entered_reconnect_grace: Vec<(ClientInstanceId, AppServerTime)>,
     pub expired: Vec<ClientInstanceId>,
+    /// The last connection of each expired client; nothing queued for it can be read anymore.
+    pub expired_connections: Vec<ConnectionId>,
     pub last_client_expired: bool,
 }
 
@@ -319,8 +321,11 @@ impl ClientHub {
             })
             .collect::<Vec<_>>();
 
+        let mut expired_connections = Vec::new();
         for client_instance_id in &expired {
-            self.clients.remove(client_instance_id);
+            if let Some(record) = self.clients.remove(client_instance_id) {
+                expired_connections.push(record.context.connection_id);
+            }
             self.connections
                 .retain(|_, value| value != client_instance_id);
         }
@@ -332,6 +337,7 @@ impl ClientHub {
                 .collect(),
             last_client_expired: !expired.is_empty() && self.clients.is_empty(),
             expired,
+            expired_connections,
         }
     }
 

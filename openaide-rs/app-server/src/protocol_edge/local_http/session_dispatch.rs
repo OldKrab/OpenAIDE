@@ -3,18 +3,17 @@
 //! queueing are shared with pushing links.
 
 use openaide_app_server_protocol::methods::AGENT_AUTHENTICATE;
+use openaide_app_server_protocol::server_requests::{PERMISSION_REQUEST, QUESTION_REQUEST};
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::ConnectionId;
+use crate::protocol_edge::outbox::ProtocolExchange;
 use crate::protocol_edge::reliable_session::{
     AcceptClientFrame, PollError, ReliableSessionRegistry,
 };
-use crate::protocol_edge::stdio::wire::{
-    event_wire_messages, server_request_wire_messages, WireRequest, WireRequestId,
-};
-use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage};
+use crate::protocol_edge::stdio::wire::{parse_inbound, WireMessage, WireRequest, WireRequestId};
 
-use super::protocol::{dispatch_protocol_message, handle_local_http_protocol, valid_connection_id};
+use super::protocol::{rejection_body, valid_connection_id};
 use super::reliable_upload_chunks::AppendError as ReliableChunkError;
 use super::{auth_status, empty_response, json_response, AuthStatus, LocalHttpResponse};
 
@@ -69,7 +68,7 @@ pub(super) fn handle_reliable_session_upload(
     connection_id: Option<&str>,
     body: &str,
     sessions: &ReliableSessionRegistry,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+    exchange: &impl ProtocolExchange,
 ) -> LocalHttpResponse {
     let accepted = match accept_reliable_session_upload(
         authorization,
@@ -87,7 +86,7 @@ pub(super) fn handle_reliable_session_upload(
         connection_id,
         accepted,
         sessions,
-        dispatch,
+        exchange,
     )
 }
 
@@ -164,59 +163,81 @@ pub(super) fn dispatch_reliable_session_upload(
     connection_id: Option<&str>,
     accepted: AcceptedReliableUpload,
     sessions: &ReliableSessionRegistry,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+    exchange: &impl ProtocolExchange,
 ) -> LocalHttpResponse {
-    let response = handle_local_http_protocol(
-        authorization,
-        expected_token,
-        connection_id,
-        &accepted.message.to_string(),
-        dispatch,
-        |_| Vec::new(),
-    );
-    queue_dispatch_replies(response, &accepted.session_id, sessions)
+    match auth_status(authorization, expected_token) {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
+    let Some(connection_id) = valid_connection_id(connection_id) else {
+        return reliable_upload_rejection("invalid_connection_id", "single");
+    };
+    dispatch_accepted_session_frame(connection_id, accepted, sessions, exchange).0
 }
 
-/// Runs an accepted frame for a link that authenticated when it attached.
+/// Runs an accepted frame, then moves everything queued for its connection, the reply
+/// included, onto the frame's session. RPC replies travel on that ordered sequence, never
+/// inline. Returns the response and how many frames joined the session.
 pub(super) fn dispatch_accepted_session_frame(
     connection_id: ConnectionId,
     accepted: AcceptedReliableUpload,
     sessions: &ReliableSessionRegistry,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+    exchange: &impl ProtocolExchange,
 ) -> (LocalHttpResponse, usize) {
-    let response = dispatch_protocol_message(
-        connection_id,
-        &accepted.message.to_string(),
-        dispatch,
-        |_| Vec::new(),
-    );
-    let reply_bytes = response.body.len();
-    (
-        queue_dispatch_replies(response, &accepted.session_id, sessions),
-        reply_bytes,
-    )
+    let message = match parse_inbound(accepted.message) {
+        Ok(message) => message,
+        Err(rejection) => {
+            log_reliable_upload_rejection(rejection.reason_code, "single");
+            return (json_response(400, rejection_body(rejection)), 0);
+        }
+    };
+    exchange.dispatch(connection_id.clone(), message);
+    let queued = transfer_to_session(exchange, sessions, &accepted.session_id, &connection_id);
+    (empty_response(204), queued)
 }
 
-/// RPC replies travel on the session's ordered server sequence, never inline.
-fn queue_dispatch_replies(
-    response: LocalHttpResponse,
-    session_id: &str,
+/// Moves a connection's outbound sequence onto one of its sessions, in order.
+pub(super) fn transfer_to_session(
+    exchange: &impl ProtocolExchange,
     sessions: &ReliableSessionRegistry,
-) -> LocalHttpResponse {
-    if response.status != 200 {
-        if response.status == 400 {
-            let reason_code =
-                response_code(&response).unwrap_or_else(|| "nested_protocol_rejected".to_string());
-            log_reliable_upload_rejection(&reason_code, "single");
+    session_id: &str,
+    connection_id: &ConnectionId,
+) -> usize {
+    exchange.transfer(connection_id, |messages| {
+        let mut queued = 0;
+        let mut dropped = 0;
+        for message in messages {
+            // TODO(state-sync phase 3): stop opening Permission and Question server-request
+            // copies once Task state is their only channel (ADR-0086); until then a session
+            // drops them here, because its clients answer them through pendingRequest/resolve.
+            if matches!(
+                message.server_request_method(),
+                Some(PERMISSION_REQUEST | QUESTION_REQUEST)
+            ) {
+                continue;
+            }
+            let message =
+                serde_json::to_value(WireMessage::from(message)).expect("wire message serializes");
+            if sessions.enqueue_server_message(session_id, message) {
+                queued += 1;
+            } else {
+                dropped += 1;
+            }
         }
-        return response;
-    }
-    if let Ok(value) = serde_json::from_str::<Value>(&response.body) {
-        for message in value.as_array().cloned().unwrap_or_else(|| vec![value]) {
-            sessions.enqueue_server_message(session_id, message);
+        if dropped > 0 {
+            crate::logging::warn(
+                "reliable_session_transfer_dropped",
+                json!({
+                    "connection_id": connection_id.as_str(),
+                    "session_id": session_id,
+                    "dropped_count": dropped,
+                    "reason_code": "unknown_session",
+                }),
+            );
         }
-    }
-    empty_response(204)
+        queued
+    })
 }
 
 pub(super) fn is_agent_authenticate_request(message: &Value) -> bool {
@@ -246,14 +267,6 @@ fn log_reliable_upload_rejection(reason_code: &str, upload_kind: &'static str) {
     );
 }
 
-fn response_code(response: &LocalHttpResponse) -> Option<String> {
-    serde_json::from_str::<Value>(&response.body)
-        .ok()?
-        .get("code")?
-        .as_str()
-        .map(str::to_string)
-}
-
 pub(super) fn handle_reliable_session_poll(
     authorization: Option<&str>,
     expected_token: &str,
@@ -261,12 +274,7 @@ pub(super) fn handle_reliable_session_poll(
     session_id: &str,
     after: u64,
     sessions: &ReliableSessionRegistry,
-    receive: impl FnOnce(
-        &ConnectionId,
-    ) -> Option<(
-        Vec<crate::protocol_edge::GatewayEventDelivery>,
-        Vec<crate::server_requests::ServerRequestDelivery>,
-    )>,
+    exchange: &impl ProtocolExchange,
 ) -> LocalHttpResponse {
     match auth_status(authorization, expected_token) {
         AuthStatus::Authorized => {}
@@ -283,10 +291,10 @@ pub(super) fn handle_reliable_session_poll(
     if sessions.connection_id(session_id).as_ref() != Some(&connection_id) {
         return empty_response(410);
     }
-    let Some((events, server_requests)) = receive(&connection_id) else {
+    if !exchange.observe_link(&connection_id) {
         return empty_response(410);
-    };
-    queue_connection_deliveries(sessions, session_id, connection_id, events, server_requests);
+    }
+    transfer_to_session(exchange, sessions, session_id, &connection_id);
     match sessions.poll(session_id, after) {
         Ok(batch) if batch.frames.is_empty() => empty_response(204),
         Ok(batch) => json_response(
@@ -296,34 +304,5 @@ pub(super) fn handle_reliable_session_poll(
         Err(PollError::UnknownSession) => empty_response(410),
         Err(PollError::InvalidAcknowledgement) => empty_response(409),
         Err(PollError::ReplayExpired) => json_response(409, json!({ "resyncRequired": true })),
-    }
-}
-
-/// Moves a connection's drained gateway deliveries onto its session sequence.
-pub(super) fn queue_connection_deliveries(
-    sessions: &ReliableSessionRegistry,
-    session_id: &str,
-    connection_id: ConnectionId,
-    events: Vec<crate::protocol_edge::GatewayEventDelivery>,
-    mut server_requests: Vec<crate::server_requests::ServerRequestDelivery>,
-) {
-    // Task-scoped permissions and questions are shared product state. Their
-    // snapshots/events fan out to every eligible client; only client-targeted
-    // capabilities remain reverse RPC requests.
-    server_requests.retain(|request| {
-        !matches!(
-            request.envelope.method.as_str(),
-            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
-                | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
-        )
-    });
-    for message in event_wire_messages(connection_id.clone(), events)
-        .into_iter()
-        .chain(server_request_wire_messages(connection_id, server_requests))
-    {
-        sessions.enqueue_server_message(
-            session_id,
-            serde_json::to_value(message).expect("wire message serializes"),
-        );
     }
 }

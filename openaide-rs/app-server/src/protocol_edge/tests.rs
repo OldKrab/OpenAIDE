@@ -74,6 +74,7 @@ mod client_probe;
 mod devices;
 mod gateway_lock_wait;
 mod navigation_publication;
+mod outbound_order;
 mod replacement_impact;
 mod task_resume;
 mod terminals;
@@ -992,20 +993,13 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
         ),
         ClientExpiryOutcome::Expired { .. }
     ));
-    let events = response_events(gateway.handle_inbound(
-        webview_connection,
-        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(15),
-    ));
+    let events = gateway.drain_event_deliveries_for_connection(&webview_connection);
 
-    assert!(events.iter().any(|delivery| {
-        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-            && matches!(
-                &delivery.event.payload,
-                AppServerEventPayload::ProjectCollectionUpdated { projects }
-                    if projects.projects.is_empty()
-            )
-    }));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        AppServerEventPayload::ProjectCollectionUpdated { projects }
+            if projects.projects.is_empty()
+    )));
 }
 
 #[test]
@@ -1232,7 +1226,13 @@ fn background_agent_status_update_is_queued_for_local_http_subscribers() {
     assert!(!published.is_empty());
     let queued = gateway.drain_event_deliveries_for_connection(&connection_id);
 
-    assert_eq!(queued, published);
+    assert_eq!(
+        queued,
+        published
+            .into_iter()
+            .map(|delivery| delivery.event)
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -1414,15 +1414,15 @@ fn local_http_authentication_reads_secrets_from_the_initiating_client() {
         std::thread::yield_now();
     };
     assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.method, "secret/read");
+    assert_eq!(deliveries[0].method, "secret/read");
     assert_eq!(
-        deliveries[0].envelope.params["key"],
+        deliveries[0].params["key"],
         "openaide.agent.codex.auth.api-key.env.OPENAI_API_KEY"
     );
     gateway.handle_inbound(
         connection_id,
         InboundProtocolMessage::ClientResponse {
-            request_id: deliveries[0].envelope.request_id.as_str().to_string(),
+            request_id: deliveries[0].request_id.as_str().to_string(),
             answer: ServerRequestAnswer::Result(json!({ "value": "secure-token" })),
         },
         AppServerTime(4),
@@ -1979,6 +1979,7 @@ fn error_envelope_preserves_client_request_meta_and_invalid_params_details() {
         ConnectionId::new("conn-1"),
         InboundProtocolMessage::ClientRequest {
             id: "1".to_string(),
+            wire_id: json!("1"),
             method: CLIENT_INITIALIZE.to_string(),
             params: json!({ "clientInstanceId": 7 }),
             meta: RequestMeta {
@@ -2713,7 +2714,7 @@ fn unknown_client_response_returns_permission_error() {
 }
 
 #[test]
-fn heartbeat_delivers_a_queued_navigation_change_once() {
+fn a_background_navigation_change_is_queued_once_for_its_subscriber() {
     let mut gateway = initialized_gateway("client-1", "local-http:client-1");
     gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -2744,25 +2745,16 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
 
     assert_eq!(published.len(), 1);
 
-    let outcome = gateway.handle_inbound(
-        ConnectionId::new("local-http:client-1"),
-        request("3", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(4),
-    );
-
-    let events = response_events(outcome);
+    let connection_id = ConnectionId::new("local-http:client-1");
+    let events = gateway.drain_event_deliveries_for_connection(&connection_id);
     assert_eq!(events.len(), 1);
     assert!(matches!(
-        &events[0].event.payload,
+        &events[0].payload,
         AppServerEventPayload::TaskUpdated { .. }
     ));
-
-    let second = gateway.handle_inbound(
-        ConnectionId::new("local-http:client-1"),
-        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(5),
-    );
-    assert!(response_events(second).is_empty());
+    assert!(gateway
+        .drain_event_deliveries_for_connection(&connection_id)
+        .is_empty());
 }
 
 #[test]
@@ -2869,7 +2861,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
 }
 
 #[test]
-fn shared_gateway_distinguishes_initialized_event_stream_connections() {
+fn shared_gateway_distinguishes_initialized_connections() {
     let gateway = SharedRpcGateway::new(initialized_gateway("client-1", "local-http:client-1"));
 
     assert!(gateway.connection_is_initialized(&ConnectionId::new("local-http:client-1")));
@@ -5212,6 +5204,7 @@ fn request_with_meta<T: serde::Serialize>(
 ) -> InboundProtocolMessage {
     InboundProtocolMessage::ClientRequest {
         id: id.to_string(),
+        wire_id: json!(id),
         method: method.to_string(),
         params: serde_json::to_value(params).unwrap(),
         meta,

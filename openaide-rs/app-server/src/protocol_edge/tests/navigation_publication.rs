@@ -124,7 +124,7 @@ fn published_task_counts(gateway: &SharedRpcGateway, connection_id: &ConnectionI
     gateway
         .drain_event_deliveries_for_connection(connection_id)
         .into_iter()
-        .filter_map(|delivery| match delivery.event.payload {
+        .filter_map(|event| match event.payload {
             AppServerEventPayload::ProjectEntriesReplaced {
                 section: TaskNavigationSection::Tasks,
                 task_count,

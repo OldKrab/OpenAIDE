@@ -323,7 +323,9 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let events = self.publish_worktree_repository_update(repository, now);
-        self.pending_event_deliveries.extend(events.clone());
+        // No request carries a background publication, so it joins the outbox directly; the
+        // returned copy lets callers inspect what was published.
+        self.outbox.push_events(events.clone());
         events
     }
 

@@ -18,10 +18,7 @@ mod uploads;
 mod viewer_downloads;
 mod websocket;
 
-use http::{
-    read_http_request, write_event_stream_data, write_event_stream_headers,
-    write_event_stream_heartbeat, write_file_download, write_http_response,
-};
+use http::{read_http_request, write_file_download, write_http_response};
 use session_socket::handle_session_socket;
 pub(crate) use session_socket::SessionSocketTimeouts;
 use terminal_socket::handle_terminal_socket;
@@ -117,7 +114,6 @@ pub(crate) struct LocalHttpRequest {
     pub session_id: Option<String>,
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
-    pub accepts_event_stream: bool,
     pub websocket_upgrade: bool,
     pub websocket_key: Option<String>,
     pub websocket_version: Option<String>,
@@ -139,7 +135,6 @@ pub fn handle_app_stream(
                 &request.body,
             )
         },
-        |stream, request| handle_event_stream(stream, handler, request),
         |_stream, request| Ok(handle_session_poll(handler, request)),
         |stream, request| handle_file_upload(stream, handler, request),
         |stream, request| handle_file_download(stream, handler, request),
@@ -162,18 +157,9 @@ pub(crate) fn handle_stream(
     stream: &mut TcpStream,
     handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
 ) -> Result<(), LocalHttpProbeListenerError> {
-    handle_stream_with_push(stream, handler, |_stream, _request| unreachable!())
-}
-
-fn handle_stream_with_push(
-    stream: &mut TcpStream,
-    handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
-    push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
-) -> Result<(), LocalHttpProbeListenerError> {
     handle_stream_with_routes(
         stream,
         handler,
-        push,
         |_stream, _request| {
             Ok(LocalHttpResponse {
                 status: 405,
@@ -188,7 +174,6 @@ fn handle_stream_with_push(
 fn handle_stream_with_routes(
     stream: &mut TcpStream,
     handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
-    push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
     receive: impl FnOnce(
         &mut TcpStream,
         LocalHttpRequest,
@@ -199,7 +184,6 @@ fn handle_stream_with_routes(
     handle_stream_with_socket_route(
         stream,
         handler,
-        push,
         receive,
         upload,
         download,
@@ -220,7 +204,6 @@ fn handle_stream_with_routes(
 fn handle_stream_with_socket_route(
     stream: &mut TcpStream,
     handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
-    push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
     receive: impl FnOnce(
         &mut TcpStream,
         LocalHttpRequest,
@@ -246,7 +229,6 @@ fn handle_stream_with_socket_route(
             session_id: request.session_id,
             after_header_present: request.after_header_present,
             after_sequence: request.after_sequence,
-            accepts_event_stream: request.accepts_event_stream,
             websocket_upgrade: request.websocket_upgrade,
             websocket_key: request.websocket_key,
             websocket_version: request.websocket_version,
@@ -331,9 +313,6 @@ fn handle_stream_with_socket_route(
         .is_some_and(|path| path.ends_with("/upload") || path.ends_with("/upload/chunk"))
     {
         return upload(stream, request);
-    }
-    if request.accepts_event_stream {
-        return push(stream, request);
     }
     let response = handler(request);
     let status = response.status;
@@ -480,44 +459,6 @@ fn reliable_session_poll_request_error(request: &LocalHttpRequest) -> Option<Loc
     })
 }
 
-fn handle_event_stream(
-    stream: &mut TcpStream,
-    handler: &LocalHttpAppHandler,
-    request: LocalHttpRequest,
-) -> Result<(), LocalHttpProbeListenerError> {
-    let lease = match handler.begin_event_stream(
-        request.authorization.as_deref(),
-        request.connection_id.as_deref(),
-    ) {
-        Ok(connection_id) => connection_id,
-        Err(response) => return write_http_response(stream, &response),
-    };
-    let result = (|| {
-        write_event_stream_headers(stream)?;
-        let mut last_heartbeat = std::time::Instant::now();
-        while handler.event_stream_is_current(&lease) {
-            let messages = handler.drain_push_messages(&lease);
-            if !messages.is_empty() {
-                write_event_stream_data(stream, &messages)?;
-                if !handler.observe_event_stream_activity(&lease) {
-                    break;
-                }
-                last_heartbeat = std::time::Instant::now();
-            } else if last_heartbeat.elapsed() >= Duration::from_secs(1) {
-                write_event_stream_heartbeat(stream)?;
-                if !handler.observe_event_stream_activity(&lease) {
-                    break;
-                }
-                last_heartbeat = std::time::Instant::now();
-            }
-            std::thread::sleep(Duration::from_millis(16));
-        }
-        Ok(())
-    })();
-    handler.finish_event_stream(&lease);
-    result
-}
-
 fn configure_timeouts(
     stream: &TcpStream,
     timeout: Duration,
@@ -644,7 +585,7 @@ fn is_transient_socket_kind(kind: ErrorKind) -> bool {
         ErrorKind::Interrupted
             | ErrorKind::TimedOut
             | ErrorKind::WouldBlock
-            // Browsers routinely close event streams during navigation, refresh, and suspension.
+            // Browsers routinely close connections during navigation, refresh, and suspension.
             | ErrorKind::BrokenPipe
             | ErrorKind::ConnectionReset
             | ErrorKind::ConnectionAborted

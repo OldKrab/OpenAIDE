@@ -105,7 +105,8 @@ fn unrelated_subscription_event_does_not_advance_task_cursor() {
         task_event.deliveries[0].event.previous_cursor,
         task_baseline.cursor
     );
-    assert_eq!(task_event.deliveries[0].event.cursor.as_str(), "cursor-1");
+    // Cursor values come from one sequence that every publication advances.
+    assert_eq!(task_event.deliveries[0].event.cursor.as_str(), "cursor-2");
     assert_eq!(task_event.deliveries[0].event.subscription, task_scope);
 }
 
@@ -143,6 +144,130 @@ fn clients_sharing_one_scope_receive_the_same_cursor_link() {
                 && delivery.event.cursor.as_str() == "cursor-1"
                 && delivery.event.subscription == SubscriptionScope::Projects
         ));
+}
+
+fn agents_updated() -> AppServerEventPayload {
+    AppServerEventPayload::AgentCollectionUpdated {
+        agents: AgentCollectionSnapshot { agents: Vec::new() },
+    }
+}
+
+#[test]
+fn an_event_for_one_client_leaves_another_clients_chain_unbroken() {
+    let mut stream = StateStream::new(StateRootId::from("root-1"));
+    let mut baselines = Vec::new();
+    for client in ["client-1", "client-2"] {
+        baselines.push(
+            stream
+                .subscribe(
+                    &ctx(client, &format!("conn-{client}")),
+                    SubscriptionScope::Agents,
+                    &snapshots(),
+                    AppServerTime(1),
+                )
+                .unwrap()
+                .cursor,
+        );
+    }
+
+    let private = stream.publish_committed(
+        EventScope::Client {
+            state_root_id: StateRootId::from("root-1"),
+            client_instance_id: ClientInstanceId::from("client-1"),
+        },
+        agents_updated(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(2),
+    );
+    let shared = stream.publish_committed(
+        state_root_scope(),
+        agents_updated(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(3),
+    );
+
+    assert_eq!(private.deliveries.len(), 1);
+    let link = |client: &str| {
+        shared
+            .deliveries
+            .iter()
+            .find(|delivery| delivery.delivery.client_instance_id.as_str() == client)
+            .map(|delivery| delivery.event.previous_cursor.clone())
+            .unwrap()
+    };
+    assert_eq!(link("client-1"), private.deliveries[0].event.cursor);
+    assert_eq!(link("client-2"), baselines[1]);
+}
+
+#[test]
+fn resubscribing_rebases_the_chain_on_the_new_baseline() {
+    let mut stream = StateStream::new(StateRootId::from("root-1"));
+    let context = ctx("client-1", "conn-1");
+    stream
+        .subscribe(
+            &context,
+            SubscriptionScope::Agents,
+            &snapshots(),
+            AppServerTime(1),
+        )
+        .unwrap();
+    let before = stream.publish_committed(
+        state_root_scope(),
+        agents_updated(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(2),
+    );
+
+    let baseline = stream
+        .subscribe(
+            &context,
+            SubscriptionScope::Agents,
+            &snapshots(),
+            AppServerTime(3),
+        )
+        .unwrap()
+        .cursor;
+    let after = stream.publish_committed(
+        state_root_scope(),
+        agents_updated(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(4),
+    );
+
+    assert_eq!(stream.subscription_count(), 1);
+    // An event already sent for the old baseline is at or before the new one.
+    assert_eq!(before.deliveries[0].event.cursor, baseline);
+    assert_eq!(after.deliveries[0].event.previous_cursor, baseline);
+}
+
+#[test]
+fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
+    let mut stream = StateStream::new(StateRootId::from("root-1"));
+    let baseline = stream
+        .subscribe(
+            &ctx("client-1", "conn-1"),
+            SubscriptionScope::Agents,
+            &snapshots(),
+            AppServerTime(1),
+        )
+        .unwrap()
+        .cursor;
+
+    let missed = stream.publish_committed(
+        state_root_scope(),
+        agents_updated(),
+        |_| None,
+        AppServerTime(2),
+    );
+    let next = stream.publish_committed(
+        state_root_scope(),
+        agents_updated(),
+        |client_id| Some(delivery(client_id)),
+        AppServerTime(3),
+    );
+
+    assert!(missed.deliveries.is_empty());
+    assert_ne!(next.deliveries[0].event.previous_cursor, baseline);
 }
 
 #[test]

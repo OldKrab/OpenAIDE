@@ -9,11 +9,11 @@ use crate::app_lifecycle::ShutdownCause;
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
-use super::{GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
+use super::outbox::OutboundMessage;
+use super::{GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
 use file_upload::{AppendChunkOutcome, ChunkUploadError, ChunkUploadRegistry, ChunkUploadRequest};
 
 mod attention_wait;
-mod event_streams;
 mod file_upload;
 pub mod listener;
 mod protocol;
@@ -23,7 +23,8 @@ mod session_link;
 
 pub use protocol::LocalHttpProtocolHandler;
 
-const LOCAL_HTTP_CONNECTION_ID: &str = "local-http-probe";
+/// Each probe gets its own connection, so concurrent probes never read each other's replies.
+const PROBE_CONNECTION_PREFIX: &str = "local-http-probe:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalHttpResponse {
@@ -104,15 +105,6 @@ impl LocalHttpAppHandler {
         }
     }
 
-    pub(crate) fn begin_event_stream(
-        &self,
-        authorization: Option<&str>,
-        connection_id: Option<&str>,
-    ) -> Result<event_streams::EventStreamLease, LocalHttpResponse> {
-        self.protocol
-            .begin_event_stream(authorization, connection_id)
-    }
-
     pub(crate) fn open_session_link(
         &self,
         authorization: Option<&str>,
@@ -153,25 +145,6 @@ impl LocalHttpAppHandler {
     ) -> LocalHttpResponse {
         self.protocol
             .poll_session(authorization, connection_id, session_id, after)
-    }
-
-    pub(crate) fn event_stream_is_current(&self, lease: &event_streams::EventStreamLease) -> bool {
-        self.protocol.event_stream_is_current(lease)
-    }
-
-    pub(crate) fn observe_event_stream_activity(
-        &self,
-        lease: &event_streams::EventStreamLease,
-    ) -> bool {
-        self.protocol.observe_event_stream_activity(lease)
-    }
-
-    pub(crate) fn finish_event_stream(&self, lease: &event_streams::EventStreamLease) {
-        self.protocol.finish_event_stream(lease);
-    }
-
-    pub(crate) fn drain_push_messages(&self, lease: &event_streams::EventStreamLease) -> String {
-        self.protocol.drain_push_messages(lease)
     }
 
     /// The Terminal socket redeems attach tokens here without taking the protocol lock per frame.
@@ -334,11 +307,16 @@ impl LocalHttpProbeHandler {
             &self.replacement_token,
             body,
             |message| {
-                self.gateway.handle_inbound(
-                    ConnectionId::new(LOCAL_HTTP_CONNECTION_ID),
-                    message,
-                    now,
-                )
+                let connection_id =
+                    ConnectionId::new(format!("{PROBE_CONNECTION_PREFIX}{}", uuid::Uuid::new_v4()));
+                self.gateway
+                    .dispatch_inbound(connection_id.clone(), message, now);
+                self.gateway.transfer_outbound(&connection_id, |messages| {
+                    messages.into_iter().find_map(|message| match message {
+                        OutboundMessage::Reply { response, .. } => Some(response),
+                        _ => None,
+                    })
+                })
             },
             || {
                 // Acknowledge before the process owner drains agents and storage; that
@@ -367,7 +345,7 @@ fn handle_local_http_probe(
     expected_token: &str,
     replacement_token: &str,
     body: &str,
-    dispatch: impl FnOnce(InboundProtocolMessage) -> GatewayOutcome,
+    dispatch: impl FnOnce(InboundProtocolMessage) -> Option<GatewayResponse>,
     replace: impl FnOnce() -> Result<(), String>,
 ) -> LocalHttpResponse {
     let regular_auth = auth_status(authorization, expected_token);
@@ -437,14 +415,13 @@ fn handle_local_http_probe(
 
     match dispatch(InboundProtocolMessage::ClientRequest {
         id: gateway_id(&id),
+        wire_id: id.clone(),
         method: request.method,
         params: request.params.unwrap_or_else(|| json!({})),
         meta: request.meta,
     }) {
-        GatewayOutcome::Respond { response, .. } => {
-            json_response(200, gateway_response(id, response))
-        }
-        GatewayOutcome::Noop => json_response(
+        Some(response) => json_response(200, gateway_response(id, response)),
+        None => json_response(
             500,
             jsonrpc_error(id, internal_error("client/probe produced no response")),
         ),

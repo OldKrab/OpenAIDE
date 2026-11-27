@@ -11,7 +11,7 @@ use crate::agent::{registry_handle::AgentRegistryHandle, AgentRuntime};
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::host::{HostBridge, HostRequest};
-use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage, SharedRpcGateway};
+use crate::protocol_edge::SharedRpcGateway;
 use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdate, TaskUpdateReceiver};
@@ -28,11 +28,7 @@ mod task_image_tests;
 mod tests;
 pub(crate) mod wire;
 
-use wire::{
-    client_response, event_wire_messages, id_to_gateway_id, invalid_request, parse_error,
-    serialize_message, server_request_wire_messages, wire_messages, WireMessage, WireRequest,
-    WireRequestId,
-};
+use wire::{client_response, parse_inbound, parse_rejection, serialize_message, WireMessage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AcpHostRequestTransport {
@@ -207,27 +203,20 @@ impl ProtocolEdgeStdioDispatcher {
         self.agent_status_updates.take()
     }
 
-    pub fn handle_worktree_update(
+    /// Publishes a worktree change; the flush moves it to stdout.
+    pub fn publish_worktree_update(
         &mut self,
         repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
-    ) -> Vec<String> {
+    ) {
         let now = self.next_time();
-        let events = self
-            .gateway
+        self.gateway
             .publish_worktree_repository_update(repository, now);
-        event_wire_messages(self.connection_id.clone(), events)
-            .into_iter()
-            .map(serialize_message)
-            .collect()
     }
 
-    pub fn handle_agent_status_update(&mut self) -> Vec<String> {
+    /// Publishes an Agent status change; the flush moves it to stdout.
+    pub fn publish_agent_status_update(&mut self) {
         let now = self.next_time();
-        let events = self.gateway.publish_agent_status_update(now);
-        event_wire_messages(self.connection_id.clone(), events)
-            .into_iter()
-            .map(serialize_message)
-            .collect()
+        self.gateway.publish_agent_status_update(now);
     }
 
     pub fn take_host_requests(&mut self) -> Option<mpsc::Receiver<HostRequest>> {
@@ -256,113 +245,119 @@ impl ProtocolEdgeStdioDispatcher {
         self.attachment_runtime.clone()
     }
 
-    pub fn handle_line(&mut self, line: &str) -> Vec<String> {
+    /// The stdio connection's outbound sequence. Every writer to stdout goes through it.
+    pub fn outbound(&self) -> StdioOutbound {
+        StdioOutbound {
+            gateway: self.gateway.clone(),
+            connection_id: self.connection_id.clone(),
+        }
+    }
+
+    /// Runs one stdin line. Its replies, and any rejection of a malformed message, join the
+    /// stdio outbound sequence; the flush moves them to stdout.
+    pub fn dispatch_line(&mut self, line: &str) {
         let parsed = match serde_json::from_str::<Value>(line) {
             Ok(value) => value,
-            Err(error) => return vec![serialize_message(parse_error(error))],
+            Err(error) => {
+                self.reject(parse_rejection(error));
+                return;
+            }
         };
         let values = match parsed {
             Value::Array(values) => values,
             value => vec![value],
         };
-        values
-            .into_iter()
-            .flat_map(|value| self.handle_value(value))
-            .map(serialize_message)
-            .collect()
+        for value in values {
+            self.dispatch_value(value);
+        }
     }
 
-    fn handle_value(&mut self, value: Value) -> Vec<WireMessage> {
-        if let Some(response) = client_response(&value) {
-            let now = self.next_time();
-            return match self
-                .gateway
-                .handle_inbound(self.connection_id.clone(), response, now)
-            {
-                GatewayOutcome::Noop => Vec::new(),
-                GatewayOutcome::Respond {
-                    connection_id,
-                    events,
-                    server_requests,
-                    ..
-                } => event_wire_messages(connection_id.clone(), events)
-                    .into_iter()
-                    .chain(server_request_wire_messages(connection_id, server_requests))
-                    .collect(),
-            };
-        }
-        if self.host_bridge.try_handle_response(&value) {
-            return Vec::new();
-        }
-        let request = match serde_json::from_value::<WireRequest>(value) {
-            Ok(request) => request,
-            Err(error) => return vec![invalid_request(None, error.to_string())],
+    #[cfg(test)]
+    pub(crate) fn handle_line(&mut self, line: &str) -> Vec<String> {
+        self.dispatch_line(line);
+        self.outbound().flush(|lines| lines)
+    }
+
+    fn dispatch_value(&mut self, value: Value) {
+        // An answer to a server request shares JSON-RPC's response shape with an answer to a
+        // host request, so recognize it before the host bridge claims every response.
+        let message = match client_response(&value) {
+            Some(response) => Ok(response),
+            None if self.host_bridge.try_handle_response(&value) => return,
+            None => parse_inbound(value),
         };
-        let id = match request.id {
-            WireRequestId::Notification => return Vec::new(),
-            WireRequestId::Invalid => {
-                return vec![invalid_request(
-                    Some(Value::Null),
-                    "invalid JSON-RPC id".to_string(),
-                )];
+        match message {
+            Ok(message) => {
+                let now = self.next_time();
+                self.gateway
+                    .dispatch_inbound(self.connection_id.clone(), message, now);
             }
-            WireRequestId::Request(id) => id,
-        };
-        if request.jsonrpc != "2.0" {
-            return vec![invalid_request(Some(id), "jsonrpc must be 2.0".to_string())];
-        }
-        let Some(method) = request.method else {
-            return vec![invalid_request(Some(id), "method is required".to_string())];
-        };
-        let params = request.params.unwrap_or_else(|| json!({}));
-        let inbound = InboundProtocolMessage::ClientRequest {
-            id: id_to_gateway_id(&id),
-            method,
-            params,
-            meta: request.meta,
-        };
-        let now = self.next_time();
-        match self
-            .gateway
-            .handle_inbound(self.connection_id.clone(), inbound, now)
-        {
-            GatewayOutcome::Respond {
-                response,
-                events,
-                server_requests,
-                ..
-            } => wire_messages(
-                id,
-                self.connection_id.clone(),
-                response,
-                events,
-                server_requests,
-            ),
-            GatewayOutcome::Noop => Vec::new(),
+            Err(rejection) => self.reject(rejection),
         }
     }
 
-    pub fn handle_task_update(&mut self, update: TaskUpdate) -> Vec<String> {
-        let now = self.next_time();
-        let (events, server_requests) = self.gateway.publish_committed_task_update_for_connection(
-            &self.connection_id,
-            &update,
-            now,
+    fn reject(&self, rejection: wire::InboundRejection) {
+        crate::logging::warn(
+            "stdio_protocol_rejected",
+            json!({ "reason_code": rejection.reason_code }),
         );
-        event_wire_messages(self.connection_id.clone(), events)
-            .into_iter()
-            .chain(server_request_wire_messages(
-                self.connection_id.clone(),
-                server_requests,
-            ))
-            .map(serialize_message)
-            .collect()
+        self.gateway.queue_rejection(&self.connection_id, rejection);
+    }
+
+    /// Publishes a committed Task update and queues the server requests it made deliverable;
+    /// the flush moves them to stdout.
+    pub fn publish_task_update(&mut self, update: TaskUpdate) {
+        let now = self.next_time();
+        self.gateway.publish_committed_task_update(&update, now);
+        self.gateway
+            .queue_deliverable_server_requests(&self.connection_id, now);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handle_task_update(&mut self, update: TaskUpdate) -> Vec<String> {
+        self.publish_task_update(update);
+        self.outbound().flush(|lines| lines)
     }
 
     fn next_time(&mut self) -> AppServerTime {
         let (now, next_tick) = next_stdio_time(self.next_tick, AppServerTime::now().0);
         self.next_tick = next_tick;
         now
+    }
+}
+
+/// Moves the stdio connection's outbound sequence to stdout. Several threads flush; the
+/// sequence's transfer lock is held across each drain and its write, so lines reach stdout in
+/// the order App Server queued them.
+#[derive(Clone)]
+pub struct StdioOutbound {
+    gateway: SharedRpcGateway,
+    connection_id: ConnectionId,
+}
+
+impl StdioOutbound {
+    /// Hands the queued lines to `write` while holding the transfer lock.
+    pub fn flush<R>(&self, write: impl FnOnce(Vec<String>) -> R) -> R {
+        self.gateway
+            .transfer_outbound(&self.connection_id, |messages| {
+                write(
+                    messages
+                        .into_iter()
+                        .map(|message| serialize_message(WireMessage::from(message)))
+                        .collect(),
+                )
+            })
+    }
+
+    /// Queues the server requests the stdio client can now answer, then flushes.
+    pub fn flush_with_server_requests<R>(&self, write: impl FnOnce(Vec<String>) -> R) -> R {
+        self.gateway
+            .queue_deliverable_server_requests(&self.connection_id, AppServerTime::now());
+        self.flush(write)
+    }
+
+    pub fn delivery_signal(&self) -> crate::protocol_edge::DeliverySignal {
+        self.gateway.delivery_signal()
     }
 }
 

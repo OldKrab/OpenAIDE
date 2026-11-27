@@ -4,8 +4,7 @@ use openaide_app_server_protocol::snapshot::TaskStatus;
 use openaide_app_server_protocol::task::{TaskNavigationSection, TaskNavigationSection::*};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::client_lifecycle::{AppServerTime, ConnectionId};
-use crate::server_requests::ServerRequestDelivery;
+use crate::client_lifecycle::AppServerTime;
 use crate::snapshots::TaskNavigationSnapshotSource;
 use crate::task_events::{
     CommittedNavigationChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind,
@@ -93,6 +92,7 @@ fn project_entries_payloads(
 }
 
 impl RpcGateway {
+    #[cfg(test)]
     pub(crate) fn publish_task_update(
         &mut self,
         update: &TaskUpdate,
@@ -185,7 +185,9 @@ impl RpcGateway {
                 now,
             ));
         }
-        self.pending_event_deliveries.extend(events.clone());
+        // Task updates come from the publisher thread, never from a request, so they join the
+        // outbox here; the returned copy lets callers inspect what was published.
+        self.outbox.push_events(events.clone());
         events
     }
 
@@ -212,18 +214,6 @@ impl RpcGateway {
             )));
         }
         events
-    }
-
-    pub(crate) fn publish_committed_task_update_for_connection(
-        &mut self,
-        connection_id: &ConnectionId,
-        update: &TaskUpdate,
-        now: AppServerTime,
-    ) -> (Vec<GatewayEventDelivery>, Vec<ServerRequestDelivery>) {
-        self.publish_task_update(update, now);
-        let events = self.drain_event_deliveries_for_connection(connection_id);
-        let server_requests = self.drain_server_requests_for_connection(connection_id, now);
-        (events, server_requests)
     }
 
     fn publish_history_sync(

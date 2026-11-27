@@ -22,10 +22,8 @@ fn authorized_client_probe_routes_to_gateway_response() {
             "params": {}
         })
         .to_string(),
-        |_message| GatewayOutcome::Respond {
-            connection_id: ConnectionId::new("local-http-probe"),
-            id: "client_probe".to_string(),
-            response: GatewayResponse::Result(
+        |_message| {
+            Some(GatewayResponse::Result(
                 serde_json::to_value(ResponseEnvelope::new(
                     ClientProbeResult {
                         state_root_fingerprint: "root-a".to_string(),
@@ -36,9 +34,7 @@ fn authorized_client_probe_routes_to_gateway_response() {
                     ResponseMeta::default(),
                 ))
                 .unwrap(),
-            ),
-            events: Vec::new(),
-            server_requests: Vec::new(),
+            ))
         },
         || Ok(()),
     );
@@ -57,7 +53,7 @@ fn auth_is_required_before_protocol_parsing() {
         "token",
         "replacement-token",
         "{not-json",
-        |_| GatewayOutcome::Noop,
+        |_| None,
         || Ok(()),
     );
     let invalid = handle_local_http_probe(
@@ -65,7 +61,7 @@ fn auth_is_required_before_protocol_parsing() {
         "token",
         "replacement-token",
         "{not-json",
-        |_| GatewayOutcome::Noop,
+        |_| None,
         || Ok(()),
     );
 
@@ -82,7 +78,7 @@ fn malformed_jsonrpc_returns_protocol_error_body() {
         "token",
         "replacement-token",
         "{not-json",
-        |_| GatewayOutcome::Noop,
+        |_| None,
         || Ok(()),
     );
 
@@ -104,7 +100,7 @@ fn rejects_non_probe_methods() {
             "params": {}
         })
         .to_string(),
-        |_| GatewayOutcome::Noop,
+        |_| None,
         || Ok(()),
     );
 

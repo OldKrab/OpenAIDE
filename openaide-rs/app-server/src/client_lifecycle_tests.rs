@@ -118,6 +118,7 @@ fn connection_activity_extends_liveness_deadline() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -126,6 +127,7 @@ fn connection_activity_extends_liveness_deadline() {
         ClientExpiryBatch {
             entered_reconnect_grace: vec![(client_id.clone(), AppServerTime(29))],
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -134,6 +136,7 @@ fn connection_activity_extends_liveness_deadline() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: vec![client_id],
+            expired_connections: vec![ConnectionId::new("conn-1")],
             last_client_expired: true,
         }
     );
@@ -154,6 +157,7 @@ fn heartbeat_timeout_enters_reconnect_grace_before_expiry() {
         ClientExpiryBatch {
             entered_reconnect_grace: vec![(client_id.clone(), AppServerTime(120))],
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -163,6 +167,7 @@ fn heartbeat_timeout_enters_reconnect_grace_before_expiry() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -171,6 +176,7 @@ fn heartbeat_timeout_enters_reconnect_grace_before_expiry() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: vec![client_id],
+            expired_connections: vec![ConnectionId::new("conn-1")],
             last_client_expired: true,
         }
     );
@@ -191,6 +197,7 @@ fn heartbeat_timeout_is_independent_from_reconnect_grace() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -199,6 +206,7 @@ fn heartbeat_timeout_is_independent_from_reconnect_grace() {
         ClientExpiryBatch {
             entered_reconnect_grace: vec![(client_id.clone(), AppServerTime(140))],
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -207,6 +215,7 @@ fn heartbeat_timeout_is_independent_from_reconnect_grace() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: vec![client_id],
+            expired_connections: vec![ConnectionId::new("conn-1")],
             last_client_expired: true,
         }
     );
@@ -233,6 +242,7 @@ fn reconnect_grace_expiry_removes_only_due_clients() {
         ClientExpiryBatch {
             entered_reconnect_grace: vec![(first.clone(), AppServerTime(21))],
             expired: Vec::new(),
+            expired_connections: Vec::new(),
             last_client_expired: false,
         }
     );
@@ -241,6 +251,7 @@ fn reconnect_grace_expiry_removes_only_due_clients() {
         ClientExpiryBatch {
             entered_reconnect_grace: Vec::new(),
             expired: vec![first.clone()],
+            expired_connections: vec![ConnectionId::new("conn-1")],
             last_client_expired: false,
         }
     );

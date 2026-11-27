@@ -15,7 +15,7 @@ use crate::protocol_edge::DeliverySignal;
 
 use super::protocol::{valid_connection_id, LocalHttpProtocolHandler};
 use super::session_dispatch::{
-    dispatch_accepted_session_frame, is_agent_authenticate_request, queue_connection_deliveries,
+    dispatch_accepted_session_frame, is_agent_authenticate_request, transfer_to_session,
     AcceptedReliableUpload,
 };
 use super::{auth_status, AuthStatus};
@@ -201,13 +201,11 @@ impl SessionLink {
                 }),
             );
         }
-        let now = AppServerTime::now();
-        let gateway = self.protocol.gateway.clone();
-        let (response, reply_bytes) = dispatch_accepted_session_frame(
+        let (response, queued_frames) = dispatch_accepted_session_frame(
             self.attached.connection_id.clone(),
             accepted,
             &self.protocol.sessions,
-            move |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+            &self.protocol.gateway,
         );
         let outcome = if response.status == 204 {
             Ok(())
@@ -222,7 +220,7 @@ impl SessionLink {
                     "session_id": self.attached.session_id,
                     "method": method,
                     "outcome": if outcome.is_ok() { "completed" } else { "rejected" },
-                    "reply_bytes": reply_bytes,
+                    "queued_frames": queued_frames,
                     "duration_ms": started_at.elapsed().as_millis(),
                 }),
             );
@@ -238,8 +236,8 @@ impl SessionLink {
             .acknowledge(&self.attached.session_id, through)?)
     }
 
-    /// Renews client liveness, moves pending gateway deliveries onto the
-    /// session, and returns the frames this link has not written yet.
+    /// Renews client liveness, moves the connection's outbound sequence onto the session,
+    /// and returns the frames this link has not written yet.
     pub(crate) fn pump(&self, written_through: u64) -> Result<Vec<ServerFrame>, LinkClose> {
         let sessions = &self.protocol.sessions;
         if !sessions.link_is_current(&self.attached) {
@@ -247,15 +245,8 @@ impl SessionLink {
         }
         let gateway = &self.protocol.gateway;
         let connection_id = &self.attached.connection_id;
-        let now = AppServerTime::now();
-        if gateway.observe_connection_activity(connection_id, now) {
-            queue_connection_deliveries(
-                sessions,
-                &self.attached.session_id,
-                connection_id.clone(),
-                gateway.drain_event_deliveries_for_connection(connection_id),
-                gateway.drain_server_requests_for_connection(connection_id, now),
-            );
+        if gateway.observe_link_activity(connection_id, AppServerTime::now()) {
+            transfer_to_session(gateway, sessions, &self.attached.session_id, connection_id);
         } else if self.client_frame_dispatched.load(Ordering::Acquire) {
             return Err(LinkClose::SessionExpired);
         }

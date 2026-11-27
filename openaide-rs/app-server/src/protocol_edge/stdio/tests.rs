@@ -3,6 +3,7 @@ use super::*;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage};
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
@@ -68,6 +69,7 @@ fn initialize_params(client_id: &str) -> Value {
 fn gateway_request(id: &str, method: &str, params: Value) -> InboundProtocolMessage {
     InboundProtocolMessage::ClientRequest {
         id: id.to_string(),
+        wire_id: json!(id),
         method: method.to_string(),
         params,
         meta: RequestMeta::default(),
@@ -846,10 +848,11 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
         })
         .to_string(),
     );
-    assert!(response(&archived[0])["result"]["result"]["archived"]
+    let (reply, events) = archived.split_last().unwrap();
+    assert!(response(reply)["result"]["result"]["archived"]
         .as_bool()
         .unwrap());
-    let sections = archived[1..]
+    let sections = events
         .iter()
         .map(|line| response(line)["params"]["payload"]["section"].clone())
         .collect::<std::collections::HashSet<_>>();
@@ -867,9 +870,11 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
         })
         .to_string(),
     );
-    assert!(!response(&restored[0])["result"]["result"]["archived"]
-        .as_bool()
-        .unwrap());
+    assert!(
+        !response(restored.last().unwrap())["result"]["result"]["archived"]
+            .as_bool()
+            .unwrap()
+    );
     drop(dispatcher);
     let reopened = crate::native_sessions::catalog::NativeSessionCatalog::open(
         open_store_after_dispatcher_drop(temp.path()),
@@ -943,11 +948,11 @@ fn native_session_title_override_publishes_and_survives_restart() {
         .to_string(),
     );
     assert_eq!(
-        response(&renamed[0])["result"]["result"]["session"]["title"],
+        response(&renamed[1])["result"]["result"]["session"]["title"],
         "My session"
     );
     assert_eq!(
-        response(&renamed[1])["params"]["payload"]["entries"][0]["session"]["title"],
+        response(&renamed[0])["params"]["payload"]["entries"][0]["session"]["title"],
         "My session"
     );
     let pinned = dispatcher.handle_line(
@@ -964,11 +969,11 @@ fn native_session_title_override_publishes_and_survives_restart() {
         .to_string(),
     );
     assert_eq!(
-        response(&pinned[0])["result"]["result"]["session"]["pinned"],
+        response(&pinned[1])["result"]["result"]["session"]["pinned"],
         true
     );
     assert_eq!(
-        response(&pinned[1])["params"]["payload"]["entries"][0]["session"]["pinned"],
+        response(&pinned[0])["params"]["payload"]["entries"][0]["session"]["pinned"],
         true
     );
     let cleanup = dispatcher.handle_line(
@@ -1049,8 +1054,9 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
         .to_string(),
     );
 
+    // The probe's published change precedes its reply.
     assert_eq!(responses.len(), 2);
-    let probe_response = response(&responses[0]);
+    let probe_response = response(&responses[1]);
     assert_eq!(probe_response["id"], "2");
     assert_eq!(
         probe_response["result"]["result"]["agents"]["agents"][0]["agentId"],
@@ -1061,7 +1067,7 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
         "connected"
     );
 
-    let event = response(&responses[1]);
+    let event = response(&responses[0]);
     assert_eq!(event["method"], "app/event");
     assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
     assert_eq!(
@@ -1115,7 +1121,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
         );
 
         assert_eq!(responses.len(), 2);
-        let create_response = response(&responses[0]);
+        let create_response = response(&responses[1]);
         assert_eq!(create_response["id"], "create-agent");
         custom_agent_id = create_response["result"]["result"]["agentId"]
             .as_str()
@@ -1132,7 +1138,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
             .iter()
             .any(|agent| agent["agentId"] == custom_agent_id));
 
-        let event = response(&responses[1]);
+        let event = response(&responses[0]);
         assert_eq!(event["method"], "app/event");
         assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
         assert!(event["params"]["payload"]["agents"]["agents"]
@@ -1463,7 +1469,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
         })
         .to_string(),
     );
-    let custom_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let custom_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1551,7 +1557,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
         })
         .to_string(),
     );
-    let create_disabled_response = response(&create_disabled[0]);
+    let create_disabled_response = response(create_disabled.last().unwrap());
     assert_eq!(create_disabled_response["id"], "create-disabled");
     assert!(create_disabled_response["result"]["result"]["agentId"]
         .as_str()
@@ -1794,8 +1800,9 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
         .to_string(),
     );
 
+    // The deliverable server request precedes the subscribe reply that lists it.
     assert_eq!(responses.len(), 2);
-    let subscribe_response = response(&responses[0]);
+    let subscribe_response = response(&responses[1]);
     assert_eq!(subscribe_response["id"], "2");
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["task"]["title"],
@@ -1806,7 +1813,7 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
             ["requestId"],
         "server-request-1"
     );
-    let server_request = response(&responses[1]);
+    let server_request = response(&responses[0]);
     assert_eq!(server_request["jsonrpc"], "2.0");
     assert_eq!(server_request["id"], "server-request-1");
     assert_eq!(server_request["method"], "secret/read");
@@ -1836,7 +1843,7 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
 }
 
 #[test]
-fn stdio_error_response_does_not_resolve_pending_server_request() {
+fn stdio_error_response_is_refused_and_does_not_resolve_pending_server_request() {
     let (temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
@@ -1873,7 +1880,13 @@ fn stdio_error_response_does_not_resolve_pending_server_request() {
         .to_string(),
     );
 
-    assert!(responses.is_empty());
+    // App Server refuses the error answer and says so, as it does on every transport.
+    let [refusal] = responses.as_slice() else {
+        panic!("expected one refusal, got {responses:?}");
+    };
+    let refusal = response(refusal);
+    assert_eq!(refusal["id"], "server-request-1");
+    assert_eq!(refusal["error"]["error"]["code"], "validationFailed");
     assert_eq!(
         dispatcher
             .gateway
@@ -3316,4 +3329,42 @@ fn stdio_time_follows_the_wall_clock_and_never_repeats() {
     let (stepped_back, _) = next_stdio_time(next, 20_000);
     assert_eq!(same_ms, AppServerTime(34_001));
     assert_eq!(stepped_back, AppServerTime(34_002));
+}
+
+#[test]
+fn stdio_writes_a_reply_and_a_later_publication_in_publish_order() {
+    let (_temp, mut dispatcher) = dispatcher();
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "2",
+            "method": STATE_SUBSCRIBE,
+            "params": { "scope": { "kind": "agents" } }
+        })
+        .to_string(),
+    );
+
+    dispatcher.dispatch_line(
+        &json!({ "jsonrpc": "2.0", "id": "3", "method": CLIENT_HEARTBEAT, "params": {} })
+            .to_string(),
+    );
+    dispatcher.publish_agent_status_update();
+    let lines = dispatcher.outbound().flush(|lines| lines);
+
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(response(&lines[0])["id"], "3");
+    assert_eq!(response(&lines[1])["method"], "app/event");
+}
+
+#[test]
+fn stdio_dispatches_a_client_notification_without_a_reply() {
+    let (_temp, mut dispatcher) = dispatcher();
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let lines = dispatcher.handle_line(
+        &json!({ "jsonrpc": "2.0", "method": "client/unknown", "params": {} }).to_string(),
+    );
+
+    assert!(lines.is_empty(), "{lines:?}");
 }

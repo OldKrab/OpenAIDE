@@ -121,11 +121,14 @@ impl RpcGateway {
                 method,
                 params,
                 meta,
+                ..
             } => (id, method, params, meta),
             InboundProtocolMessage::ClientResponse { request_id, answer } => {
                 return self.handle_client_response(connection_id, request_id, answer, now);
             }
-            InboundProtocolMessage::ClientNotification { .. } => return GatewayOutcome::Noop,
+            InboundProtocolMessage::ClientNotification { method, params } => {
+                return self.handle_client_notification(connection_id, method, params, now);
+            }
         };
 
         if method != CLIENT_INITIALIZE

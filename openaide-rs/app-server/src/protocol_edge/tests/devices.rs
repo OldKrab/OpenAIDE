@@ -148,6 +148,9 @@ fn a_change_made_by_the_network_edge_is_queued_for_subscribers() {
     assert_eq!(
         gateway.drain_event_deliveries_for_connection(&connection_id),
         published
+            .into_iter()
+            .map(|delivery| delivery.event)
+            .collect::<Vec<_>>()
     );
 }
 
