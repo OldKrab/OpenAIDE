@@ -266,7 +266,12 @@ export type UpdateShutdownAbortParams = { attemptId: string, };
 
 export type UpdateShutdownAbortResult = Record<symbol, never>;
 
-export type ClientSecretKeysChangedParams = { keyIds: Array<string>, };
+export type ClientSecretKeysChangedParams = { keyIds: Array<string>,
+/**
+ * The client may also hold secrets it cannot list (stored before it kept a key index). The
+ * App Server asks such a client only when no client declared the key.
+ */
+unknownHolder: boolean, };
 
 export type ClientReplacementImpactParams = Record<symbol, never>;
 

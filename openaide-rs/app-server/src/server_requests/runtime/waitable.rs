@@ -52,15 +52,30 @@ impl ServerRequestRuntime {
     /// Replaces the secure-storage keys `client` holds (`client/initialize` and the
     /// `client/secretKeysChanged` notification). Only the count is logged.
     pub fn declare_secret_keys(&self, client: ClientInstanceId, keys: Vec<String>) {
+        self.declare_secret_holding(client, keys, false);
+    }
+
+    /// As `declare_secret_keys`; `unknown_holder` marks a client that may also hold keys it
+    /// cannot list, which is asked only when no client declared the key.
+    pub fn declare_secret_holding(
+        &self,
+        client: ClientInstanceId,
+        keys: Vec<String>,
+        unknown_holder: bool,
+    ) {
         let key_count = keys.len();
         self.inner
             .lock()
             .expect("server request runtime poisoned")
             .broker
-            .declare_secret_keys(client.clone(), keys);
+            .declare_secret_holding(client.clone(), keys, unknown_holder);
         logging::info(
             "client_secret_keys_declared",
-            json!({ "client_instance_id": client.as_str(), "key_count": key_count }),
+            json!({
+                "client_instance_id": client.as_str(),
+                "key_count": key_count,
+                "unknown_holder": unknown_holder,
+            }),
         );
     }
 
@@ -100,6 +115,7 @@ impl ServerRequestRuntime {
                 "server_request_id": opened.request_id.as_str(),
                 "holder_client_instance_id": holder.as_str(),
                 "holder_count": routing.holder_count,
+                "unknown_holder_fallback": routing.unknown_holder_fallback,
             }),
         );
         Ok(opened)

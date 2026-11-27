@@ -27,9 +27,11 @@ fn handle_secret_keys_changed(
     _now: AppServerTime,
 ) -> GatewayOutcome {
     match serde_json::from_value::<ClientSecretKeysChangedParams>(params) {
-        Ok(params) => gateway
-            .server_requests
-            .declare_secret_keys(context.client_instance_id.clone(), params.key_ids),
+        Ok(params) => gateway.server_requests.declare_secret_holding(
+            context.client_instance_id.clone(),
+            params.key_ids,
+            params.unknown_holder,
+        ),
         Err(_) => log_rejected(
             &context.connection_id,
             CLIENT_SECRET_KEYS_CHANGED,

@@ -68,8 +68,8 @@ export type SecretKeysRequestMessage = {
   payload: { requestId: string };
 };
 
-/** Key ids only, never values. */
+/** Key ids only, never values. `unknownHolder`: the shell may hold secrets it cannot list. */
 export type SecretKeysResultMessage = {
   type: "secret.keys.result";
-  payload: { requestId: string; keyIds: string[] };
+  payload: { requestId: string; keyIds: string[]; unknownHolder: boolean };
 };

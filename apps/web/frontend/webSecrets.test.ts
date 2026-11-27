@@ -109,4 +109,32 @@ describe("Web secret messages", () => {
     await handle({ type: "secret.transaction.rollback", payload: { requestId: "r2", transactionId: "t2" } });
     expect(await keys()).toEqual(["openaide.agent.codex.env.OPENAI_API_KEY"]);
   });
+
+  it("after an upgrade declares secrets saved before any index existed", async () => {
+    const legacyKey = "openaide.agent.codex.env.OPENAI_API_KEY";
+    const request = { type: "secret.keys.request", payload: { requestId: "keys" } } as const;
+
+    // A store that can list its keys declares the old secret itself and holds nothing unlisted.
+    const listing = memoryStore();
+    listing.values.set(legacyKey, "saved-before-upgrade");
+    const listed = await createWebSecretMessageHandler({
+      ...listing,
+      keys: async () => [...listing.values.keys()],
+    })(request);
+    expect(listed).toEqual({
+      type: "secret.keys.result",
+      payload: { requestId: "keys", keyIds: [legacyKey], unknownHolder: false },
+    });
+
+    // A store that cannot list them cannot declare the old secret, so it declares itself an
+    // unknown holder and the App Server falls back to asking it.
+    const opaque = memoryStore();
+    opaque.values.set(legacyKey, "saved-before-upgrade");
+    const unlisted = await createWebSecretMessageHandler(opaque)(request);
+    expect(unlisted).toEqual({
+      type: "secret.keys.result",
+      payload: { requestId: "keys", keyIds: [], unknownHolder: true },
+    });
+    expect(JSON.stringify([listed, unlisted])).not.toContain("saved-before-upgrade");
+  });
 });

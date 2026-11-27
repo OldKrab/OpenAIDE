@@ -92,6 +92,10 @@ pub struct UpdateShutdownAbortResult {}
 #[serde(rename_all = "camelCase")]
 pub struct ClientSecretKeysChangedParams {
     pub key_ids: Vec<String>,
+    /// The client may also hold secrets it cannot list (stored before it kept a key index). The
+    /// App Server asks such a client only when no client declared the key.
+    #[serde(default)]
+    pub unknown_holder: bool,
 }
 
 /// Asks what replacing this App Server with another version would affect now. A client

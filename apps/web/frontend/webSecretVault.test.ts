@@ -19,6 +19,7 @@ function memoryPersistence(): WebSecretVaultPersistence & {
       return encryptionKey;
     },
     async delete(key) { records.delete(key); },
+    async keys() { return [...records.keys()]; },
     async read(key) { return records.get(key); },
     async write(key, value) { records.set(key, value); },
   };

@@ -30,7 +30,7 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
     case "secret.keys.request":
       output.post({
         type: "secret.keys.result",
-        payload: { requestId: message.payload.requestId, keyIds: [] },
+        payload: { requestId: message.payload.requestId, keyIds: [], unknownHolder: false },
       });
       return;
     case "workspace.roots":

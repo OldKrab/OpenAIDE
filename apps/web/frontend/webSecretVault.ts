@@ -14,6 +14,7 @@ export type EncryptedSecretRecord = {
 export type WebSecretVaultPersistence = {
   encryptionKey(candidate: CryptoKey): Promise<CryptoKey>;
   delete(key: string): Promise<void>;
+  keys(): Promise<string[]>;
   read(key: string): Promise<EncryptedSecretRecord | undefined>;
   write(key: string, value: EncryptedSecretRecord): Promise<void>;
 };
@@ -44,6 +45,8 @@ export function createEncryptedSecretStore(
 
   return {
     delete: (storageKey) => persistence.delete(storageKey),
+    // Lets the shell declare secrets saved before it declared anything.
+    keys: () => persistence.keys(),
     async get(storageKey) {
       const record = await persistence.read(storageKey);
       if (!record) return undefined;
@@ -105,6 +108,15 @@ function indexedDbPersistence(indexedDb: IDBFactory): WebSecretVaultPersistence 
     },
     async delete(key) {
       await databaseRequest(getDatabase(), SECRET_STORE, "readwrite", (store) => store.delete(key));
+    },
+    async keys() {
+      const keys = await databaseRequest<IDBValidKey[]>(
+        getDatabase(),
+        SECRET_STORE,
+        "readonly",
+        (store) => store.getAllKeys(),
+      );
+      return keys.filter((key): key is string => typeof key === "string");
     },
     async read(key) {
       return databaseRequest<EncryptedSecretRecord | undefined>(

@@ -11,15 +11,17 @@ import type {
 export type AppShellSecretStore = {
   delete(key: string): PromiseLike<void> | void;
   get(key: string): PromiseLike<string | undefined> | string | undefined;
+  /** Every stored key id, for a store that can enumerate (names only). Absent when it cannot. */
+  keys?(): PromiseLike<string[]> | string[];
   store(key: string, value: string): PromiseLike<void> | void;
 };
 
 /**
- * Shell-native stores cannot list their keys, so the shell keeps its own index of the key ids it
- * holds (names only, never values). It is what the client declares to the App Server so that
- * `secret/read` is routed to a client that has the key. Secrets saved before the index existed
- * are not listed until they are saved again.
- * TODO: seed the index from the shells' native key listings where a store can enumerate.
+ * Key ids this shell declares to the App Server so `secret/read` is routed to a client that has
+ * the key. A store that can enumerate lists them directly, which covers secrets saved before any
+ * index existed. A store that cannot (a native keychain) keeps an index of the ids it saved,
+ * and the shell stays an "unknown holder": it may also hold older secrets it cannot list, so the
+ * App Server asks it when no client declared the key. Names only, never values.
  */
 export const SECRET_KEY_INDEX_KEY = "openaide.secret-key-index";
 
@@ -34,14 +36,24 @@ export async function readSecretKeyIndex(secretStore: AppShellSecretStore | unde
   }
 }
 
-/** Answers a `secret.keys.request` from the index; an unreadable store holds no declarable keys. */
+/** Answers a `secret.keys.request`; an unreadable store holds no declarable keys. */
 export async function secretKeysResult(
   message: SecretKeysRequestMessage,
   secretStore: AppShellSecretStore | undefined,
 ): Promise<SecretKeysResultMessage> {
+  const requestId = message.payload.requestId;
+  if (secretStore?.keys) {
+    try {
+      const keyIds = (await secretStore.keys()).filter((key) => key !== SECRET_KEY_INDEX_KEY);
+      return { type: "secret.keys.result", payload: { requestId, keyIds, unknownHolder: false } };
+    } catch {
+      // Fall through: an unlistable store may still hold keys, so the shell stays an unknown holder.
+      return { type: "secret.keys.result", payload: { requestId, keyIds: [], unknownHolder: true } };
+    }
+  }
   return {
     type: "secret.keys.result",
-    payload: { requestId: message.payload.requestId, keyIds: await readSecretKeyIndex(secretStore) },
+    payload: { requestId, keyIds: await readSecretKeyIndex(secretStore), unknownHolder: Boolean(secretStore) },
   };
 }
 
@@ -95,7 +107,7 @@ async function applyTransaction(
   }
 
   const before = new Map<string, string | undefined>();
-  for (const key of [...affectedKeys, SECRET_KEY_INDEX_KEY]) before.set(key, await secretStore.get(key));
+  for (const key of secretStore.keys ? affectedKeys : [...affectedKeys, SECRET_KEY_INDEX_KEY]) before.set(key, await secretStore.get(key));
   const resolvedWrites: Array<{ key: string; value: string }> = [];
   for (const write of changes.writes) {
     const value = "value" in write
@@ -108,10 +120,12 @@ async function applyTransaction(
   try {
     for (const write of resolvedWrites) await secretStore.store(write.key, write.value);
     for (const key of deleteKeys) await secretStore.delete(key);
-    const index = new Set(await readSecretKeyIndex(secretStore));
-    for (const write of resolvedWrites) index.add(write.key);
-    for (const key of deleteKeys) index.delete(key);
-    await secretStore.store(SECRET_KEY_INDEX_KEY, JSON.stringify([...index].sort()));
+    if (!secretStore.keys) {
+      const index = new Set(await readSecretKeyIndex(secretStore));
+      for (const write of resolvedWrites) index.add(write.key);
+      for (const key of deleteKeys) index.delete(key);
+      await secretStore.store(SECRET_KEY_INDEX_KEY, JSON.stringify([...index].sort()));
+    }
   } catch {
     await restoreSecrets(secretStore, before);
     throw new Error("Secure storage transaction could not be applied.");

@@ -12,7 +12,7 @@ function harness(keyIds: string[] | undefined) {
     if (message.type === "secret.keys.request" && keyIds) {
       queueMicrotask(() => emit({
         type: "secret.keys.result",
-        payload: { requestId: message.payload.requestId, keyIds },
+        payload: { requestId: message.payload.requestId, keyIds, unknownHolder: true },
       }));
     }
   });
@@ -34,7 +34,10 @@ describe("secret key declaration", () => {
   it("sends the shell's key ids to the App Server", async () => {
     const { declaration, notify, log } = harness(["openaide.agent.codex.env.KEY"]);
     await declaration.declare();
-    expect(notify).toHaveBeenCalledWith(CLIENT_SECRET_KEYS_CHANGED, { keyIds: ["openaide.agent.codex.env.KEY"] });
+    expect(notify).toHaveBeenCalledWith(CLIENT_SECRET_KEYS_CHANGED, {
+      keyIds: ["openaide.agent.codex.env.KEY"],
+      unknownHolder: true,
+    });
     expect(log).toHaveBeenLastCalledWith("secret_keys_declare_completed", expect.objectContaining({
       outcome: "success",
       key_count: 1,

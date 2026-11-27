@@ -19,6 +19,8 @@ pub(super) struct SecretHolders {
 struct Holding {
     declared_at: u64,
     keys: HashSet<String>,
+    /// May hold keys it did not list; asked only when no client declared the key.
+    unknown_holder: bool,
 }
 
 /// How a key lookup ended, for the routing log. Counts only; never key ids.
@@ -26,6 +28,8 @@ struct Holding {
 pub struct SecretRouting {
     pub holder_count: usize,
     pub reachable: bool,
+    /// The holder was an unknown-holder client, not one that declared the key.
+    pub unknown_holder_fallback: bool,
 }
 
 impl SecretHolders {
@@ -33,6 +37,7 @@ impl SecretHolders {
         &mut self,
         client: ClientInstanceId,
         keys: impl IntoIterator<Item = String>,
+        unknown_holder: bool,
     ) {
         self.declarations += 1;
         self.by_client.insert(
@@ -40,6 +45,7 @@ impl SecretHolders {
             Holding {
                 declared_at: self.declarations,
                 keys: keys.into_iter().collect(),
+                unknown_holder,
             },
         );
     }
@@ -56,30 +62,63 @@ impl ServerRequestBroker {
         client: ClientInstanceId,
         keys: impl IntoIterator<Item = String>,
     ) {
-        self.secret_holders.declare(client, keys);
+        self.secret_holders.declare(client, keys, false);
+    }
+
+    /// As `declare_secret_keys`, and marks whether the client may hold keys it cannot list.
+    pub fn declare_secret_holding(
+        &mut self,
+        client: ClientInstanceId,
+        keys: impl IntoIterator<Item = String>,
+        unknown_holder: bool,
+    ) {
+        self.secret_holders.declare(client, keys, unknown_holder);
     }
 
     /// The connected client to ask for `key`: the one that declared most recently among those
-    /// holding it, with a live delivery. The routing counts say why none was found.
+    /// holding it, with a live delivery. Only when none can answer, the most recent connected
+    /// unknown-holder client is asked instead (secrets stored before the client kept a key
+    /// index). The routing counts say why none was found.
     pub fn secret_holder_for(&self, key: &str) -> (Option<Delivery>, SecretRouting) {
+        let holders = self.live_secret_holders(|holding| holding.keys.contains(key));
+        let holder_count = holders.len();
+        if let Some(delivery) = holders.into_iter().next() {
+            return (
+                Some(delivery),
+                SecretRouting {
+                    holder_count,
+                    reachable: true,
+                    unknown_holder_fallback: false,
+                },
+            );
+        }
+        let fallback = self.live_secret_holders(|holding| holding.unknown_holder);
+        let delivery = fallback.into_iter().next();
+        let routing = SecretRouting {
+            holder_count,
+            reachable: delivery.is_some(),
+            unknown_holder_fallback: delivery.is_some(),
+        };
+        (delivery, routing)
+    }
+
+    /// Live deliveries of the clients matching `holds`, most recent declaration first.
+    fn live_secret_holders(&self, holds: impl Fn(&Holding) -> bool) -> Vec<Delivery> {
         let mut holders: Vec<(&ClientInstanceId, &Holding)> = self
             .secret_holders
             .by_client
             .iter()
-            .filter(|(_, holding)| holding.keys.contains(key))
+            .filter(|(_, holding)| holds(holding))
             .collect();
-        let holder_count = holders.len();
         holders.sort_by_key(|(_, holding)| std::cmp::Reverse(holding.declared_at));
-        let delivery = holders.into_iter().find_map(|(client, _)| {
-            self.available_responders
-                .get(client)
-                .map(|responder| responder.delivery.clone())
-        });
-        let routing = SecretRouting {
-            holder_count,
-            reachable: delivery.is_some(),
-        };
-        (delivery, routing)
+        holders
+            .into_iter()
+            .filter_map(|(client, _)| {
+                self.available_responders
+                    .get(client)
+                    .map(|responder| responder.delivery.clone())
+            })
+            .collect()
     }
 }
 

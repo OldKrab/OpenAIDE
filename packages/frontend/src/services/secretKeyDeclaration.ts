@@ -39,14 +39,15 @@ export function startSecretKeyDeclaration({
     const operation = ++sequence;
     log("secret_keys_declare_started", { operation });
     try {
-      const keyIds = await requestKeyIds(requestId);
+      const { keyIds, unknownHolder } = await requestKeyIds(requestId);
       // A later declaration supersedes this one; sending the older set would shrink the newer.
       if (disposed || operation !== sequence) return;
-      backendConnection.notify(CLIENT_SECRET_KEYS_CHANGED, { keyIds });
+      backendConnection.notify(CLIENT_SECRET_KEYS_CHANGED, { keyIds, unknownHolder });
       log("secret_keys_declare_completed", {
         operation,
         outcome: "success",
         key_count: keyIds.length,
+        unknown_holder: unknownHolder,
         duration_ms: Date.now() - startedAt,
       });
     } catch {
@@ -60,7 +61,7 @@ export function startSecretKeyDeclaration({
   }
 
   function requestKeyIds(requestId: string) {
-    return new Promise<string[]>((resolve, reject) => {
+    return new Promise<{ keyIds: string[]; unknownHolder: boolean }>((resolve, reject) => {
       const timeout = setTimeout(() => {
         unsubscribe();
         reject(new Error("The shell did not list its secure-storage keys."));
@@ -69,7 +70,10 @@ export function startSecretKeyDeclaration({
         if (message.type !== "secret.keys.result" || message.payload.requestId !== requestId) return;
         clearTimeout(timeout);
         unsubscribe();
-        resolve(message.payload.keyIds.filter((key) => typeof key === "string"));
+        resolve({
+          keyIds: message.payload.keyIds.filter((key) => typeof key === "string"),
+          unknownHolder: message.payload.unknownHolder === true,
+        });
       });
       postHostMessage({
         type: "secret.keys.request",

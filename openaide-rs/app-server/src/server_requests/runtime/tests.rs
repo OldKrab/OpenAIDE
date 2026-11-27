@@ -238,6 +238,57 @@ fn the_client_that_declared_a_key_last_is_asked_first() {
 }
 
 #[test]
+fn an_unknown_holder_is_asked_only_when_no_client_declared_the_key() {
+    let logs = crate::logging::capture_test_logs();
+    let runtime = ServerRequestRuntime::new();
+    runtime.observe_responder_available(holder_delivery("declared", "conn-1"), AppServerTime(1));
+    runtime.observe_responder_available(holder_delivery("legacy", "conn-2"), AppServerTime(1));
+    runtime.declare_secret_holding(ClientInstanceId::from("legacy"), Vec::new(), true);
+    runtime.declare_secret_keys(
+        ClientInstanceId::from("declared"),
+        vec!["agent.secret".to_string()],
+    );
+
+    let declared = runtime
+        .open_task_secret_read_request(
+            TaskId::from("task-unknown-holder"),
+            "agent.secret".to_string(),
+            None,
+            AppServerTime(2),
+        )
+        .expect("declared holder");
+    // A key saved before the upgrade: nobody declared it, so only the unknown holder is asked.
+    let legacy = runtime
+        .open_task_secret_read_request(
+            TaskId::from("task-unknown-holder"),
+            "stored.before.upgrade".to_string(),
+            None,
+            AppServerTime(2),
+        )
+        .expect("unknown holder fallback");
+
+    assert_eq!(
+        declared.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("declared")
+    );
+    assert_eq!(legacy.deliveries.len(), 1);
+    assert_eq!(
+        legacy.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("legacy")
+    );
+    let fallbacks = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| {
+            line["event"] == json!("secret_read_routed")
+                && line["fields"]["task_id"] == json!("task-unknown-holder")
+        })
+        .map(|line| line["fields"]["unknown_holder_fallback"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(fallbacks, vec![json!(false), json!(true)]);
+}
+
+#[test]
 fn task_secret_read_with_no_connected_holder_fails_at_once_and_logs() {
     let logs = crate::logging::capture_test_logs();
     let runtime = ServerRequestRuntime::new();
