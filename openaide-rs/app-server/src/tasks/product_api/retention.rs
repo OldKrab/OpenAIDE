@@ -59,12 +59,11 @@ impl TaskProductApi {
                 }
                 continue;
             }
-            let process_protected = self
-                .task_subscription_presence
-                .has_subscribers(&task.task_id)
-                || self.server_requests.has_pending_for_task(
-                    &openaide_app_server_protocol::ids::TaskId::from(task.task_id.clone()),
-                );
+            // A Task open in a view is not protected: `task/open` refreshes its last-used
+            // marker, and a view of a purged Task receives the removal.
+            let process_protected = self.server_requests.has_pending_for_task(
+                &openaide_app_server_protocol::ids::TaskId::from(task.task_id.clone()),
+            );
             let purged = match self.mutations.purge_task_if_retention_expired(
                 &task.task_id,
                 now_millis,

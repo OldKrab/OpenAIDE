@@ -158,45 +158,133 @@ fn waitable_client_request_timeout_interrupts_pending_request() {
         .is_empty());
 }
 
+fn holder_delivery(client: &str, connection: &str) -> Delivery {
+    Delivery {
+        client_instance_id: ClientInstanceId::from(client),
+        connection_id: ConnectionId::new(connection),
+    }
+}
+
 #[test]
-fn waitable_task_request_delivers_when_task_responder_subscribes() {
+fn task_secret_read_goes_to_the_connected_client_holding_the_key() {
     let runtime = ServerRequestRuntime::new();
     let task_id = TaskId::from("task-1");
+    // Neither client subscribes to the Task: routing follows the declared keys alone.
+    runtime.observe_responder_available(
+        holder_delivery("client-without", "conn-0"),
+        AppServerTime(1),
+    );
+    runtime.observe_responder_available(holder_delivery("client-1", "conn-1"), AppServerTime(1));
+    runtime.declare_secret_keys(
+        ClientInstanceId::from("client-1"),
+        vec!["agent.secret".to_string()],
+    );
+    runtime.declare_secret_keys(
+        ClientInstanceId::from("client-without"),
+        vec!["other".to_string()],
+    );
+
     let opened = runtime
         .open_task_secret_read_request(
-            task_id.clone(),
+            task_id,
             "agent.secret".to_string(),
             Some("Agent secret".to_string()),
-            AppServerTime(1),
+            AppServerTime(2),
         )
         .expect("open task request");
 
-    assert!(opened.deliveries.is_empty());
-    assert_eq!(runtime.pending_for_task(&task_id).len(), 1);
-
-    let deliveries = runtime.observe_subscription_added(
-        Delivery {
-            client_instance_id: ClientInstanceId::from("client-1"),
-            connection_id: ConnectionId::new("conn-1"),
-        },
-        task_id,
-        AppServerTime(2),
+    assert_eq!(opened.deliveries.len(), 1);
+    assert_eq!(
+        opened.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("client-1")
     );
-
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.request_id, opened.request_id);
-    assert_eq!(deliveries[0].envelope.method, "secret/read");
+    assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
     runtime.handle_response(
         ClientInstanceId::from("client-1"),
         opened.request_id.clone(),
         ServerRequestAnswer::Result(json!({ "value": "secret-value" })),
         AppServerTime(3),
     );
-
     let result = runtime
         .wait_client_response(&opened.request_id, crate::test_sync::WATCHDOG)
         .expect("accepted response");
     assert_eq!(result, json!({ "value": "secret-value" }));
+}
+
+#[test]
+fn the_client_that_declared_a_key_last_is_asked_first() {
+    let runtime = ServerRequestRuntime::new();
+    for (client, connection) in [("client-1", "conn-1"), ("client-2", "conn-2")] {
+        runtime.observe_responder_available(holder_delivery(client, connection), AppServerTime(1));
+        runtime.declare_secret_keys(
+            ClientInstanceId::from(client),
+            vec!["agent.secret".to_string()],
+        );
+    }
+
+    let opened = runtime
+        .open_task_secret_read_request(
+            TaskId::from("task-1"),
+            "agent.secret".to_string(),
+            None,
+            AppServerTime(2),
+        )
+        .expect("open task request");
+
+    assert_eq!(
+        opened.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("client-2")
+    );
+}
+
+#[test]
+fn task_secret_read_with_no_connected_holder_fails_at_once_and_logs() {
+    let logs = crate::logging::capture_test_logs();
+    let runtime = ServerRequestRuntime::new();
+    runtime.observe_responder_available(holder_delivery("client-1", "conn-1"), AppServerTime(1));
+    runtime.declare_secret_keys(
+        ClientInstanceId::from("client-1"),
+        vec!["agent.secret".to_string()],
+    );
+    // The only holder loses its transport: a client in its reconnect grace cannot answer.
+    runtime.observe_transport_unavailable(&ClientInstanceId::from("client-1"), AppServerTime(2));
+
+    let started = std::time::Instant::now();
+    let error = runtime
+        .open_task_secret_read_request(
+            TaskId::from("task-unrouted-log"),
+            "agent.secret".to_string(),
+            None,
+            AppServerTime(3),
+        )
+        .expect_err("no connected holder");
+    let unheld = runtime
+        .open_task_secret_read_request(
+            TaskId::from("task-unrouted-log"),
+            "unheld".to_string(),
+            None,
+            AppServerTime(3),
+        )
+        .expect_err("nobody declared the key");
+
+    assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    for error in [error, unheld] {
+        assert!(
+            matches!(error, crate::protocol::errors::RuntimeError::NotReady(message) if message == "missing secure value")
+        );
+    }
+    let unrouted: Vec<_> = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| {
+            line["event"] == json!("secret_read_unrouted")
+                && line["fields"]["task_id"] == json!("task-unrouted-log")
+        })
+        .collect();
+    assert_eq!(unrouted.len(), 2);
+    assert_eq!(unrouted[0]["fields"]["holder_count"], json!(0));
+    assert_eq!(unrouted[1]["fields"]["holder_count"], json!(0));
+    assert!(!format!("{unrouted:?}").contains("agent.secret"));
 }
 
 fn permission_request(request_id: &str) -> AgentPermissionRequest {

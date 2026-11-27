@@ -131,6 +131,9 @@ export function createInternalReliableBackendConnection(
       if (!initialized) return Promise.reject(new Error("Backend connection is not initialized"));
       return sendRequest(method, params, meta);
     },
+    notify(method, params) {
+      peer.notify(method, params);
+    },
     handleRequest(method, handler) {
       return peer.handleRequest(method, (params, context) => handler(params as never, {
         requestId: String(context.requestId) as import("./generated/protocol.js").RequestId,

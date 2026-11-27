@@ -325,6 +325,12 @@ describe("webview messaging composer routes", () => {
       ["openaide.agent.custom.new.env.TOKEN", "rotated-secret"],
       ["openaide.agent.custom.new.env.EXISTING", "preserved-secret"],
       ["openaide.mcp.server-files.header.Authorization", "mcp-secret"],
+      // The shell's key index, which the client declares to the App Server (names only).
+      ["openaide.secret-key-index", JSON.stringify([
+        "openaide.agent.custom.new.env.EXISTING",
+        "openaide.agent.custom.new.env.TOKEN",
+        "openaide.mcp.server-files.header.Authorization",
+      ])],
     ]);
     expect(agentSecretStore.delete.mock.calls).toEqual([
       ["openaide.agent.custom.old.env.TOKEN"],

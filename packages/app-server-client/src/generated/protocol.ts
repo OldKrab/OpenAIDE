@@ -16,6 +16,8 @@ export const CLIENT_UPDATE_SHUTDOWN_COMMIT = "client/updateShutdownCommit" as co
 export const CLIENT_UPDATE_SHUTDOWN_ABORT = "client/updateShutdownAbort" as const;
 export const CLIENT_REPLACEMENT_IMPACT = "client/replacementImpact" as const;
 
+export const CLIENT_SECRET_KEYS_CHANGED = "client/secretKeysChanged" as const;
+
 export const PENDING_REQUEST_RESOLVE = "pendingRequest/resolve" as const;
 
 export const STATE_SUBSCRIBE = "state/subscribe" as const;
@@ -263,6 +265,8 @@ export type UpdateShutdownCommitResult = Record<symbol, never>;
 export type UpdateShutdownAbortParams = { attemptId: string, };
 
 export type UpdateShutdownAbortResult = Record<symbol, never>;
+
+export type ClientSecretKeysChangedParams = { keyIds: Array<string>, };
 
 export type ClientReplacementImpactParams = Record<symbol, never>;
 
@@ -1420,7 +1424,7 @@ export type TaskArchiveOlderCutoff = { "kind": "task", taskId: TaskId, } | { "ki
 
 export type TaskArchiveOlderProtectedNativeSession = { reference: NativeSessionReference, reason: TaskArchiveOlderProtectedReason, };
 
-export type TaskArchiveOlderProtectedReason = "pinned" | "active" | "queued" | "pendingRequest" | "openElsewhere" | "changed";
+export type TaskArchiveOlderProtectedReason = "pinned" | "active" | "queued" | "pendingRequest" | "changed";
 
 export type TaskArchiveOlderProtectedTask = { taskId: TaskId, reason: TaskArchiveOlderProtectedReason, };
 
@@ -2203,6 +2207,11 @@ export type TaskListResponse = ResponseEnvelope<TaskListResult>;
 export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;
 export type TaskArchiveResponse = ResponseEnvelope<TaskArchiveResult>;
 export type TaskRestoreResponse = ResponseEnvelope<TaskRestoreResult>;
+
+export type ClientNotificationMethod = typeof CLIENT_SECRET_KEYS_CHANGED;
+export type ClientNotificationParamsByMethod = {
+  [CLIENT_SECRET_KEYS_CHANGED]: ClientSecretKeysChangedParams;
+};
 
 export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;
 export type ServerRequestParamsByMethod = {

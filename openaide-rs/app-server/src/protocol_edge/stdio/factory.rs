@@ -99,7 +99,6 @@ pub(super) fn gateway(
         configured_projects.clone(),
         agent_statuses.clone(),
     )?);
-    let task_subscription_presence = task_product_api.task_subscription_presence();
     let task_navigation = TaskNavigationStore::with_native_sessions_and_agents(
         store.clone(),
         task_product_api.native_session_catalog(),
@@ -128,10 +127,7 @@ pub(super) fn gateway(
     let gateway = RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10_000, 30_000)),
         AppLifecycle::new(),
-        StateStream::with_task_subscription_presence(
-            state_root_id.clone().into(),
-            task_subscription_presence,
-        ),
+        StateStream::new(state_root_id.clone().into()),
         server_requests,
         shell_file_reveals,
         SnapshotBuilder::with_sources(

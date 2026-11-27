@@ -4,9 +4,6 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::{PendingRequestScope, PendingRequestSnapshot};
 use serde_json::Value;
 
-use super::ResponderScope;
-use openaide_app_server_protocol::server_requests::{PERMISSION_REQUEST, QUESTION_REQUEST};
-
 #[derive(Debug, Clone)]
 pub(super) struct PendingRecord {
     pub(super) snapshot: PendingRequestSnapshot,
@@ -86,32 +83,17 @@ pub(super) fn can_deliver_to(
     record.responders.get(client_instance_id) != Some(&ResponderState::Delivered)
 }
 
+/// Whether `client_instance_id` may answer the record. A Client-scoped request belongs to its
+/// target alone. A Task-scoped one (Permission, Question) is answerable by any client; the
+/// gateway narrows that per client (a VS Code client answers only its Projects' Tasks).
 pub(super) fn record_matches_responder(
     record: &PendingRecord,
     client_instance_id: &ClientInstanceId,
-    scopes: &[ResponderScope],
 ) -> bool {
     match &record.snapshot.scope {
         PendingRequestScope::Client {
             client_instance_id: target,
-        } => {
-            target == client_instance_id
-                && scopes.iter().any(
-                    |scope| matches!(scope, ResponderScope::Client(client) if client == target),
-                )
-        }
-        PendingRequestScope::Task { task_id } => {
-            if matches!(
-                record.method.as_str(),
-                PERMISSION_REQUEST | QUESTION_REQUEST
-            ) {
-                return scopes.iter().any(
-                    |scope| matches!(scope, ResponderScope::Client(client) if client == client_instance_id),
-                );
-            }
-            scopes.iter().any(
-                |scope| matches!(scope, ResponderScope::Task(scope_task_id) if scope_task_id == task_id),
-            )
-        }
+        } => target == client_instance_id,
+        PendingRequestScope::Task { .. } => true,
     }
 }

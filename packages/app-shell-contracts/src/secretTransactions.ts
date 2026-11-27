@@ -1,5 +1,7 @@
 import type {
   HostToWebviewMessage,
+  SecretKeysRequestMessage,
+  SecretKeysResultMessage,
   SecretRef,
   SecretSyncPayload,
   SecretSyncWrite,
@@ -11,6 +13,37 @@ export type AppShellSecretStore = {
   get(key: string): PromiseLike<string | undefined> | string | undefined;
   store(key: string, value: string): PromiseLike<void> | void;
 };
+
+/**
+ * Shell-native stores cannot list their keys, so the shell keeps its own index of the key ids it
+ * holds (names only, never values). It is what the client declares to the App Server so that
+ * `secret/read` is routed to a client that has the key. Secrets saved before the index existed
+ * are not listed until they are saved again.
+ * TODO: seed the index from the shells' native key listings where a store can enumerate.
+ */
+export const SECRET_KEY_INDEX_KEY = "openaide.secret-key-index";
+
+export async function readSecretKeyIndex(secretStore: AppShellSecretStore | undefined): Promise<string[]> {
+  if (!secretStore) return [];
+  try {
+    const raw = await secretStore.get(SECRET_KEY_INDEX_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Answers a `secret.keys.request` from the index; an unreadable store holds no declarable keys. */
+export async function secretKeysResult(
+  message: SecretKeysRequestMessage,
+  secretStore: AppShellSecretStore | undefined,
+): Promise<SecretKeysResultMessage> {
+  return {
+    type: "secret.keys.result",
+    payload: { requestId: message.payload.requestId, keyIds: await readSecretKeyIndex(secretStore) },
+  };
+}
 
 type SecretTransactionResult = Extract<HostToWebviewMessage, { type: "secret.transaction.result" }>;
 type PendingTransaction = {
@@ -62,7 +95,7 @@ async function applyTransaction(
   }
 
   const before = new Map<string, string | undefined>();
-  for (const key of affectedKeys) before.set(key, await secretStore.get(key));
+  for (const key of [...affectedKeys, SECRET_KEY_INDEX_KEY]) before.set(key, await secretStore.get(key));
   const resolvedWrites: Array<{ key: string; value: string }> = [];
   for (const write of changes.writes) {
     const value = "value" in write
@@ -75,6 +108,10 @@ async function applyTransaction(
   try {
     for (const write of resolvedWrites) await secretStore.store(write.key, write.value);
     for (const key of deleteKeys) await secretStore.delete(key);
+    const index = new Set(await readSecretKeyIndex(secretStore));
+    for (const write of resolvedWrites) index.add(write.key);
+    for (const key of deleteKeys) index.delete(key);
+    await secretStore.store(SECRET_KEY_INDEX_KEY, JSON.stringify([...index].sort()));
   } catch {
     await restoreSecrets(secretStore, before);
     throw new Error("Secure storage transaction could not be applied.");

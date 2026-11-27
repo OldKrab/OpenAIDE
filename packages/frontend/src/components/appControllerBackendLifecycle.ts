@@ -12,6 +12,7 @@ import { AppServerProtocolError, type AppServerSession } from "@openaide/app-ser
 import { refreshAgentSettingsThroughBackend } from "../intents/agentSettingsIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
+import { startSecretKeyDeclaration } from "../services/secretKeyDeclaration";
 import {
   mappingContextFromClientSnapshot,
   startAppServerStateSubscription,
@@ -74,6 +75,7 @@ export type AppControllerBackendConnection = Pick<
   | "handleResponsiveness"
   | "subscribeState"
   | "handleRequest"
+  | "notify"
   | "close"
 >;
 
@@ -218,12 +220,21 @@ export function useAppControllerBackendLifecycle({
           postHostMessage,
         })
       : undefined;
+    const secretKeyDeclaration = backendConnection?.notify
+      ? startSecretKeyDeclaration({
+          backendConnection: { notify: backendConnection.notify.bind(backendConnection) },
+          log: (event, fields) => sendWebviewTelemetry(postHostMessage, event, fields),
+          postHostMessage,
+          subscribeHostMessages,
+        })
+      : undefined;
     const stopRecoveryBaselines = backendConnection?.handleRecoveryBaseline((baseline) => {
       if (!active) return;
       sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_received", {
         surface: initialBootstrap.surface,
         reason: baseline.reason,
       });
+      void secretKeyDeclaration?.declare();
       const recoveredSnapshot = baseline.result.snapshot;
       const recoveredReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(recoveredSnapshot));
       const recoveredDispatch = bindAppServerReplicaEpoch(dispatch, recoveredReplicaEpoch);
@@ -382,6 +393,7 @@ export function useAppControllerBackendLifecycle({
               const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
               const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
               initializedDispatch({ type: "appServer:ready" });
+              void secretKeyDeclaration?.declare();
               const currentBootstrap = bootstrapRef.current;
               const ingestion = actionsFromInitialSnapshot(result.snapshot, {
                 includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
@@ -603,6 +615,7 @@ export function useAppControllerBackendLifecycle({
       stopSessionStatus?.();
       stopResponsiveness?.();
       serverRequestBridge?.dispose();
+      secretKeyDeclaration?.dispose();
       stopSession();
       backendConnection?.close();
     };

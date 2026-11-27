@@ -10,10 +10,12 @@ use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use serde_json::Value;
 
 use crate::client_lifecycle::{AppServerTime, Delivery};
+use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::{
     OpenRequestOutcome, ServerRequestDelivery, ServerRequestDraft, ServerRequestRuntime,
 };
+use serde_json::json;
 
 pub(super) struct WaitableRequest {
     pub(super) result: Option<Value>,
@@ -47,6 +49,24 @@ impl ServerRequestRuntime {
         )
     }
 
+    /// Replaces the secure-storage keys `client` holds (`client/initialize` and the
+    /// `client/secretKeysChanged` notification). Only the count is logged.
+    pub fn declare_secret_keys(&self, client: ClientInstanceId, keys: Vec<String>) {
+        let key_count = keys.len();
+        self.inner
+            .lock()
+            .expect("server request runtime poisoned")
+            .broker
+            .declare_secret_keys(client.clone(), keys);
+        logging::info(
+            "client_secret_keys_declared",
+            json!({ "client_instance_id": client.as_str(), "key_count": key_count }),
+        );
+    }
+
+    /// Asks a connected client that holds `key` for it on behalf of a Task. With no such client
+    /// it fails at once with the missing-secret error instead of waiting for a response nobody
+    /// can give.
     pub fn open_task_secret_read_request(
         &self,
         task_id: TaskId,
@@ -54,17 +74,35 @@ impl ServerRequestRuntime {
         label: Option<String>,
         now: AppServerTime,
     ) -> Result<OpenWaitableRequest, RuntimeError> {
-        let title = label.clone().unwrap_or_else(|| "Secret needed".to_string());
-        let params = serde_json::to_value(SecretReadParams { key, label })
-            .map_err(|error| RuntimeError::Internal(error.to_string()))?;
-        self.open_waitable_request(
-            PendingRequestScope::Task { task_id },
-            Vec::new(),
-            SECRET_READ,
-            title,
-            params,
-            now,
-        )
+        let (delivery, routing) = self
+            .inner
+            .lock()
+            .expect("server request runtime poisoned")
+            .broker
+            .secret_holder_for(&key);
+        let Some(delivery) = delivery else {
+            logging::warn(
+                "secret_read_unrouted",
+                json!({
+                    "task_id": task_id.as_str(),
+                    "holder_count": routing.holder_count,
+                    "outcome": "no_connected_holder",
+                }),
+            );
+            return Err(RuntimeError::NotReady("missing secure value".to_string()));
+        };
+        let holder = delivery.client_instance_id.clone();
+        let opened = self.open_secret_read_request(holder.clone(), delivery, key, label, now)?;
+        logging::info(
+            "secret_read_routed",
+            json!({
+                "task_id": task_id.as_str(),
+                "server_request_id": opened.request_id.as_str(),
+                "holder_client_instance_id": holder.as_str(),
+                "holder_count": routing.holder_count,
+            }),
+        );
+        Ok(opened)
     }
 
     pub fn open_shell_notification_request(

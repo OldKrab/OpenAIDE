@@ -4,7 +4,7 @@ use openaide_app_server_protocol::snapshot::{PendingRequestScope, PendingRequest
 use crate::client_lifecycle::{AppServerTime, Delivery};
 
 use super::ServerRequestRuntime;
-use crate::server_requests::{RequestLifecycleOutcome, ResponderScope, ServerRequestDelivery};
+use crate::server_requests::{RequestLifecycleOutcome, ServerRequestDelivery};
 
 impl ServerRequestRuntime {
     pub fn interrupt_request(
@@ -45,14 +45,13 @@ impl ServerRequestRuntime {
     pub fn observe_client_initialized_or_reattached(
         &self,
         delivery: Delivery,
-        scopes: &[ResponderScope],
         now: AppServerTime,
     ) -> Vec<ServerRequestDelivery> {
         self.inner
             .lock()
             .expect("server request runtime poisoned")
             .broker
-            .observe_client_initialized_or_reattached(delivery, scopes, now)
+            .observe_client_initialized_or_reattached(delivery, now)
     }
 
     pub fn observe_transport_unavailable(
@@ -80,40 +79,13 @@ impl ServerRequestRuntime {
     pub fn observe_responder_available(
         &self,
         delivery: Delivery,
-        scopes: &[ResponderScope],
         now: AppServerTime,
     ) -> Vec<ServerRequestDelivery> {
         self.inner
             .lock()
             .expect("server request runtime poisoned")
             .broker
-            .observe_responder_available(delivery, scopes, now)
-    }
-
-    pub fn observe_subscription_added(
-        &self,
-        delivery: Delivery,
-        task_id: TaskId,
-        now: AppServerTime,
-    ) -> Vec<ServerRequestDelivery> {
-        self.inner
-            .lock()
-            .expect("server request runtime poisoned")
-            .broker
-            .observe_subscription_added(delivery, task_id, now)
-    }
-
-    pub fn observe_subscription_removed(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        task_id: &TaskId,
-        now: AppServerTime,
-    ) -> Vec<RequestLifecycleOutcome> {
-        self.observe_responder_loss(|inner| {
-            inner
-                .broker
-                .observe_subscription_removed(client_instance_id, task_id, now)
-        })
+            .observe_responder_available(delivery, now)
     }
 
     pub fn pending_for_client(
@@ -133,6 +105,15 @@ impl ServerRequestRuntime {
             .expect("server request runtime poisoned")
             .broker
             .pending_for_task(task_id)
+    }
+
+    /// The Task a pending request belongs to, if it is a Task-scoped request.
+    pub fn task_of_pending_request(&self, request_id: &RequestId) -> Option<TaskId> {
+        self.inner
+            .lock()
+            .expect("server request runtime poisoned")
+            .broker
+            .task_of_request(request_id)
     }
 
     pub fn pending_count(&self) -> usize {

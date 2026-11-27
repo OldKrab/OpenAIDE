@@ -85,6 +85,7 @@ export function createWebAppShell(): FrontendShell {
       case "secret.transaction.apply":
       case "secret.transaction.commit":
       case "secret.transaction.rollback":
+      case "secret.keys.request":
       case "appServer.serverRequest":
         void handleSecretMessage(message).then((result) => {
           if (result) postMessage(result);

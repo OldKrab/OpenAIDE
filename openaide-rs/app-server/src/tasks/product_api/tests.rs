@@ -1582,6 +1582,16 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     )
     .unwrap();
 
+    // The client holds the key; it never subscribes to the Task.
+    let delivery = Delivery {
+        client_instance_id: ClientInstanceId::from("client-1"),
+        connection_id: ConnectionId::new("connection-1"),
+    };
+    server_requests.observe_responder_available(delivery.clone(), AppServerTime::now());
+    server_requests.declare_secret_keys(
+        delivery.client_instance_id.clone(),
+        vec!["openaide.agent.custom.agent.env.TOKEN".to_string()],
+    );
     let created = api
         .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
@@ -1589,26 +1599,16 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
             workspace_root: None,
         })
         .unwrap();
+    let pending = crate::test_sync::wait_for("the routed secret request", || {
+        server_requests
+            .pending_for_client(&delivery.client_instance_id)
+            .into_iter()
+            .next()
+    });
     let task_id = created.task.task_id.clone();
-    wait_until(|| !server_requests.pending_for_task(&task_id).is_empty());
-    let delivery = Delivery {
-        client_instance_id: ClientInstanceId::from("client-1"),
-        connection_id: ConnectionId::new("connection-1"),
-    };
-    let deliveries = server_requests.observe_subscription_added(
-        delivery.clone(),
-        task_id.clone(),
-        AppServerTime::now(),
-    );
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.method, "secret/read");
-    assert_eq!(
-        deliveries[0].envelope.params["key"],
-        "openaide.agent.custom.agent.env.TOKEN"
-    );
     server_requests.handle_response(
         delivery.client_instance_id,
-        deliveries[0].envelope.request_id.clone(),
+        pending.request_id.clone(),
         ServerRequestAnswer::Result(serde_json::json!({ "value": "resolved-secret" })),
         AppServerTime::now(),
     );
@@ -4352,7 +4352,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         notifier,
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4366,10 +4365,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         client_mutation_id: "mutation-before-session-refresh".into(),
     })
     .unwrap();
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
     while updates.try_recv().is_ok() {}
     *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
         session_id: "native-session".to_string(),
@@ -4448,17 +4443,12 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
 
     let config_api = api.clone();
     let config_thread = std::thread::spawn(move || {
@@ -4541,7 +4531,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         notifier,
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4549,10 +4538,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
     .unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
     wait_until(|| !api.history_sync.has_in_flight_generation("task-existing"));
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
     while updates.try_recv().is_ok() {}
     *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
         session_id: "native-session".to_string(),

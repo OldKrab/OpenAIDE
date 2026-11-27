@@ -1,3 +1,4 @@
+use openaide_app_server_protocol::client::ShellKind;
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, ResponseMeta};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
@@ -9,7 +10,6 @@ use openaide_app_server_protocol::server_requests::{
 use openaide_app_server_protocol::snapshot::{
     PendingRequestScope, PendingRequestSnapshot, TaskSnapshot,
 };
-use openaide_app_server_protocol::state::SubscriptionScope;
 
 use crate::app_lifecycle::{
     LifecycleState, ShutdownCause, ShutdownCompletion, ShutdownRequestOutcome,
@@ -24,7 +24,7 @@ use crate::protocol_edge::{
 use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
-use crate::server_requests::{ResponderScope, ResponseOutcome, ServerRequestAnswer};
+use crate::server_requests::{ResponseOutcome, ServerRequestAnswer};
 
 impl RpcGateway {
     pub(super) fn handle_pending_request_resolve(
@@ -59,13 +59,7 @@ impl RpcGateway {
                 serde_json::to_value(response).expect("question resolution serializes"),
             ),
         };
-        let outcome = self.server_requests.handle_response_from_scopes(
-            context.client_instance_id.clone(),
-            params.request_id,
-            answer,
-            &self.responder_scopes(&context),
-            now,
-        );
+        let outcome = self.answer_request(&context, params.request_id, answer, now);
         let ResponseOutcome::Accepted { scope, .. } = outcome else {
             return self.error(
                 connection_id,
@@ -358,7 +352,6 @@ impl RpcGateway {
             self.client_hub
                 .delivery_for(&context.client_instance_id)
                 .expect("connected client must have a delivery"),
-            &self.responder_scopes(&context),
             now,
         )
     }
@@ -376,13 +369,8 @@ impl RpcGateway {
         let terminal_exchange = self
             .server_requests
             .is_auth_terminal_exchange(&RequestId::from(request_id.clone()));
-        let outcome = self.server_requests.handle_response_from_scopes(
-            context.client_instance_id.clone(),
-            RequestId::from(request_id.clone()),
-            answer,
-            &self.responder_scopes(&context),
-            now,
-        );
+        let outcome =
+            self.answer_request(&context, RequestId::from(request_id.clone()), answer, now);
         let ResponseOutcome::Accepted { scope, .. } = outcome else {
             return GatewayOutcome::Respond {
                 connection_id,
@@ -464,44 +452,58 @@ impl RpcGateway {
         task
     }
 
-    pub(super) fn responder_scopes(&self, context: &ClientContext) -> Vec<ResponderScope> {
-        let mut scopes = vec![ResponderScope::Client(context.client_instance_id.clone())];
-        scopes.extend(
-            self.state_stream
-                .subscriptions_for_client(&context.client_instance_id)
-                .into_iter()
-                .filter_map(|scope| match scope {
-                    SubscriptionScope::Task { task_id } => Some(ResponderScope::Task(task_id)),
-                    _ => None,
-                }),
-        );
-        scopes
+    /// Answers a pending request for `context`'s client after the authorization rule
+    /// (ADR-0086): any authenticated client may answer a Task's Permission or Question, except
+    /// that a VS Code client answers only for Tasks of the Projects it works in. Nothing
+    /// here depends on which Tasks the client has open.
+    fn answer_request(
+        &mut self,
+        context: &ClientContext,
+        request_id: RequestId,
+        answer: ServerRequestAnswer,
+        now: AppServerTime,
+    ) -> ResponseOutcome {
+        if let Some(denied) = self.deny_out_of_project_answer(context, &request_id) {
+            return denied;
+        }
+        self.server_requests.handle_response(
+            context.client_instance_id.clone(),
+            request_id,
+            answer,
+            now,
+        )
     }
 
-    pub(super) fn result_with_server_requests<T: serde::Serialize>(
+    fn deny_out_of_project_answer(
         &self,
-        connection_id: ConnectionId,
-        id: String,
-        meta: RequestMeta,
-        result: T,
-        server_requests: Vec<ServerRequestDelivery>,
-    ) -> GatewayOutcome {
-        match responses::result(connection_id, id, meta, result) {
-            GatewayOutcome::Respond {
-                connection_id,
-                id,
-                response,
-                events,
-                ..
-            } => GatewayOutcome::Respond {
-                connection_id,
-                id,
-                response,
-                events,
-                server_requests,
-            },
-            GatewayOutcome::Noop => GatewayOutcome::Noop,
+        context: &ClientContext,
+        request_id: &RequestId,
+    ) -> Option<ResponseOutcome> {
+        if context.shell.kind != ShellKind::VscodeExtension {
+            return None;
         }
+        let task_id = self.server_requests.task_of_pending_request(request_id)?;
+        let task_project = self.task_snapshots.project_of(&task_id);
+        let allowed = task_project.as_ref().is_some_and(|project| {
+            self.project_roots
+                .client_project_ids(&context.client_instance_id)
+                .contains(project)
+        });
+        if allowed {
+            return None;
+        }
+        crate::logging::warn(
+            "pending_request_answer_denied",
+            serde_json::json!({
+                "client_instance_id": context.client_instance_id.as_str(),
+                "task_id": task_id.as_str(),
+                "reason_code": "task_outside_client_projects",
+            }),
+        );
+        Some(ResponseOutcome::UnauthorizedResponder {
+            request_id: request_id.clone(),
+            responder: context.client_instance_id.clone(),
+        })
     }
 
     fn publish_request_resolution(
@@ -593,9 +595,11 @@ impl RpcGateway {
             }
             PendingRequestScope::Task { task_id } => self
                 .state_stream
-                .subscribers_for_scope(&SubscriptionScope::Task {
-                    task_id: task_id.clone(),
-                })
+                .subscribers_for_scope(
+                    &openaide_app_server_protocol::state::SubscriptionScope::Task {
+                        task_id: task_id.clone(),
+                    },
+                )
                 .into_iter()
                 .filter_map(|client_id| self.client_hub.delivery_for(&client_id))
                 .collect(),

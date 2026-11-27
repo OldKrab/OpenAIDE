@@ -151,6 +151,9 @@ export function createAppServerSession(
         ? connection.request(method, params)
         : connection.request(method, params, meta);
     },
+    notify(method, params) {
+      connection.notify?.(method, params);
+    },
     handleRequest(method, handler) {
       return connection.handleRequest(method, handler);
     },

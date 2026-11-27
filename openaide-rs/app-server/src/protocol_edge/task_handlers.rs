@@ -708,11 +708,6 @@ impl RpcGateway {
             task_id: task_id.clone(),
         };
         self.state_stream.unsubscribe(&client, scope, now);
-        self.server_requests.observe_subscription_removed(
-            &client.client_instance_id,
-            &task_id,
-            now,
-        );
         self.result::<TaskReleaseResult>(connection_id, id, meta, TaskReleaseResult { task_id })
     }
 

@@ -84,4 +84,29 @@ describe("Web secret messages", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret-value");
     expect(JSON.stringify(log.mock.calls)).not.toContain("sensitive provider detail");
   });
+
+  it("lists the held key ids, never values, and follows saves, deletes and rollbacks", async () => {
+    const handle = createWebSecretMessageHandler(memoryStore());
+    const ref = { kind: "agentEnvironment", agentId: "codex", name: "OPENAI_API_KEY" } as const;
+    const keys = async () => {
+      const result = await handle({ type: "secret.keys.request", payload: { requestId: "keys" } });
+      return result?.type === "secret.keys.result" ? result.payload.keyIds : undefined;
+    };
+    expect(await keys()).toEqual([]);
+
+    await handle({
+      type: "secret.transaction.apply",
+      payload: { requestId: "a", transactionId: "t1", changes: { writes: [{ target: ref, value: "secret-value" }], deletes: [] } },
+    });
+    await handle({ type: "secret.transaction.commit", payload: { requestId: "c", transactionId: "t1" } });
+    expect(await keys()).toEqual(["openaide.agent.codex.env.OPENAI_API_KEY"]);
+
+    await handle({
+      type: "secret.transaction.apply",
+      payload: { requestId: "a2", transactionId: "t2", changes: { writes: [], deletes: [ref] } },
+    });
+    expect(await keys()).toEqual([]);
+    await handle({ type: "secret.transaction.rollback", payload: { requestId: "r2", transactionId: "t2" } });
+    expect(await keys()).toEqual(["openaide.agent.codex.env.OPENAI_API_KEY"]);
+  });
 });
