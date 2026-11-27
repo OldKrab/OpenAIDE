@@ -35,7 +35,7 @@ State now travels in three shapes, chosen by what the data is like, on a transpo
 - One recompute emits the frames of every affected view together, so a row moving between sections, or a Native Session replaced by the Task that adopted it, never appears twice or goes missing between frames.
 - A mutation commits, marks its Project changed, and the resulting frames are sent before the mutation's reply.
 - Collapsing a Project hides its non-live rows locally at once, using each row's live flag, and then lowers the history limit.
-- **Discovery depth is a count target.** Each Agent listing is paged until it has supplied enough rows to fill the largest history limit among current views, or is exhausted. A catalog page only marks its Project changed, and a page that changes no view sends nothing. The Archive view never drives discovery. Discovery keeps polling; Codex's list-change push is out of scope.
+- **Discovery depth is a count target.** Each Agent listing is paged until it has supplied enough rows to fill the largest history limit among current views, or is exhausted. A catalog page only marks its Project changed, and a page that changes no view sends nothing. The Archive view never drives discovery. Discovery keeps polling, and `taskNavigation/refresh` keeps its name as the explicit request for a new pass; Codex's list-change push is out of scope.
 - The open Task comes from its Task subscription and a worktree's linked Tasks from worktree data; no client code assumes Navigation holds every row.
 
 ### Entity subscriptions
@@ -44,7 +44,7 @@ State now travels in three shapes, chosen by what the data is like, on a transpo
 - The reply carries every current field in full, and the content (Chat or Tool output) as exactly one of: **current**, when the known version is the latest; **deltas**, the changes after the known version; or **full**, when no version was offered, or it is older than the last compaction or replacement, or ahead of the entity.
 - Each committed transaction sends one notification carrying the changed fields and content changes together, so a Task is always atomic.
 - Fields carry no version; they are small and always resent on subscribe. Only content is versioned: the Task Chat version is the last Chat frame number, the Tool-detail version its artifact sequence, and a Subagent history keeps its own revision ([ADR-0046](0046-subagent-histories-use-independent-journals.md)). The Subagent catalog is part of the Task entity when it is committed with the Task, and otherwise its own entity subscription.
-- The Chat version is durable, so a cached Task copy may resume across an App Server restart. A known version is honored only for a copy from the same state root.
+- The Chat version is durable, so a cached Task copy may resume across an App Server restart. The client drops every cached copy when `client/initialize` reports a different state root; that one check at initialize replaces any per-event state-root comparison.
 - A removed entity ends its subscription with a final `removed` notification.
 - Agent-owned Composer state (model, mode, Configuration Options, slash commands) is a Task field. Draft text never leaves the client ([ADR-0022](0022-backend-frontend-app-shell-architecture.md)).
 - Derived Task fields, such as Task Workspace availability and the Subagent overview, are published to open Tasks when their source changes, since they do not move with a Task commit.
@@ -58,7 +58,7 @@ State now travels in three shapes, chosen by what the data is like, on a transpo
 
 ### Search
 
-`search` takes text and optional Project ids and returns matching rows, each with at most one best snippet whose window and highlight ranges App Server computes, and the matching message id; a title-only match has no snippet. It is one-shot, not live. While open, its results replace the Navigation list; the Navigation view is untouched. Selecting a result opens the Task at that message. OpenAIDE Tasks match on full text, Native Sessions on title only.
+`search` takes text and optional Project ids and returns matching rows from both the open and the archived sections. Each result names its section, the matching message id, and at most one best snippet whose window and highlight ranges App Server computes; a title-only match has no snippet. It is one-shot, not live. While open, its results replace the Navigation list; the Navigation view is untouched. Selecting a result opens the Task at that message. OpenAIDE Tasks match on full text, Native Sessions on title only.
 
 ### Chat storage
 
@@ -81,7 +81,7 @@ A subscription only means "send me this data". Each former use of presence has i
 
 ### Owners and routing
 
-Each shape has one owner: the global-state owner, the Navigation owner, and the existing per-Task commit path for entities. An owner publishes by comparing old and new values, so a change that changes nothing publishes nothing. Each notification is addressed to known subscriptions; scope labels, payload matching, and state-root comparison on events are removed from both sides. The client session keeps the global state, Navigation views, and entity copies and applies the three message shapes.
+Each shape has one owner: the global-state owner, the Navigation owner, and the existing per-Task commit path for entities. An owner publishes by comparing old and new values, so a change that changes nothing publishes nothing. Moving every existing handler-side publish call behind an owner at once is not required; each owner absorbs them as it lands. Each notification is addressed to known subscriptions; scope labels, payload matching, and state-root comparison on events are removed from both sides. The client session keeps the global state, Navigation views, and entity copies and applies the three message shapes.
 
 Out of scope: the Android attention long-poll ([ADR-0027](0027-task-attention-and-shell-local-notifications.md)), terminal I/O streams, Project file watching, turning `shell/*` server requests into notifications, generic typed change entries, and a single Frontend store.
 
@@ -104,7 +104,7 @@ Out of scope: the Android attention long-poll ([ADR-0027](0027-task-attention-an
 ## Consequences
 
 - The protocol changes are incompatible with older clients, so the App Server Protocol major version increases ([ADR-0062](0062-remote-devices-are-app-server-clients.md)).
-- A Task left open without being opened again, prompted, or worked on for seven days becomes eligible for retention unless it is pinned or otherwise protected; its open view receives the removal.
+- A Task left open without being opened again, prompted, or worked on for seven days becomes eligible for retention unless it is pinned or otherwise protected; its open view receives the entity `removed` notification, as for any deletion.
 - Archive-older can archive a Task another client is viewing; that view shows the change.
 - A Permission can be answered without opening its Task, for example from a notification action.
 - [The Task Lifecycle and Chat Specification](../task-chat-flow.md) is amended for Navigation, archive-older, retention, search, and Task resume.
