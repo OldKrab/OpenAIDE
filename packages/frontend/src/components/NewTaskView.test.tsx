@@ -1107,6 +1107,7 @@ describe("NewTaskView", () => {
     state.newTask.nativeSessions = {
       adoptingSessionId: "session_1",
       items: [],
+      groups: [],
       loaded: true,
       loading: false,
     };

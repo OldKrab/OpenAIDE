@@ -62,7 +62,7 @@ impl TaskProductApi {
             )
             .map_err(protocol_error_from_runtime)?;
         self.task_notifier
-            .navigation_project_entries_changed(source.project_id.as_str().to_string());
+            .navigation_project_changed(source.project_id.as_str().to_string());
         crate::logging::info(
             "native_session_fork_completed",
             serde_json::json!({

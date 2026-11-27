@@ -1,17 +1,26 @@
 import {
   applySubscriptionEvent,
+  installNavigationSubscribeReply,
   installSubscriptionReply,
   type SubscriptionIngestionState,
 } from "./stateIngestion.js";
+import { entityVersion } from "./stateIngestionEntities.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
 import {
+  NAVIGATION_SUBSCRIBE,
+  NAVIGATION_UNSUBSCRIBE,
+  NAVIGATION_UPDATE,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AppServerEvent,
   type InitializeResult,
+  type NavigationViewParams,
+  type NavigationUpdateResult,
+  type StateSubscribeResult,
   type SubscriptionScope,
 } from "./generated/protocol.js";
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
+import { createGlobalStateSync } from "./globalStateSync.js";
 import type {
   AppServerSession,
   AppServerSessionStatus,
@@ -21,19 +30,33 @@ import type {
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
   BackendUnsubscribe,
+  EntityReplicaSnapshot,
   ReplicaSnapshot,
 } from "./backendConnection.js";
 
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
-const MAX_RETAINED_TASK_COPIES = 16;
+/** Copies kept per entity kind after their last observer leaves (ADR-0086). */
+const MAX_RETAINED_COPIES: Record<EntityReplicaSnapshot["kind"], number> = {
+  task: 16,
+  // Terminal output can be large, so fewer of these are worth keeping.
+  toolDetail: 8,
+  subagentHistory: 8,
+};
 
 type ScopeReplica = {
   scope: SubscriptionScope;
   observers: Set<AppServerStateObserver>;
   state?: SubscriptionIngestionState;
+  /**
+   * Events that arrive while no baseline is installed: those sent before the subscribe reply,
+   * and those after it in the same transport batch, which is delivered before the reply's
+   * continuation runs.
+   */
   pendingEvents: AppServerEvent[];
+  /** A Navigation view's parameters: the latest wanted, and the ones App Server holds. */
+  navigation?: { wanted: NavigationViewParams; sent?: NavigationViewParams; pushing: boolean };
   refreshing: boolean;
   refreshGeneration?: number;
   refreshPromise?: Promise<void>;
@@ -53,10 +76,10 @@ export function createAppServerSession(
   logger = createDiagnosticsLogger("openaide-app-server-session"),
 ): AppServerSession {
   const replicas = new Map<string, ScopeReplica>();
-  // Task copies kept after their last observer leaves, least recently released first.
-  // Returning to the Task offers the copy's revision instead of paying for a baseline
-  // (ADR-0073). A copy is trusted only within the generation that installed it.
-  const retainedTaskCopies = new Map<string, Extract<ReplicaSnapshot, { kind: "task" }>>();
+  // Entity copies (Task, Subagent History, Tool detail) kept after their last observer leaves,
+  // least recently released first. Returning to the entity offers the copy's content version
+  // instead of paying for a baseline (ADR-0086).
+  const retainedCopies = new Map<string, EntityReplicaSnapshot>();
   const statusListeners = new Set<(status: AppServerSessionStatus) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
@@ -67,9 +90,11 @@ export function createAppServerSession(
   let recoveryGate: RecoveryGate | undefined;
   let status: AppServerSessionStatus = { status: "connecting", generation };
   let initialization: InitializeResult | undefined;
+  const globalSync = createGlobalStateSync(logger);
   logger.info("app_server_session_created");
 
   const stopEvents = connection.handleNotification("app/event", handleEvent);
+  const stopSync = connection.handleNotification("sync", globalSync.receive);
   const stopInvalidation = connection.handleGenerationInvalidated(beginRecovery);
   const stopRecoveryBaseline = connection.handleRecoveryBaseline((baseline) => {
     void installRecoveryBaseline(baseline);
@@ -94,7 +119,7 @@ export function createAppServerSession(
         const result = await (meta === undefined
           ? connection.initialize(params)
           : connection.initialize(params, meta));
-        if (generation === initialGeneration) initialization = result;
+        if (generation === initialGeneration) initialization = globalSync.install(result);
         initialized = true;
         await refreshCurrentReplicas(initialGeneration);
         // Initialization can lose its transport while installing observed scopes.
@@ -108,7 +133,7 @@ export function createAppServerSession(
           duration_ms: Date.now() - startedAt,
           replica_count: replicas.size,
         });
-        return initialization ?? result;
+        return globalSync.latest() ?? initialization ?? result;
       } catch (error) {
         logger.error("app_server_session_initialize_failed", {
           generation,
@@ -133,15 +158,27 @@ export function createAppServerSession(
           duration_ms: Date.now() - startedAt,
         });
       }
+      if (method === NAVIGATION_UPDATE) {
+        // The session remembers what a view wants, so recovery resubscribes with it.
+        const handled = await updateNavigationView(params as NavigationViewParams);
+        if (handled) return {} as never;
+      }
       return meta === undefined
         ? connection.request(method, params)
         : connection.request(method, params, meta);
     },
+    notify(method, params) {
+      connection.notify?.(method, params);
+    },
     handleRequest(method, handler) {
       return connection.handleRequest(method, handler);
     },
-    handleNotification(method, handler) {
-      return connection.handleNotification(method, handler);
+    handleNotification(method: "app/event" | "sync", handler: never) {
+      // `sync` goes through the session so a change never reaches a caller before the state it
+      // applies to; events keep their own per-scope chain.
+      return method === "sync"
+        ? globalSync.subscribe(handler)
+        : connection.handleNotification(method, handler);
     },
     handleGenerationInvalidated(handler) {
       invalidationListeners.add(handler);
@@ -155,13 +192,17 @@ export function createAppServerSession(
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
-    subscribeState(scope, observer) {
+    subscribeState(scope, observer, view) {
       const key = scopeKey(scope);
       let replica = replicas.get(key);
+      if (scope.kind === "taskNavigation" && !view) {
+        throw new Error("A Navigation subscription needs its view parameters");
+      }
       if (!replica) {
         replica = {
           scope,
           observers: new Set(),
+          ...(view ? { navigation: { wanted: view, pushing: false } } : {}),
           pendingEvents: [],
           refreshing: true,
           retryDelay: SUBSCRIPTION_RETRY_MS,
@@ -173,6 +214,11 @@ export function createAppServerSession(
         });
       }
       replica.observers.add(observer);
+      if (view && replica.navigation) {
+        // A returning observer brings its own parameters; the view follows the latest.
+        replica.navigation.wanted = view;
+        void pushNavigationParams(replica);
+      }
       if (replica.state && !replica.refreshing) {
         notifyObserver(observer, "onSnapshot", logger, replica.state.snapshot);
         notifyObserver(observer, "onBaselineReady", logger);
@@ -199,11 +245,13 @@ export function createAppServerSession(
       recoveryGate?.resolve();
       recoveryGate = undefined;
       stopEvents();
+      stopSync();
+      globalSync.clear();
       stopInvalidation();
       stopRecoveryBaseline();
       stopRecoveryFailure();
       replicas.clear();
-      retainedTaskCopies.clear();
+      retainedCopies.clear();
       statusListeners.clear();
       invalidationListeners.clear();
       recoveryBaselineListeners.clear();
@@ -218,6 +266,7 @@ export function createAppServerSession(
     if (closed) return;
     const previousGate = recoveryGate;
     generation += 1;
+    globalSync.suspend();
     recoveryGate = deferredGate(generation, Date.now());
     // A replacement transport may expire before all of its baselines arrive.
     // Earlier waiters remain blocked until the newest recovery settles.
@@ -228,8 +277,13 @@ export function createAppServerSession(
       replica_count: replicas.size,
     });
     updateStatus({ status: "recovering", generation, reason: event.reason });
-    retainedTaskCopies.clear();
-    for (const replica of replicas.values()) invalidateReplica(replica);
+    // A copy stays valid across a transport loss or an App Server restart: it carries the content
+    // version it was built at, and App Server answers it with the missed changes, or the whole
+    // content when it cannot. Only another state root makes the copies meaningless.
+    for (const [key, replica] of replicas) {
+      retainCopy(key, replica);
+      invalidateReplica(replica);
+    }
     notifyListeners(invalidationListeners, event, logger, "generation_invalidation");
   }
 
@@ -242,8 +296,21 @@ export function createAppServerSession(
       replica_count: replicas.size,
       duration_ms: Date.now() - gate.startedAt,
     });
-    initialization = baseline.result;
-    notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
+    if (initialization && initialization.snapshot.stateRoot.stateRootId !== baseline.result.snapshot.stateRoot.stateRootId) {
+      logger.info("app_server_retained_copies_dropped", {
+        generation,
+        retained_copy_count: retainedCopies.size,
+        reason: "stateRootChanged",
+      });
+      retainedCopies.clear();
+    }
+    initialization = globalSync.install(baseline.result);
+    notifyListeners(
+      recoveryBaselineListeners,
+      { ...baseline, result: initialization },
+      logger,
+      "recovery_baseline",
+    );
     await refreshCurrentReplicas(gate.generation);
     if (closed || recoveryGate !== gate) return;
     recoveryGate = undefined;
@@ -320,31 +387,34 @@ export function createAppServerSession(
   async function refreshReplicaUntilReady(replica: ScopeReplica, targetGeneration: number) {
     let attempt = 0;
     // Only the first attempt offers a retained copy; a rejected resume falls back to a baseline.
-    let retained = takeRetainedTaskCopy(scopeKey(replica.scope));
+    let retained = takeRetainedCopy(scopeKey(replica.scope));
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
       attempt += 1;
       const startedAt = Date.now();
-      const knownRevision = retained?.task.revision;
+      const knownVersion = retained ? entityVersion(retained) : undefined;
       try {
         logger.info("app_server_state_baseline_request_started", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
-          known_revision_offered: knownRevision !== undefined,
+          known_version_offered: knownVersion !== undefined,
         });
-        const result = await connection.request(
-          STATE_SUBSCRIBE,
-          knownRevision === undefined ? { scope: replica.scope } : { scope: replica.scope, knownRevision },
-        );
+        const navigation = replica.navigation;
+        const sentParams = navigation?.wanted;
+        const result = navigation && sentParams
+          ? await connection.request(NAVIGATION_SUBSCRIBE, sentParams)
+          : await connection.request(
+            STATE_SUBSCRIBE,
+            knownVersion === undefined ? { scope: replica.scope } : { scope: replica.scope, knownVersion },
+          );
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
-        const snapshot = initialization?.snapshot;
-        if (!snapshot) throw new Error("App Server session is not initialized");
+        if (!initialization) throw new Error("App Server session is not initialized");
         const offered = retained;
         retained = undefined;
-        const state = installSubscriptionReply(result, {
-          stateRootId: snapshot.stateRoot.stateRootId,
-          clientInstanceId: snapshot.client.clientInstanceId,
-        }, offered);
+        const state = "frame" in result
+          ? installNavigationSubscribeReply(result, replica.scope)
+          : installSubscriptionReply(result, offered);
+        if (navigation && state) navigation.sent = sentParams;
         if (!state) {
           logger.warn("app_server_state_resume_rejected", {
             ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
@@ -358,17 +428,20 @@ export function createAppServerSession(
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", logger, replica.state.snapshot);
-        replayPendingEvents(replica);
+        const replayedPendingCount = replayPendingEvents(replica);
         // Replay can invalidate the baseline while this refresh still owns the
         // promise. Keep that owner running until the buffered stream is coherent.
         if (replica.refreshing) continue;
         notifyReplica(replica, "onBaselineReady", logger);
+        // Parameters that changed while the baseline was in flight go out now.
+        void pushNavigationParams(replica);
         logger.info("app_server_state_baseline_ready", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
-          reply_kind: result.snapshot.kind,
-          missed_change_count: result.snapshot.kind === "taskResume" ? result.snapshot.resume.changes.length : 0,
+          reply_kind: "frame" in result ? "navigationFrame" : result.snapshot.kind,
+          ...("frame" in result ? {} : replySyncDiagnosticFields(result.snapshot)),
+          replayed_pending_event_count: replayedPendingCount,
           duration_ms: Date.now() - startedAt,
         });
         return;
@@ -417,10 +490,13 @@ export function createAppServerSession(
       return true;
     }
     if (result.kind === "resyncRequired") {
+      // The entity's revision (or the Navigation row/group a frame needs) says an event was
+      // lost or reordered, which is a bug, not a race. Resync still recovers.
       logger.warn("app_server_state_event_rejected", {
         ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
         generation,
         reason: result.reason,
+        ...result.detail,
       });
       invalidateReplica(replica);
       void refreshReplica(replica, generation);
@@ -438,16 +514,22 @@ export function createAppServerSession(
     return true;
   }
 
+  /**
+   * Applies the events buffered while the baseline was in flight: those sent before the subscribe
+   * reply, which the baseline already contains, and those after it in the same transport batch.
+   * Each entity's revision (and a Navigation frame's revision) drops the first kind without
+   * changing the copy. Returns how many events were buffered.
+   */
   function replayPendingEvents(replica: ScopeReplica) {
-    if (!replica.state || replica.pendingEvents.length === 0) return;
-    const cursorIndex = replica.pendingEvents.findIndex((event) => event.cursor === replica.state?.cursor);
-    const events = cursorIndex === -1 ? replica.pendingEvents : replica.pendingEvents.slice(cursorIndex + 1);
+    if (!replica.state || replica.pendingEvents.length === 0) return 0;
+    const events = replica.pendingEvents;
     replica.pendingEvents = [];
     for (const [index, event] of events.entries()) {
       if (applyEvent(replica, event)) continue;
       for (const pending of events.slice(index + 1)) queuePendingEvent(replica, pending);
       break;
     }
+    return events.length;
   }
 
   function queuePendingEvent(replica: ScopeReplica, event: AppServerEvent) {
@@ -459,28 +541,97 @@ export function createAppServerSession(
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
     replicas.delete(key);
-    retainTaskCopy(key, replica);
+    retainCopy(key, replica);
     logger.info("app_server_state_subscription_released", {
       ...scopeDiagnosticFields(replica.scope, key),
       generation,
     });
-    void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
+    const released = replica.scope.kind === "taskNavigation"
+      ? connection.request(NAVIGATION_UNSUBSCRIBE, { section: replica.scope.section })
+      : connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope });
+    void released.catch(() => undefined);
   }
 
-  function retainTaskCopy(key: string, replica: ScopeReplica) {
-    const snapshot = replica.state?.snapshot;
-    if (replica.refreshing || snapshot?.kind !== "task") return;
-    retainedTaskCopies.delete(key);
-    retainedTaskCopies.set(key, snapshot);
-    for (const oldest of retainedTaskCopies.keys()) {
-      if (retainedTaskCopies.size <= MAX_RETAINED_TASK_COPIES) break;
-      retainedTaskCopies.delete(oldest);
+  /**
+   * Remembers the parameters a Navigation view now wants and returns whether this session owns
+   * that view (so the request is answered here, not sent as-is).
+   */
+  async function updateNavigationView(params: NavigationViewParams) {
+    const replica = replicas.get(scopeKey({ kind: "taskNavigation", section: params.section }));
+    if (!replica?.navigation) return false;
+    replica.navigation.wanted = params;
+    await pushNavigationParams(replica);
+    return true;
+  }
+
+  /**
+   * Sends the wanted parameters when App Server holds others. One push runs at a time and
+   * re-reads the wanted parameters when it finishes, so a burst of changes costs few requests.
+   * A view that is not ready sends nothing: its next baseline carries the latest parameters.
+   */
+  async function pushNavigationParams(replica: ScopeReplica) {
+    const navigation = replica.navigation;
+    if (!navigation || navigation.pushing) return;
+    navigation.pushing = true;
+    const startedAt = Date.now();
+    let attempts = 0;
+    try {
+      while (
+        !closed
+        && replica.state
+        && !replica.refreshing
+        && JSON.stringify(navigation.sent) !== JSON.stringify(navigation.wanted)
+      ) {
+        const params = navigation.wanted;
+        attempts += 1;
+        await connection.request(NAVIGATION_UPDATE, params) satisfies NavigationUpdateResult;
+        navigation.sent = params;
+      }
+      if (attempts > 0) {
+        logger.info("app_server_navigation_update_completed", {
+          ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+          generation,
+          attempt: attempts,
+          duration_ms: Date.now() - startedAt,
+        });
+      }
+    } catch (error) {
+      logger.warn("app_server_navigation_update_failed", {
+        ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
+        generation,
+        attempt: attempts,
+        duration_ms: Date.now() - startedAt,
+        ...diagnosticErrorFields(error),
+      });
+      // The view's state on App Server is unknown now; a fresh baseline settles it.
+      if (!closed && replicas.get(scopeKey(replica.scope)) === replica) {
+        invalidateReplica(replica);
+        void refreshReplica(replica, generation);
+      }
+    } finally {
+      navigation.pushing = false;
     }
   }
 
-  function takeRetainedTaskCopy(key: string) {
-    const snapshot = retainedTaskCopies.get(key);
-    retainedTaskCopies.delete(key);
+  function retainCopy(key: string, replica: ScopeReplica) {
+    const snapshot = replica.state?.snapshot;
+    if (replica.refreshing || !isEntityReplica(snapshot)) return;
+    retainedCopies.delete(key);
+    retainedCopies.set(key, snapshot);
+    // Evict the least recently released copy of the same kind once its kind is over its limit.
+    let sameKind = 0;
+    for (const copy of retainedCopies.values()) if (copy.kind === snapshot.kind) sameKind += 1;
+    for (const [oldestKey, copy] of retainedCopies) {
+      if (sameKind <= MAX_RETAINED_COPIES[snapshot.kind]) break;
+      if (copy.kind !== snapshot.kind) continue;
+      retainedCopies.delete(oldestKey);
+      sameKind -= 1;
+    }
+  }
+
+  function takeRetainedCopy(key: string) {
+    const snapshot = retainedCopies.get(key);
+    retainedCopies.delete(key);
     return snapshot;
   }
 
@@ -495,6 +646,30 @@ export function createAppServerSession(
     }
     status = next;
     notifyListeners(statusListeners, next, logger, "session_status");
+  }
+}
+
+function isEntityReplica(snapshot: ReplicaSnapshot | undefined): snapshot is EntityReplicaSnapshot {
+  return snapshot?.kind === "task" || snapshot?.kind === "toolDetail" || snapshot?.kind === "subagentHistory";
+}
+
+/** How an entity reply brought the client's copy current; empty for other scopes. */
+function replySyncDiagnosticFields(snapshot: StateSubscribeResult["snapshot"]) {
+  switch (snapshot.kind) {
+    case "task":
+      return {
+        content_sync: snapshot.chatSync.kind,
+        missed_change_count: snapshot.chatSync.kind === "deltas" ? snapshot.chatSync.changes.length : 0,
+      };
+    case "toolDetail":
+      return {
+        content_sync: snapshot.terminalSync.kind,
+        missed_change_count: snapshot.terminalSync.kind === "deltas" ? snapshot.terminalSync.appends.length : 0,
+      };
+    case "subagentHistory":
+      return { content_sync: snapshot.chatSync.kind, missed_change_count: 0 };
+    default:
+      return {};
   }
 }
 
@@ -513,15 +688,8 @@ function diagnosticErrorFields(error: unknown) {
 
 function scopeKey(scope: SubscriptionScope) {
   switch (scope.kind) {
-    case "projects":
-    case "agents":
-    case "devices":
-    case "terminals":
-      return scope.kind;
-    case "settings":
-      return `settings:${scope.section ?? ""}`;
     case "taskNavigation":
-      return `taskNavigation:${scope.section}:${scope.projectIds?.join(",") ?? "*"}`;
+      return `taskNavigation:${scope.section}`;
     case "task":
       return `task:${scope.taskId}`;
     case "subagentCatalog":
@@ -530,8 +698,6 @@ function scopeKey(scope: SubscriptionScope) {
       return `subagentHistory:${scope.taskId}:${scope.subagentId}`;
     case "toolDetail":
       return `toolDetail:${scope.taskId}:${scope.artifactId}`;
-    case "worktreeRepository":
-      return `worktreeRepository:${scope.repositoryId}`;
   }
 }
 

@@ -8,7 +8,7 @@ use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion
 ///
 /// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
 /// `minor` for any change an older client cannot ignore.
-pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 4, minor: 2 };
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 5, minor: 0 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +84,19 @@ pub struct UpdateShutdownAbortParams {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateShutdownAbortResult {}
+
+/// Client notification (no reply): every secure-storage key id the client holds now, replacing
+/// the previous set. `secret/read` goes only to a connected client that declared the key
+/// (ADR-0086). Key ids are storage names such as `openaide.agent.<agent>.env.<name>`, never values.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientSecretKeysChangedParams {
+    pub key_ids: Vec<String>,
+    /// The client may also hold secrets it cannot list (stored before it kept a key index). The
+    /// App Server asks such a client only when no client declared the key.
+    #[serde(default)]
+    pub unknown_holder: bool,
+}
 
 /// Asks what replacing this App Server with another version would affect now. A client
 /// that installed a different version shows the answer before the user confirms the
@@ -283,7 +296,12 @@ pub enum ClientProtocolCapability {
     Resync,
     RequestResponses,
     StableClientRequestIds,
+    /// Read nowhere: Permission and Question requests reach clients as Task state only
+    /// (ADR-0086). Kept so clients that still send it deserialize.
+    // TODO(protocol-3): remove with the next major protocol version.
     PermissionResponses,
+    /// See `PermissionResponses`.
+    // TODO(protocol-3): remove with the next major protocol version.
     QuestionResponses,
 }
 

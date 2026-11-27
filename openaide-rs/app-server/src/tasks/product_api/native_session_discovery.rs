@@ -11,9 +11,6 @@ use crate::projects::ProjectIdentity;
 use super::session_cursor::OpaqueSessionCursor;
 use super::{protocol_error_from_runtime, TaskProductApi};
 
-/// Bounds passive refresh work while covering the largest initial per-Project window.
-const INITIAL_NATIVE_SESSION_ROW_TARGET: usize = 20;
-
 impl TaskProductApi {
     /// Discovers a bounded window for every known Project workspace and enabled Agent.
     ///
@@ -24,26 +21,32 @@ impl TaskProductApi {
     pub(super) fn refresh_native_session_project_trees(
         &self,
         project_filter: Option<&str>,
-        target_row_count: Option<usize>,
     ) -> Result<(), ProtocolError> {
         self.refresh_native_session_project_trees_with_id(
             project_filter,
-            target_row_count,
             &uuid::Uuid::new_v4().to_string(),
         )
     }
 
-    pub(super) fn refresh_native_session_project_trees_with_id(
+    /// Stands in for Tasks views showing every Project known to discovery.
+    #[cfg(test)]
+    pub(super) fn demand_every_project_for_test(&self, target: usize) {
+        let task_records = self.store.list_all_task_records_strict().unwrap();
+        let demand = self
+            .discovery_workspaces(&self.configured_projects.projects(), &task_records)
+            .into_iter()
+            .map(|(project_id, _)| (project_id, target))
+            .collect();
+        self.native_catalog.discovery().replace_demand(demand);
+    }
+
+    /// Every (Project, workspace) pair discovery may list: configured roots, their available
+    /// worktrees, and the workspaces of historical Tasks whose Project was not removed.
+    pub(super) fn discovery_workspaces(
         &self,
-        project_filter: Option<&str>,
-        target_row_count: Option<usize>,
-        refresh_id: &str,
-    ) -> Result<(), ProtocolError> {
-        let projects = self.configured_projects.projects();
-        let task_records = self
-            .store
-            .list_all_task_records_strict()
-            .map_err(protocol_error_from_runtime)?;
+        projects: &[crate::projects::ProjectTaskContext],
+        task_records: &[crate::storage::records::TaskRecord],
+    ) -> HashSet<(String, String)> {
         let mut project_workspaces = projects
             .iter()
             .map(|project| {
@@ -53,7 +56,7 @@ impl TaskProductApi {
                 )
             })
             .collect::<HashSet<_>>();
-        for project in &projects {
+        for project in projects {
             if let Ok(Some(repository)) = self
                 .worktrees
                 .refresh_project(Path::new(&project.workspace_root))
@@ -92,6 +95,20 @@ impl TaskProductApi {
                 task.workspace_root.clone(),
             ));
         }
+        project_workspaces
+    }
+
+    pub(super) fn refresh_native_session_project_trees_with_id(
+        &self,
+        project_filter: Option<&str>,
+        refresh_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let projects = self.configured_projects.projects();
+        let task_records = self
+            .store
+            .list_all_task_records_strict()
+            .map_err(protocol_error_from_runtime)?;
+        let project_workspaces = self.discovery_workspaces(&projects, &task_records);
         let mut selected_project_ids = projects
             .iter()
             .filter(|project| {
@@ -111,14 +128,17 @@ impl TaskProductApi {
             ));
         }
         let agents = self.agent_registry.summaries();
-        let target_row_count = target_row_count.unwrap_or(INITIAL_NATIVE_SESSION_ROW_TARGET);
+        // Discovery depth is the target the Tasks views publish; a Project no view shows is
+        // not listed at all.
         let selected_workspaces = project_workspaces
             .iter()
             .filter(|(project_id, _)| project_filter.is_none_or(|filter| project_id == filter))
+            .filter(|(project_id, _)| self.native_catalog.discovery().target(project_id).is_some())
             .cloned()
             .collect::<Vec<_>>();
         let mut outcomes = Vec::with_capacity(agents.len() * selected_workspaces.len());
         let mut first_error = None;
+        let mut failed_projects = HashSet::<String>::new();
         // Workspace-major, so consecutive contexts alternate Agents: workers that take
         // the next context rarely wait on an Agent already at its listing cap.
         let contexts = selected_workspaces
@@ -140,6 +160,7 @@ impl TaskProductApi {
                     scope.spawn(|| {
                         let mut agent_outcomes = Vec::with_capacity(selected_workspaces.len());
                         let mut agent_error = None;
+                        let mut failed_projects = Vec::new();
                         while let Some((agent_id, project_id, workspace_root)) = contexts
                             .get(next_context.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
                         {
@@ -147,17 +168,21 @@ impl TaskProductApi {
                                 agent_id,
                                 project_id,
                                 workspace_root,
-                                target_row_count,
+                                self.native_catalog
+                                    .discovery()
+                                    .target(project_id)
+                                    .unwrap_or_default(),
                                 &task_records,
                                 refresh_id,
                             ) {
                                 Ok(outcome) => agent_outcomes.push(outcome),
                                 Err(error) => {
+                                    failed_projects.push(project_id);
                                     agent_error.get_or_insert(error);
                                 }
                             }
                         }
-                        (agent_outcomes, agent_error)
+                        (agent_outcomes, agent_error, failed_projects)
                     })
                 })
                 .collect::<Vec<_>>();
@@ -168,8 +193,9 @@ impl TaskProductApi {
         });
         for result in agent_results {
             match result {
-                Ok((agent_outcomes, agent_error)) => {
+                Ok((agent_outcomes, agent_error, failed)) => {
                     outcomes.extend(agent_outcomes);
+                    failed_projects.extend(failed.into_iter().map(|id| id.to_string()));
                     if let Some(error) = agent_error {
                         first_error.get_or_insert(error);
                     }
@@ -179,6 +205,18 @@ impl TaskProductApi {
                         super::internal_error("Native Session refresh worker panicked")
                     });
                 }
+            }
+        }
+        // Failure is per Project, so one broken workspace does not mark every group failed.
+        for project_id in &selected_project_ids {
+            let failed = failed_projects.contains(project_id);
+            if self
+                .native_catalog
+                .discovery()
+                .set_failed(project_id, failed)
+            {
+                self.task_notifier
+                    .navigation_project_changed(project_id.clone());
             }
         }
         if let Some(error) = first_error {
@@ -205,10 +243,11 @@ impl TaskProductApi {
             let has_more = projects_with_more.contains(&project_id);
             if self
                 .native_catalog
-                .set_project_has_more(&project_id, has_more)
+                .discovery()
+                .set_undiscovered(&project_id, has_more)
             {
                 self.task_notifier
-                    .navigation_project_entries_changed(project_id.clone());
+                    .navigation_project_changed(project_id.clone());
             }
             crate::logging::info(
                 "native_session_project_tree_refreshed",
@@ -377,10 +416,6 @@ impl TaskProductApi {
             crate::logging::warn("native_session_context_refresh_failed", fields);
         }
         outcome
-    }
-
-    pub(super) fn initial_native_session_row_target() -> usize {
-        INITIAL_NATIVE_SESSION_ROW_TARGET
     }
 }
 

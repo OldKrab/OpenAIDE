@@ -193,6 +193,7 @@ export function createDesktopShell(
     if (message.type === "secret.transaction.apply"
       || message.type === "secret.transaction.commit"
       || message.type === "secret.transaction.rollback"
+      || message.type === "secret.keys.request"
       || message.type === "appServer.serverRequest") {
       void handleSecretMessage(message).then((result) => {
         if (!result) return;

@@ -142,11 +142,6 @@ impl TaskProductApi {
                 .has_pending_for_task(&TaskId::from(task.task_id.clone()))
             {
                 Some(TaskArchiveOlderProtectedReason::PendingRequest)
-            } else if self
-                .task_subscription_presence
-                .has_subscribers(&task.task_id)
-            {
-                Some(TaskArchiveOlderProtectedReason::OpenElsewhere)
             } else {
                 None
             };

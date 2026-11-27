@@ -6,7 +6,6 @@ use openaide_app_server_protocol::devices::{
 };
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::ProtocolError;
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::methods::{
     DEVICES_RELAY_ADD_PERSON, DEVICES_RELAY_PEOPLE, DEVICES_RELAY_REVOKE_PERSON, DEVICES_SET_RELAY,
 };
@@ -16,8 +15,9 @@ use serde_json::Value;
 use crate::remote_devices::RemoteDevicesWorkflow;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::global_state::GlobalAreas;
 
-use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
+use super::{responses, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
     pub(super) fn handle_devices_create_invite(
@@ -35,8 +35,8 @@ impl RpcGateway {
         match self.remote_devices.create_invite(added_by, now.0) {
             Ok(result) => {
                 crate::logging::info("remote_device_invite_created", serde_json::json!({}));
-                let events = self.publish_device_collection_update(now);
-                self.result_with_events(connection_id, id, meta, result, events)
+                self.publish_global_state(GlobalAreas::DEVICES);
+                self.result(connection_id, id, meta, result)
             }
             Err(error) => self.error(connection_id, id, meta, error),
         }
@@ -48,20 +48,13 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         if let Err(error) = serde_json::from_value::<DevicesCancelInviteParams>(params) {
             return self.error(connection_id, id, meta, responses::invalid_params(error));
         }
         self.remote_devices.cancel_invite();
-        let events = self.publish_device_collection_update(now);
-        self.result_with_events(
-            connection_id,
-            id,
-            meta,
-            DevicesCancelInviteResult {},
-            events,
-        )
+        self.publish_global_state(GlobalAreas::DEVICES);
+        self.result(connection_id, id, meta, DevicesCancelInviteResult {})
     }
 
     pub(super) fn handle_devices_remove(
@@ -70,7 +63,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<DevicesRemoveParams>(params) {
             Ok(params) => params,
@@ -86,8 +78,8 @@ impl RpcGateway {
                     "remote_device_removed",
                     serde_json::json!({ "device": device }),
                 );
-                let events = self.publish_device_collection_update(now);
-                self.result_with_events(connection_id, id, meta, DevicesRemoveResult {}, events)
+                self.publish_global_state(GlobalAreas::DEVICES);
+                self.result(connection_id, id, meta, DevicesRemoveResult {})
             }
             Err(error) => self.error(connection_id, id, meta, error),
         }
@@ -103,10 +95,9 @@ impl RpcGateway {
         method: &str,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let answer = relay_request(self.remote_devices.as_ref(), method, params);
-        self.relay_answer(connection_id, id, method, meta, answer, now)
+        self.relay_answer(connection_id, id, method, meta, answer)
     }
 
     /// Answers an Own Relay call. A relay change moves every client's device list.
@@ -117,46 +108,21 @@ impl RpcGateway {
         method: &str,
         meta: RequestMeta,
         answer: Result<Value, ProtocolError>,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         match answer {
             Ok(result) => {
-                let events = if method == DEVICES_SET_RELAY {
-                    self.publish_device_collection_update(now)
-                } else {
-                    Vec::new()
-                };
-                self.result_with_events(connection_id, id, meta, result, events)
+                if method == DEVICES_SET_RELAY {
+                    self.publish_global_state(GlobalAreas::DEVICES);
+                }
+                self.result(connection_id, id, meta, result)
             }
             Err(error) => self.error(connection_id, id, meta, error),
         }
     }
 
     /// Republishes after a change the network edge made, such as a device connecting.
-    pub(crate) fn publish_background_device_collection_update(
-        &mut self,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let events = self.publish_device_collection_update(now);
-        // Links drain background publications on their next wake.
-        self.pending_event_deliveries.extend(events.clone());
-        events
-    }
-
-    fn publish_device_collection_update(
-        &mut self,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let devices = self.remote_devices.snapshot();
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::StateRoot {
-                state_root_id: self.state_stream.state_root_id().clone(),
-            },
-            AppServerEventPayload::DeviceCollectionUpdated { devices },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ))
+    pub(crate) fn publish_background_device_collection_update(&mut self) {
+        self.publish_global_state(GlobalAreas::DEVICES);
     }
 
     /// Names the client that pairs a device: a Remote Device by its own name, a

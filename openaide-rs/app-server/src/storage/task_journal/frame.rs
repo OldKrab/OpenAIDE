@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::protocol::errors::RuntimeError;
 
-const MAGIC: &[u8; 8] = b"OAIDETJ\0";
+pub(super) const MAGIC: &[u8; 8] = b"OAIDETJ\0";
 pub(super) const FORMAT_VERSION: u16 = 1;
 pub(crate) const FILE_HEADER_LEN: usize = MAGIC.len() + size_of::<u16>();
 const FRAME_LENGTH_LEN: usize = size_of::<u64>();
@@ -352,19 +352,29 @@ fn create_compacted_file<T: FramedRecord>(
 /// Replays complete verified frames. Only an incomplete final frame is removed;
 /// checksum, sequence, and payload failures remain visible to the caller.
 pub(crate) fn replay<T: FramedRecord>(path: &Path) -> Result<ReplayedFrames<T>, RuntimeError> {
-    replay_internal(path, true)
+    replay_internal(path, true, true)
+}
+
+/// Replays like `replay` but never modifies the file: an incomplete final
+/// frame is ignored instead of truncated. A reader that does not own the file
+/// uses this, so a migration cannot change bytes that stay authoritative.
+pub(super) fn replay_read_only<T: FramedRecord>(
+    path: &Path,
+) -> Result<ReplayedFrames<T>, RuntimeError> {
+    replay_internal(path, true, false)
 }
 
 /// Validates and indexes a journal without retaining decoded frame payloads.
 /// Startup artifact reconciliation must scale with frame count, not lifetime
 /// terminal-output bytes across the complete state root.
 pub(super) fn scan<T: FramedRecord>(path: &Path) -> Result<ReplayedFrames<T>, RuntimeError> {
-    replay_internal(path, false)
+    replay_internal(path, false, true)
 }
 
 fn replay_internal<T: FramedRecord>(
     path: &Path,
     retain_frames: bool,
+    repair_tail: bool,
 ) -> Result<ReplayedFrames<T>, RuntimeError> {
     let mut file = File::open(path).map_err(|error| io_error("replay_open", error))?;
     let file_len = file
@@ -383,51 +393,11 @@ fn replay_internal<T: FramedRecord>(
     validate_header(&header)?;
 
     let mut cursor = FILE_HEADER_LEN as u64;
-    let mut complete_len = cursor;
     let mut expected_sequence = 1_u64;
     let mut frames = Vec::new();
     let mut frame_ends = Vec::new();
 
-    while cursor < file_len {
-        let remaining = file_len - cursor;
-        if remaining < FRAME_LENGTH_LEN as u64 {
-            break;
-        }
-        let mut length_bytes = [0_u8; FRAME_LENGTH_LEN];
-        file.read_exact(&mut length_bytes)
-            .map_err(|error| io_error("replay_length", error))?;
-        let payload_len = u64::from_le_bytes(length_bytes);
-        let payload_len = usize::try_from(payload_len).map_err(|_| {
-            RuntimeError::Storage("Task journal frame length does not fit memory".to_string())
-        })?;
-        if payload_len > MAX_FRAME_BYTES {
-            return Err(RuntimeError::Storage(format!(
-                "Task journal frame exceeds {MAX_FRAME_BYTES} bytes"
-            )));
-        }
-        let frame_len = FRAME_LENGTH_LEN
-            .checked_add(payload_len)
-            .and_then(|value| value.checked_add(FRAME_CHECKSUM_LEN))
-            .ok_or_else(|| {
-                RuntimeError::Storage("Task journal frame length overflow".to_string())
-            })?;
-        if remaining < frame_len as u64 {
-            break;
-        }
-
-        let mut payload = vec![0_u8; payload_len];
-        file.read_exact(&mut payload)
-            .map_err(|error| io_error("replay_payload", error))?;
-        let mut checksum_bytes = [0_u8; FRAME_CHECKSUM_LEN];
-        file.read_exact(&mut checksum_bytes)
-            .map_err(|error| io_error("replay_checksum", error))?;
-        let expected_checksum = u32::from_le_bytes(checksum_bytes);
-        let actual_checksum = crc32(&payload);
-        if actual_checksum != expected_checksum {
-            return Err(RuntimeError::Storage(format!(
-                "Task journal checksum mismatch at sequence {expected_sequence}"
-            )));
-        }
+    while let Some(payload) = read_payload(&mut file, file_len - cursor, expected_sequence)? {
         let frame = T::decode(&payload)?;
         if frame.format_version() != FORMAT_VERSION {
             return Err(RuntimeError::Storage(format!(
@@ -446,29 +416,12 @@ fn replay_internal<T: FramedRecord>(
             frames.push(frame);
         }
         expected_sequence += 1;
-        cursor += frame_len as u64;
-        complete_len = cursor;
-        frame_ends.push(complete_len);
+        cursor += framed_len(payload.len());
+        frame_ends.push(cursor);
     }
 
-    let discarded_tail_bytes = file_len.saturating_sub(complete_len);
-    if discarded_tail_bytes > 0 {
-        let file = OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|error| io_error("tail_recovery_open", error))?;
-        file.set_len(complete_len)
-            .map_err(|error| io_error("tail_recovery_truncate", error))?;
-        file.sync_all()
-            .map_err(|error| io_error("tail_recovery_sync", error))?;
-        crate::logging::warn(
-            "task_journal_incomplete_tail_discarded",
-            serde_json::json!({
-                "stage": "replay_tail_recovery",
-                "storage_kind": "framed_journal",
-                "discarded_bytes": discarded_tail_bytes,
-            }),
-        );
+    if repair_tail {
+        discard_incomplete_tail(path, cursor, file_len)?;
     }
 
     let frame_count = frame_ends.len();
@@ -477,6 +430,101 @@ fn replay_internal<T: FramedRecord>(
         frame_ends,
         frame_count,
     })
+}
+
+/// Bytes one payload occupies on disk, length prefix and checksum included.
+pub(super) fn framed_len(payload_len: usize) -> u64 {
+    (FRAME_LENGTH_LEN + payload_len + FRAME_CHECKSUM_LEN) as u64
+}
+
+/// Reads the next complete frame's payload at the file's current position and
+/// verifies its checksum. `remaining` is the number of unread file bytes.
+/// Returns `None` at the end of the complete frames: either nothing is left or
+/// the final frame is incomplete. `sequence` only labels a checksum error.
+pub(super) fn read_payload(
+    file: &mut File,
+    remaining: u64,
+    sequence: u64,
+) -> Result<Option<Vec<u8>>, RuntimeError> {
+    let Some(payload_len) = peek_payload_len(file, remaining)? else {
+        return Ok(None);
+    };
+    let mut payload = vec![0_u8; payload_len];
+    file.read_exact(&mut payload)
+        .map_err(|error| io_error("replay_payload", error))?;
+    let mut checksum_bytes = [0_u8; FRAME_CHECKSUM_LEN];
+    file.read_exact(&mut checksum_bytes)
+        .map_err(|error| io_error("replay_checksum", error))?;
+    if crc32(&payload) != u32::from_le_bytes(checksum_bytes) {
+        return Err(RuntimeError::Storage(format!(
+            "Task journal checksum mismatch at sequence {sequence}"
+        )));
+    }
+    Ok(Some(payload))
+}
+
+/// Moves past the next complete frame without reading or verifying its
+/// payload, and returns the bytes it occupies. `None` when it is incomplete.
+pub(super) fn skip_frame(file: &mut File, remaining: u64) -> Result<Option<u64>, RuntimeError> {
+    let Some(payload_len) = peek_payload_len(file, remaining)? else {
+        return Ok(None);
+    };
+    let tail = (payload_len + FRAME_CHECKSUM_LEN) as i64;
+    file.seek(SeekFrom::Current(tail))
+        .map_err(|error| io_error("replay_skip", error))?;
+    Ok(Some(framed_len(payload_len)))
+}
+
+/// Reads a frame's length prefix, leaving the position just after it. `None`
+/// when fewer bytes than the whole frame remain.
+fn peek_payload_len(file: &mut File, remaining: u64) -> Result<Option<usize>, RuntimeError> {
+    if remaining < FRAME_LENGTH_LEN as u64 {
+        return Ok(None);
+    }
+    let mut length_bytes = [0_u8; FRAME_LENGTH_LEN];
+    file.read_exact(&mut length_bytes)
+        .map_err(|error| io_error("replay_length", error))?;
+    let payload_len = usize::try_from(u64::from_le_bytes(length_bytes)).map_err(|_| {
+        RuntimeError::Storage("Task journal frame length does not fit memory".to_string())
+    })?;
+    if payload_len > MAX_FRAME_BYTES {
+        return Err(RuntimeError::Storage(format!(
+            "Task journal frame exceeds {MAX_FRAME_BYTES} bytes"
+        )));
+    }
+    if remaining < framed_len(payload_len) {
+        return Ok(None);
+    }
+    Ok(Some(payload_len))
+}
+
+/// Truncates bytes after the last complete frame, which a crash left behind.
+pub(super) fn discard_incomplete_tail(
+    path: &Path,
+    complete_len: u64,
+    file_len: u64,
+) -> Result<(), RuntimeError> {
+    let discarded_tail_bytes = file_len.saturating_sub(complete_len);
+    if discarded_tail_bytes == 0 {
+        return Ok(());
+    }
+    let file = OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|error| io_error("tail_recovery_open", error))?;
+    file.set_len(complete_len)
+        .map_err(|error| io_error("tail_recovery_truncate", error))?;
+    file.sync_all()
+        .map_err(|error| io_error("tail_recovery_sync", error))?;
+    crate::logging::warn(
+        "task_journal_incomplete_tail_discarded",
+        serde_json::json!({
+            "stage": "replay_tail_recovery",
+            "storage_kind": "framed_journal",
+            "discarded_bytes": discarded_tail_bytes,
+        }),
+    );
+    Ok(())
 }
 
 /// Removes complete but uncommitted frames, retaining the shared file header.
@@ -605,7 +653,7 @@ fn validate_header(bytes: &[u8]) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn write_frame<T: FramedRecord>(
+pub(super) fn write_frame<T: Serialize>(
     file: &mut File,
     frame: &T,
     kind: JournalKind,
@@ -630,7 +678,7 @@ fn write_frame<T: FramedRecord>(
 }
 
 #[cfg(unix)]
-fn sync_directory(
+pub(super) fn sync_directory(
     path: &Path,
     kind: JournalKind,
     point: FaultPoint,
@@ -646,7 +694,7 @@ fn sync_directory(
 }
 
 #[cfg(windows)]
-fn sync_directory(
+pub(super) fn sync_directory(
     _path: &Path,
     kind: JournalKind,
     point: FaultPoint,
@@ -661,7 +709,7 @@ fn sync_directory(
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn sync_directory(
+pub(super) fn sync_directory(
     _path: &Path,
     kind: JournalKind,
     point: FaultPoint,
@@ -674,12 +722,12 @@ fn sync_directory(
 }
 
 #[cfg(unix)]
-fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
+pub(super) fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
     fs::rename(temporary, path).map_err(|error| io_error("compact_replace", error))
 }
 
 #[cfg(windows)]
-fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
+pub(super) fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::Storage::FileSystem::{
@@ -713,13 +761,13 @@ fn durable_replace(temporary: &Path, path: &Path) -> Result<(), RuntimeError> {
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn durable_replace(_temporary: &Path, _path: &Path) -> Result<(), RuntimeError> {
+pub(super) fn durable_replace(_temporary: &Path, _path: &Path) -> Result<(), RuntimeError> {
     Err(RuntimeError::Storage(
         "Task journal compact_replace failed (kind=unsupported_platform)".to_string(),
     ))
 }
 
-fn io_error(stage: &'static str, error: io::Error) -> RuntimeError {
+pub(super) fn io_error(stage: &'static str, error: io::Error) -> RuntimeError {
     RuntimeError::Storage(format!(
         "Task journal {stage} failed (kind={})",
         io_error_kind(error.kind())
@@ -742,7 +790,7 @@ fn io_error_kind(kind: io::ErrorKind) -> &'static str {
     }
 }
 
-fn json_error(stage: &'static str, error: serde_json::Error) -> RuntimeError {
+pub(super) fn json_error(stage: &'static str, error: serde_json::Error) -> RuntimeError {
     let kind = match error.classify() {
         serde_json::error::Category::Io => "io",
         serde_json::error::Category::Syntax => "syntax",
@@ -752,7 +800,7 @@ fn json_error(stage: &'static str, error: serde_json::Error) -> RuntimeError {
     RuntimeError::Storage(format!("Task journal {stage} failed (kind={kind})"))
 }
 
-fn crc32(bytes: &[u8]) -> u32 {
+pub(super) fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = u32::MAX;
     for byte in bytes {
         crc ^= u32::from(*byte);

@@ -5,8 +5,6 @@ use ts_rs::TS;
 
 use crate::ids::{ClientInstanceId, RequestId};
 
-pub const PERMISSION_REQUEST: &str = "permission/request";
-pub const QUESTION_REQUEST: &str = "question/request";
 pub const SECRET_READ: &str = "secret/read";
 pub const SHELL_AUTH_TERMINAL: &str = "shell/authTerminal";
 pub const SHELL_OPEN_EXTERNAL: &str = "shell/openExternal";
@@ -75,12 +73,6 @@ pub enum PermissionRequestOptionKind {
     AllowAlways,
     RejectOnce,
     RejectAlways,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionRequestResponse {
-    pub option_id: String,
 }
 
 /// A normalized form question. App shells never receive the unstable ACP schema directly.

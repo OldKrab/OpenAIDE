@@ -1582,6 +1582,16 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     )
     .unwrap();
 
+    // The client holds the key; it never subscribes to the Task.
+    let delivery = Delivery {
+        client_instance_id: ClientInstanceId::from("client-1"),
+        connection_id: ConnectionId::new("connection-1"),
+    };
+    server_requests.observe_responder_available(delivery.clone(), AppServerTime::now());
+    server_requests.declare_secret_keys(
+        delivery.client_instance_id.clone(),
+        vec!["openaide.agent.custom.agent.env.TOKEN".to_string()],
+    );
     let created = api
         .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
@@ -1589,27 +1599,16 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
             workspace_root: None,
         })
         .unwrap();
+    let pending = crate::test_sync::wait_for("the routed secret request", || {
+        server_requests
+            .pending_for_client(&delivery.client_instance_id)
+            .into_iter()
+            .next()
+    });
     let task_id = created.task.task_id.clone();
-    wait_until(|| !server_requests.pending_for_task(&task_id).is_empty());
-    let delivery = Delivery {
-        client_instance_id: ClientInstanceId::from("client-1"),
-        connection_id: ConnectionId::new("connection-1"),
-        request_capabilities: vec![crate::client_lifecycle::RequestCapability::Permission],
-    };
-    let deliveries = server_requests.observe_subscription_added(
-        delivery.clone(),
-        task_id.clone(),
-        AppServerTime::now(),
-    );
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.method, "secret/read");
-    assert_eq!(
-        deliveries[0].envelope.params["key"],
-        "openaide.agent.custom.agent.env.TOKEN"
-    );
     server_requests.handle_response(
         delivery.client_instance_id,
-        deliveries[0].envelope.request_id.clone(),
+        pending.request_id.clone(),
         ServerRequestAnswer::Result(serde_json::json!({ "value": "resolved-secret" })),
         AppServerTime::now(),
     );
@@ -3341,7 +3340,7 @@ fn targeted_native_catalog_refresh_discovers_sessions_for_a_newly_added_project(
         .add_project(&workspace_root.to_string_lossy())
         .unwrap();
 
-    api.request_native_session_catalog_load_more(project.project_id.as_str(), 20);
+    request_discovery(&api, project.project_id.as_str(), 20);
 
     wait_until(|| {
         api.native_session_catalog().entries().iter().any(|entry| {
@@ -3449,14 +3448,14 @@ fn targeted_native_catalog_refresh_assigns_sessions_to_the_most_specific_project
         .add_project(&child_root.to_string_lossy())
         .unwrap();
 
-    api.request_native_session_catalog_load_more(parent.project_id.as_str(), 20);
+    request_discovery(&api, parent.project_id.as_str(), 20);
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 1);
     assert!(api
         .native_session_catalog()
         .project(parent.project_id.as_str())
         .is_empty());
 
-    api.request_native_session_catalog_load_more(child.project_id.as_str(), 20);
+    request_discovery(&api, child.project_id.as_str(), 20);
     wait_until(|| {
         api.native_session_catalog()
             .project(child.project_id.as_str())
@@ -3466,7 +3465,7 @@ fn targeted_native_catalog_refresh_assigns_sessions_to_the_most_specific_project
 }
 
 #[test]
-fn load_more_continues_past_a_page_containing_only_archived_sessions() {
+fn deepening_continues_past_a_page_containing_only_archived_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut archived_task = task_record("task-archived", "/tmp/openaide-unit-workspace/app");
@@ -3499,7 +3498,7 @@ fn load_more_continues_past_a_page_containing_only_archived_sessions() {
         api.native_session_catalog().archive(&reference).unwrap();
     }
 
-    api.request_native_session_catalog_load_more(project_id.as_str(), 1);
+    request_discovery(&api, project_id.as_str(), 1);
     wait_until(|| {
         agent
             .requested_cursors()
@@ -3546,12 +3545,9 @@ fn project_load_stops_after_the_requested_navigation_window() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_load_more(project.project_id.as_str(), 7);
+    request_discovery(&api, project.project_id.as_str(), 7);
 
-    wait_until(|| {
-        !api.native_session_catalog()
-            .project_refreshing(project.project_id.as_str())
-    });
+    wait_until(|| !project_is_loading(&api, project.project_id.as_str()));
     for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert_eq!(
             agent.requested_cursors_for(agent_id),
@@ -3564,13 +3560,16 @@ fn project_load_stops_after_the_requested_navigation_window() {
             .len(),
         10 * BUILT_IN_AGENT_METADATA.len()
     );
-    assert!(api
-        .native_session_catalog()
-        .project_has_more(project.project_id.as_str()));
+    assert!(
+        api.native_session_catalog()
+            .discovery()
+            .project(project.project_id.as_str())
+            .undiscovered
+    );
 }
 
 #[test]
-fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
+fn navigation_refresh_is_bounded_and_a_deeper_target_advances_agent_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let workspace_root = temp.path().join("bounded-navigation-project");
@@ -3602,8 +3601,11 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
     )
     .unwrap();
 
+    api.native_session_catalog()
+        .discovery()
+        .replace_demand([(project.project_id.as_str().to_string(), 20)].into());
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
-    wait_until(|| !api.native_session_catalog().refreshing());
+    wait_until(|| !api.native_catalog_refresh.is_running());
 
     for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert_eq!(
@@ -3616,15 +3618,15 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
             ]
         );
     }
-    assert!(api
-        .native_session_catalog()
-        .project_has_more(project.project_id.as_str()));
+    assert!(
+        api.native_session_catalog()
+            .discovery()
+            .project(project.project_id.as_str())
+            .undiscovered
+    );
 
-    api.request_native_session_catalog_load_more(project.project_id.as_str(), 30);
-    wait_until(|| {
-        !api.native_session_catalog()
-            .project_refreshing(project.project_id.as_str())
-    });
+    request_discovery(&api, project.project_id.as_str(), 30);
+    wait_until(|| !project_is_loading(&api, project.project_id.as_str()));
 
     for agent_id in BUILT_IN_AGENT_METADATA.map(|agent| agent.id) {
         assert!(agent
@@ -3635,7 +3637,7 @@ fn navigation_refresh_is_bounded_and_load_more_advances_agent_history() {
 }
 
 #[test]
-fn exhausted_project_load_more_does_not_restart_agent_history() {
+fn exhausted_project_deepening_does_not_restart_agent_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().join("state")).unwrap();
     let workspace_root = temp.path().join("exhausted-project");
@@ -3667,21 +3669,18 @@ fn exhausted_project_load_more_does_not_restart_agent_history() {
     )
     .unwrap();
 
-    api.request_native_session_catalog_load_more(project.project_id.as_str(), 100);
-    wait_until(|| {
-        !api.native_session_catalog()
-            .project_refreshing(project.project_id.as_str())
-    });
+    request_discovery(&api, project.project_id.as_str(), 100);
+    wait_until(|| !project_is_loading(&api, project.project_id.as_str()));
     let calls_after_exhaustion = agent.requested_cursors().len();
-    assert!(!api
-        .native_session_catalog()
-        .project_has_more(project.project_id.as_str()));
-
-    api.request_native_session_catalog_load_more(project.project_id.as_str(), 110);
-    wait_until(|| {
+    assert!(
         !api.native_session_catalog()
-            .project_refreshing(project.project_id.as_str())
-    });
+            .discovery()
+            .project(project.project_id.as_str())
+            .undiscovered
+    );
+
+    request_discovery(&api, project.project_id.as_str(), 110);
+    wait_until(|| !project_is_loading(&api, project.project_id.as_str()));
 
     assert_eq!(agent.requested_cursors().len(), calls_after_exhaustion);
 }
@@ -3743,6 +3742,7 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     )
     .unwrap();
 
+    api.demand_every_project_for_test(20);
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     // Entry is synchronized by the counter; independent contexts may all enter
     // before this thread wakes, while block_list holds their responses.
@@ -3750,7 +3750,7 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     agent.block_list.store(false, Ordering::SeqCst);
 
-    wait_until(|| !api.native_session_catalog().refreshing());
+    wait_until(|| !api.native_catalog_refresh.is_running());
     assert_eq!(
         agent.list_calls.load(Ordering::SeqCst),
         2 * BUILT_IN_AGENT_METADATA.len()
@@ -3773,7 +3773,7 @@ fn background_native_session_refresh_logs_completion() {
     .unwrap();
 
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
-    wait_until(|| !api.native_session_catalog().refreshing());
+    wait_until(|| !api.native_catalog_refresh.is_running());
 
     assert!(diagnostic_logs
         .snapshot()
@@ -4353,7 +4353,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         notifier,
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4367,10 +4366,6 @@ fn catalog_refresh_marks_newer_history_for_explicit_reload() {
         client_mutation_id: "mutation-before-session-refresh".into(),
     })
     .unwrap();
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
     while updates.try_recv().is_ok() {}
     *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
         session_id: "native-session".to_string(),
@@ -4449,17 +4444,12 @@ fn catalog_refresh_defers_session_replacement_when_an_option_change_started_firs
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
 
     let config_api = api.clone();
     let config_thread = std::thread::spawn(move || {
@@ -4542,7 +4532,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
         notifier,
     )
     .unwrap();
-    let task_subscription_presence = api.task_subscription_presence();
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
@@ -4550,10 +4539,6 @@ fn catalog_refresh_does_not_block_a_later_option_change() {
     .unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
     wait_until(|| !api.history_sync.has_in_flight_generation("task-existing"));
-    task_subscription_presence.subscribe_for_test(
-        ClientInstanceId::from("client-open-task"),
-        TaskId::from("task-existing"),
-    );
     while updates.try_recv().is_ok() {}
     *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
         session_id: "native-session".to_string(),
@@ -4900,7 +4885,7 @@ fn failed_native_session_listing_is_not_cached() {
 }
 
 #[test]
-fn background_native_session_failure_is_published_as_failed_refresh_state() {
+fn background_native_session_failure_marks_the_project_discovery_failed() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -4923,30 +4908,35 @@ fn background_native_session_failure_is_published_as_failed_refresh_state() {
     )
     .unwrap();
 
+    let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
+    api.native_session_catalog()
+        .discovery()
+        .replace_demand([(project_id.as_str().to_string(), 20)].into());
+
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
 
+    // Discovery only marks the Project dirty; the Navigation owner publishes the state.
     assert!(matches!(
         updates
             .recv_timeout(crate::test_sync::WATCHDOG)
             .unwrap()
             .kind,
-        TaskUpdateKind::NavigationRefreshStateChanged {
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
-        }
+        TaskUpdateKind::NavigationDirty
     ));
-    assert!(matches!(
-        updates
-            .recv_timeout(crate::test_sync::WATCHDOG)
-            .unwrap()
-            .kind,
-        TaskUpdateKind::NavigationRefreshStateChanged {
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
-        }
-    ));
-    assert!(matches!(
-        api.native_session_catalog().refresh_state(),
-        openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
-    ));
+    wait_until(|| {
+        !api.native_catalog_refresh.is_running()
+            && api
+                .native_session_catalog()
+                .discovery()
+                .project(project_id.as_str())
+                .failed
+    });
+    assert!(
+        !api.native_session_catalog()
+            .discovery()
+            .project(project_id.as_str())
+            .loading
+    );
 }
 
 #[test]
@@ -9622,7 +9612,7 @@ fn corrupt_chat_snapshot(state_root: &std::path::Path, task_id: &str) {
     let path = state_root
         .join("task-store-v1/tasks")
         .join(task_id)
-        .join("chat.snapshot");
+        .join("chat.log");
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -10705,6 +10695,21 @@ impl AgentRuntime for ConfigMutatingStartAgent {
     ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
+}
+
+/// Publishes what a Tasks view's history limit would, then asks discovery to reach it.
+fn request_discovery(api: &TaskProductApi, project_id: &str, target: usize) {
+    api.native_session_catalog()
+        .discovery()
+        .replace_demand([(project_id.to_string(), target)].into());
+    api.request_native_session_discovery_deepening(project_id);
+}
+
+fn project_is_loading(api: &TaskProductApi, project_id: &str) -> bool {
+    api.native_session_catalog()
+        .discovery()
+        .project(project_id)
+        .loading
 }
 
 fn wait_until(condition: impl Fn() -> bool) {

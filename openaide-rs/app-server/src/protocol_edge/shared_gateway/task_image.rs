@@ -5,8 +5,8 @@ use openaide_app_server_protocol::task::TaskImageResult;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 
-use super::super::{GatewayOutcome, InboundProtocolMessage};
-use super::SharedRpcGateway;
+use super::super::InboundProtocolMessage;
+use super::{Handled, SharedRpcGateway};
 
 impl SharedRpcGateway {
     /// Checks access and reads the stored bytes under the lock, makes the preview
@@ -18,7 +18,7 @@ impl SharedRpcGateway {
         message: InboundProtocolMessage,
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
+    ) -> Handled<'_> {
         let prepared = {
             let mut gateway = self.lock();
             // Keep routing's initialization/shutdown rejection and lease activity semantics.
@@ -28,7 +28,8 @@ impl SharedRpcGateway {
                     .context_for_connection(&connection_id)
                     .is_none()
             {
-                return gateway.handle_inbound(connection_id, message, now);
+                let outcome = gateway.handle_inbound(connection_id, message, now);
+                return (gateway, outcome);
             }
             if let Some(client) = gateway
                 .client_hub
@@ -44,7 +45,7 @@ impl SharedRpcGateway {
             };
             match gateway.prepare_task_image(&connection_id, id, params.clone(), meta) {
                 Ok(prepared) => prepared,
-                Err(outcome) => return *outcome,
+                Err(outcome) => return (gateway, *outcome),
             }
         };
         let InboundProtocolMessage::ClientRequest {
@@ -62,16 +63,18 @@ impl SharedRpcGateway {
             .context_for_connection(&connection_id)
             .is_some_and(|client| client.client_instance_id == owner)
         {
-            return gateway.error(
+            let outcome = gateway.error(
                 connection_id,
                 id,
                 meta,
                 super::super::responses::not_initialized(method),
             );
+            return (gateway, outcome);
         }
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
-        gateway.result::<TaskImageResult>(connection_id, id, meta, result)
+        let outcome = gateway.result::<TaskImageResult>(connection_id, id, meta, result);
+        (gateway, outcome)
     }
 }

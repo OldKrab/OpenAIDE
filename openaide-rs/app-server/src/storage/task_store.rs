@@ -26,6 +26,7 @@ impl Store {
                     ..MessageMeta::default()
                 },
                 artifact_heads: Default::default(),
+                chat_version: 0,
             }),
             Err(error) => return Err(error),
         };

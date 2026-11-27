@@ -1,6 +1,9 @@
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
+use crate::storage::task_journal::TerminalOutputAppend;
+
+use crate::storage::task_journal::chat_log::{self, ChatChangesSince};
 
 use super::{
     artifact, recovery, RecoveredTask, TaskJournalStore, TaskProjection, ToolArtifactProjection,
@@ -36,6 +39,73 @@ impl TaskJournalStore {
             .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
     }
 
+    /// The Task's Chat version: the number of the last committed `chat.log`
+    /// frame. It is durable and never restarts, so it survives restarts,
+    /// compaction and replacement. The store keeps it in the projection, so it
+    /// is the version of exactly the Chat that projection holds.
+    #[cfg(test)]
+    pub(crate) fn chat_version(&self, task_id: &str) -> Result<u64, RuntimeError> {
+        self.inspect_projection(task_id, |projection| projection.chat_version)
+    }
+
+    /// What changed in the Chat after `known` up to `through`: nothing
+    /// (`Current`), the committed frames' operations (`Deltas`), or a reason
+    /// the client must take the whole Chat instead: its version predates the
+    /// log's snapshot or a replacement (`TooOld`), or is newer than anything
+    /// committed (`Ahead`). `through` is the Chat version of a projection the
+    /// caller already read, so the answer describes that state even when a
+    /// later commit has landed. Reads the log without touching it, so it may
+    /// run beside the storage worker.
+    pub(crate) fn chat_changes_since(
+        &self,
+        task_id: &str,
+        known: u64,
+        through: u64,
+    ) -> Result<ChatChangesSince, RuntimeError> {
+        let task_dir = self.committed_task_dir(task_id)?;
+        chat_log::changes_since(&task_dir, known, through).inspect_err(|error| {
+            crate::logging::warn(
+                "chat_log_read_failed",
+                serde_json::json!({
+                    "operation": "chat_changes_since",
+                    "task_id": task_id,
+                    "known_version": known,
+                    "chat_version": through,
+                    "error_kind": error.reason(),
+                }),
+            );
+        })
+    }
+
+    /// The directory of a Task whose Chat is hydrated, which also converts an
+    /// older layout, so readers see only `chat.log`.
+    fn committed_task_dir(&self, task_id: &str) -> Result<std::path::PathBuf, RuntimeError> {
+        validate_task_id(task_id)?;
+        recovery::ensure_task_loaded(
+            &self.inner.tasks_root,
+            &self.inner.catalog,
+            &self.inner.epoch_task_overlays,
+            &self.inner.projections,
+            &self.inner.projection_load_lock,
+            &self.inner.subagents,
+            task_id,
+        )?;
+        match self
+            .inner
+            .projections
+            .read()
+            .expect("Task journal projections poisoned")
+            .get(task_id)
+        {
+            Some(RecoveredTask::Available { .. }) => {}
+            Some(RecoveredTask::Unavailable { error }) => {
+                return Err(RuntimeError::Storage(error.clone()))
+            }
+            None => return Err(RuntimeError::TaskNotFound(task_id.to_string())),
+        }
+        Ok(self.inner.tasks_root.join(task_id))
+    }
+
     /// Whether this process has hydrated the Task's Chat. Listing Tasks at
     /// startup reads only their metadata.
     pub(crate) fn is_loaded(&self, task_id: &str) -> bool {
@@ -59,7 +129,7 @@ impl TaskJournalStore {
     /// Reads a committed projection in place. Chat history makes a clone expensive on a long
     /// Task, and these reads can run once per Tool row of a Chat page. The callback runs under a
     /// read lock and must not call back into storage.
-    fn inspect_projection<T>(
+    pub(crate) fn inspect_projection<T>(
         &self,
         task_id: &str,
         inspect: impl FnOnce(&TaskProjection) -> T,
@@ -124,6 +194,19 @@ impl TaskJournalStore {
         task_id: &str,
         artifact_id: &str,
     ) -> Result<ToolArtifactProjection, RuntimeError> {
+        self.load_tool_artifact_since(task_id, artifact_id, None)
+            .map(|(artifact, _)| artifact)
+    }
+
+    /// Loads Tool detail and, for a `known_sequence` below its head, the terminal output
+    /// appended after it, in order. The appends are read with the artifact, so they describe
+    /// exactly the head the projection reports.
+    pub fn load_tool_artifact_since(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+        known_sequence: Option<u64>,
+    ) -> Result<(ToolArtifactProjection, Vec<TerminalOutputAppend>), RuntimeError> {
         validate_task_id(task_id)?;
         artifact::validate_artifact_id(artifact_id)?;
         let committed_head = self
@@ -148,9 +231,14 @@ impl TaskJournalStore {
             )?;
             entry.insert(reconciled);
         }
-        let mut artifact =
-            artifact::load(&self.inner.tasks_root, task_id, artifact_id, committed_head)?;
+        let (mut artifact, appends) = artifact::load(
+            &self.inner.tasks_root,
+            task_id,
+            artifact_id,
+            committed_head,
+            known_sequence.unwrap_or(committed_head),
+        )?;
         artifact.revision = committed_head;
-        Ok(artifact)
+        Ok((artifact, appends))
     }
 }

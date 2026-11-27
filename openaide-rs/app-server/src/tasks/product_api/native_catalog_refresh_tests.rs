@@ -8,8 +8,17 @@ use crate::protocol::model::{
 use crate::tasks::product_api::list_sessions::{
     NativeCatalogRefreshCoordinator, MAX_CONCURRENT_AGENT_LISTINGS,
 };
-use openaide_app_server_protocol::snapshot::TaskNavigationRefreshState;
 use std::time::Duration;
+
+/// A Tasks view showing these workspaces' Projects: discovery only lists demanded Projects.
+fn demand_workspaces(api: &TaskProductApi, workspaces: &[String]) {
+    api.native_session_catalog().discovery().replace_demand(
+        workspaces
+            .iter()
+            .map(|workspace| (project_id_for_workspace(workspace).as_str().to_string(), 20))
+            .collect(),
+    );
+}
 
 // timing: data — intervals compared against the measured age, never waited on.
 const ALWAYS_STALE: Duration = Duration::ZERO;
@@ -44,7 +53,7 @@ fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
         listing_entered: Some(entered_tx),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let (notifier, _updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -53,6 +62,10 @@ fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
         notifier,
     )
     .unwrap();
+    demand_workspaces(
+        &api,
+        &[temp.path().join("workspace").to_str().unwrap().to_string()],
+    );
 
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
@@ -61,18 +74,7 @@ fn a_client_refresh_in_progress_absorbs_the_periodic_refresh() {
     assert!(!api.native_catalog_refresh.trailing_run_requested());
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
-    loop {
-        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
-        if matches!(
-            update.kind,
-            TaskUpdateKind::NavigationRefreshStateChanged {
-                refresh: TaskNavigationRefreshState::Idle
-                    | TaskNavigationRefreshState::Failed { .. }
-            }
-        ) {
-            break;
-        }
-    }
+    wait_until(|| !api.native_catalog_refresh.is_running());
 }
 
 #[test]
@@ -93,7 +95,7 @@ fn a_refresh_run_names_who_asked_for_it() {
         listing_entered: Some(entered_tx),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let (notifier, _updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -102,25 +104,18 @@ fn a_refresh_run_names_who_asked_for_it() {
         notifier,
     )
     .unwrap();
+    demand_workspaces(
+        &api,
+        &[temp.path().join("workspace").to_str().unwrap().to_string()],
+    );
     let logs = crate::logging::capture_test_logs();
 
-    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::LoadMore);
+    api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::NavigationSubscribed);
     entered_rx.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::AgentsReady);
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
-    loop {
-        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
-        if matches!(
-            update.kind,
-            TaskUpdateKind::NavigationRefreshStateChanged {
-                refresh: TaskNavigationRefreshState::Idle
-                    | TaskNavigationRefreshState::Failed { .. }
-            }
-        ) {
-            break;
-        }
-    }
+    wait_until(|| !api.native_catalog_refresh.is_running());
 
     // Log capture spans parallel tests, so only the order of these two requesters counts.
     let requesters = logs
@@ -129,7 +124,9 @@ fn a_refresh_run_names_who_asked_for_it() {
         .filter(|entry| entry["event"] == "native_session_catalog_refresh_started")
         .map(|entry| entry["fields"]["requester"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    let first = requesters.iter().position(|name| name == "load_more");
+    let first = requesters
+        .iter()
+        .position(|name| name == "navigation_subscribed");
     let trailing = requesters.iter().rposition(|name| name == "agents_ready");
     assert!(
         first.is_some() && first < trailing,
@@ -160,7 +157,7 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
         listing_entered: Some(entered_tx),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let (notifier, _updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -169,6 +166,18 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
         notifier,
     )
     .unwrap();
+    demand_workspaces(
+        &api,
+        &(0..3)
+            .map(|index| {
+                temp.path()
+                    .join(format!("workspace-{index}"))
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>(),
+    );
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     let expected = 3 * BUILT_IN_AGENT_METADATA.len();
     let mut entered = 0;
@@ -181,20 +190,10 @@ fn sidebar_refresh_runs_independent_contexts_before_waiting_for_slow_history() {
     // Release and drain before asserting, including the intentionally failing run.
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
-    loop {
-        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
-        if matches!(
-            update.kind,
-            TaskUpdateKind::NavigationRefreshStateChanged {
-                refresh: TaskNavigationRefreshState::Idle
-            }
-        ) {
-            break;
-        }
-    }
+    wait_until(|| !api.native_catalog_refresh.is_running());
     assert_eq!(entered, expected,
         "one slow history must not serialize every Agent/workspace and keep sidebar Refresh disabled");
-    assert!(!api.native_session_catalog().refreshing());
+    assert!(!api.native_catalog_refresh.is_running());
 }
 
 #[test]
@@ -221,7 +220,7 @@ fn sidebar_refresh_caps_each_agents_concurrent_listings() {
         listing_entered: Some(entered_tx),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let (notifier, _updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
@@ -230,6 +229,18 @@ fn sidebar_refresh_caps_each_agents_concurrent_listings() {
         notifier,
     )
     .unwrap();
+    demand_workspaces(
+        &api,
+        &(0..workspace_count)
+            .map(|index| {
+                temp.path()
+                    .join(format!("workspace-{index}"))
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>(),
+    );
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     let capped = MAX_CONCURRENT_AGENT_LISTINGS * BUILT_IN_AGENT_METADATA.len();
     let mut entered_by_agent = HashMap::<String, usize>::new();
@@ -246,17 +257,7 @@ fn sidebar_refresh_caps_each_agents_concurrent_listings() {
     }
     *gate.0.lock().unwrap() = true;
     gate.1.notify_all();
-    loop {
-        let update = updates.recv_timeout(crate::test_sync::WATCHDOG).unwrap();
-        if matches!(
-            update.kind,
-            TaskUpdateKind::NavigationRefreshStateChanged {
-                refresh: TaskNavigationRefreshState::Idle
-            }
-        ) {
-            break;
-        }
-    }
+    wait_until(|| !api.native_catalog_refresh.is_running());
     assert_eq!(entered_by_agent.len(), BUILT_IN_AGENT_METADATA.len());
     assert!(
         entered_by_agent
@@ -288,6 +289,15 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
             ))
             .unwrap();
     }
+    let workspaces = (0..3)
+        .map(|index| {
+            temp.path()
+                .join(format!("workspace-{index}"))
+                .to_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
     let (statuses, updates) = AgentStatusCache::channel();
     let agent = Arc::new(MixedCatalogRuntime {
         advertises_auth_method,
@@ -301,16 +311,21 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    demand_workspaces(&api, &workspaces);
 
     api.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::ClientRefresh);
     assert!(
         publish_status_updates_until_settled(&api, &updates),
         "unchanged auth failures must not feed another catalog refresh forever"
     );
-    assert!(matches!(
-        api.native_session_catalog().refresh_state(),
-        TaskNavigationRefreshState::Failed { .. }
-    ));
+    assert!(
+        workspaces.iter().all(|workspace| api
+            .native_session_catalog()
+            .discovery()
+            .project(project_id_for_workspace(workspace).as_str())
+            .failed),
+        "an unsigned Agent marks each Project's discovery failed"
+    );
     let contexts = 3;
     let agent_count = BUILT_IN_AGENT_METADATA.len();
     assert_eq!(
@@ -338,9 +353,13 @@ fn assert_unsigned_catalog_settles(advertises_auth_method: bool) {
     agent.authenticated.store(true, Ordering::SeqCst);
     statuses.record_authentication_success("codex");
     assert!(publish_status_updates_until_settled(&api, &updates));
-    assert_eq!(
-        api.native_session_catalog().refresh_state(),
-        TaskNavigationRefreshState::Idle
+    assert!(
+        workspaces.iter().all(|workspace| !api
+            .native_session_catalog()
+            .discovery()
+            .project(project_id_for_workspace(workspace).as_str())
+            .failed),
+        "signing in settles every Project"
     );
     assert_eq!(
         api.native_session_catalog().entries().len(),
@@ -369,7 +388,7 @@ fn publish_status_updates_until_settled(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 // A refresh that never ends is caught by the watchdog here.
-                wait_until(|| !api.native_session_catalog().refreshing());
+                wait_until(|| !api.native_catalog_refresh.is_running());
                 if updates.try_recv().is_err() {
                     return true;
                 }
@@ -381,7 +400,7 @@ fn publish_status_updates_until_settled(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    wait_until(|| !api.native_session_catalog().refreshing());
+    wait_until(|| !api.native_catalog_refresh.is_running());
     false
 }
 

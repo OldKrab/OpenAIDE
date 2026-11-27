@@ -72,6 +72,7 @@ fn unchanged_task_commit(context: &CommitContext, task_id: &str) -> CommittedTas
         task_id: task_id.to_string(),
         subagent: None,
         journal_sequence,
+        chat_version: None,
         task_revision,
         task_snapshot_changed: false,
         chat_text_appends: Vec::new(),

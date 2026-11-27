@@ -13,6 +13,7 @@ use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use serde_json::Value;
 
 use crate::client_lifecycle::ConnectionId;
+use crate::global_state::GlobalAreas;
 
 use super::{responses, GatewayOutcome, RpcGateway};
 
@@ -32,11 +33,10 @@ impl RpcGateway {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let mut events = removed_tasks
+        let events = removed_tasks
             .into_iter()
             .flat_map(|task| {
                 self.publish_task_payload(
-                    &task.task_id,
                     AppServerEventPayload::TaskChanged {
                         task_id: task.task_id.clone(),
                         revision: task.next_revision,
@@ -49,7 +49,7 @@ impl RpcGateway {
                 )
             })
             .collect::<Vec<_>>();
-        events.extend(self.publish_navigation_replacement(now));
+        self.navigation.mark_all();
         responses::result_with_events(
             connection_id,
             id,
@@ -256,6 +256,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::SETTINGS);
         self.result::<AppPreferencesResult>(connection_id, id, meta, result)
     }
 
@@ -276,6 +277,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::NEW_TASK_DEFAULTS);
         self.result::<NewTaskDefaultsSnapshot>(connection_id, id, meta, result)
     }
 
@@ -313,6 +315,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::SETTINGS);
         self.result::<RuntimeSettingsResult>(connection_id, id, meta, result)
     }
 }

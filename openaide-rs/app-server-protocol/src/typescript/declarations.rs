@@ -41,10 +41,11 @@ use crate::client::{
     ClientCapabilitiesChangedResult, ClientDetachParams, ClientDetachResult, ClientHeartbeatParams,
     ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams, ClientProbeResult,
     ClientProtocolCapability, ClientReplacementImpactParams, ClientReplacementImpactResult,
-    ClientRole, ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface,
-    SettingsSection, ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
-    UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
-    UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
+    ClientRole, ClientSecretKeysChangedParams, ClientWorkspaceRoot, InitializeParams,
+    InitializeResult, RequestedSurface, SettingsSection, ShellCapability, ShellDescriptor,
+    ShellKind, UpdateShutdownAbortParams, UpdateShutdownAbortResult, UpdateShutdownBlockedReason,
+    UpdateShutdownCommitParams, UpdateShutdownCommitResult, UpdateShutdownPrepareParams,
+    UpdateShutdownPrepareResult,
 };
 use crate::devices::{
     DeviceCollectionSnapshot, DevicesCancelInviteParams, DevicesCancelInviteResult,
@@ -69,7 +70,7 @@ use crate::envelopes::{
 };
 use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use crate::events::{
-    AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange, ToolDetailDelta,
+    AppServerEvent, AppServerEventPayload, TaskChanges, TaskChatChange, ToolDetailDelta,
 };
 use crate::file_viewer::{
     FileViewerError, FileViewerKind, FileViewerOpenFromHandleParams, FileViewerOpenParams,
@@ -77,10 +78,15 @@ use crate::file_viewer::{
 };
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
-    ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
-    FileBrowserRootId, FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId,
-    ServerId, StateRootId, SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId,
-    WorktreeOperationId, WorktreeRepositoryId,
+    ClientInstanceId, ClientMutationId, ClientRequestId, FileBrowserEntryId, FileBrowserRootId,
+    FileViewerHandleId, MessageId, ProjectId, QueuedMessageId, RequestId, ServerId, StateRootId,
+    SubagentId, TaskId, TaskListCursor, TurnId, WorktreeId, WorktreeOperationId,
+    WorktreeRepositoryId,
+};
+use crate::navigation::{
+    NavigationDiscovery, NavigationFrame, NavigationGroupFrame, NavigationHistoryLimit,
+    NavigationRow, NavigationRowRef, NavigationSubscribeResult, NavigationUnsubscribeParams,
+    NavigationUnsubscribeResult, NavigationUpdateResult, NavigationViewParams,
 };
 use crate::project::{
     ProjectAddParams, ProjectAddResult, ProjectRefreshParams, ProjectRefreshResult,
@@ -89,9 +95,9 @@ use crate::project::{
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
-    PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
-    QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
-    SecretReadParams, SecretReadResponse, ShellAuthTerminalParams, ShellAuthTerminalResponse,
+    PermissionToolCallRef, QuestionField, QuestionOption, QuestionRequestParams,
+    QuestionRequestResponse, QuestionStringFormat, QuestionValue, SecretReadParams,
+    SecretReadResponse, ShellAuthTerminalParams, ShellAuthTerminalResponse,
     ShellNotificationAction, ShellNotificationLevel, ShellOpenExternalParams,
     ShellOpenExternalResponse, ShellResolveFileRevealParams, ShellResolveFileRevealResult,
     ShellRevealFileParams, ShellRevealFileResponse, ShellShowNotificationParams,
@@ -133,17 +139,17 @@ use crate::snapshot::{
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
     TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
     TaskMessageQueuePauseSnapshot, TaskMessageQueueSnapshot, TaskNavigationEntry,
-    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPermissionPolicy,
-    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
-    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost, TimeSpanSnapshot,
-    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationActionSnapshot,
-    ToolPresentationSnapshot, ToolSearchTargetSnapshot,
+    TaskPermissionPolicy, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
+    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
+    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
+    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage,
+    TaskUsageCost, TimeSpanSnapshot, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    ToolPresentationActionSnapshot, ToolPresentationSnapshot, ToolSearchTargetSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
-    SubscriptionScope, SubscriptionSnapshot, TaskResumeSnapshot, TaskRevisionChanges,
+    SubagentChatSync, SubscriptionScope, SubscriptionSnapshot, TaskChatSync, TerminalOutputAppend,
+    ToolTerminalSync,
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
@@ -155,7 +161,7 @@ use crate::task::{
     NativeSessionForkParams, NativeSessionForkResult, NativeSessionForkSource,
     NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
     NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
-    TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    SearchSnippet, TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
     TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff, TaskArchiveOlderParams,
     TaskArchiveOlderProtectedNativeSession, TaskArchiveOlderProtectedReason,
@@ -164,19 +170,19 @@ use crate::task::{
     TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult,
     TaskImageParams, TaskImageResult, TaskImageVariant, TaskLifecycleChanged, TaskListLifecycle,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
-    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
-    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams,
-    TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
-    TaskReloadNativeSessionResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult,
-    TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskStopBackgroundCommandParams, TaskStopBackgroundCommandResult, TaskStopSubagentParams,
-    TaskStopSubagentResult, TaskTitleSelection, TaskToolImagePreviewParams,
-    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
-    WorkspaceFileSearchState,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSearchHit,
+    TaskNavigationSearchParams, TaskNavigationSearchResult, TaskNavigationSection, TaskOpenParams,
+    TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams,
+    TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
+    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskStopBackgroundCommandParams,
+    TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
+    TaskTitleSelection, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
+    TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview, WorkspaceFileSearchState,
 };
 use crate::terminals::{
     TerminalAttach, TerminalCollectionSnapshot, TerminalStatus, TerminalSummary, TerminalTarget,
@@ -208,7 +214,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientInstanceId>(output, config);
     push_decl::<ClientMutationId>(output, config);
     push_decl::<ClientRequestId>(output, config);
-    push_decl::<EventCursor>(output, config);
     push_decl::<FileBrowserEntryId>(output, config);
     push_decl::<FileBrowserRootId>(output, config);
     push_decl::<FileViewerHandleId>(output, config);
@@ -249,6 +254,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<UpdateShutdownCommitResult>(output, config);
     push_decl::<UpdateShutdownAbortParams>(output, config);
     push_decl::<UpdateShutdownAbortResult>(output, config);
+    push_decl::<ClientSecretKeysChangedParams>(output, config);
     push_decl::<ClientReplacementImpactParams>(output, config);
     push_decl::<ClientReplacementImpactResult>(output, config);
     push_decl::<AttachedClientSummary>(output, config);
@@ -269,8 +275,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<StateSubscribeParams>(output, config);
     push_decl::<StateSubscribeResult>(output, config);
-    push_decl::<TaskResumeSnapshot>(output, config);
-    push_decl::<TaskRevisionChanges>(output, config);
+    push_decl::<TaskChatSync>(output, config);
+    push_decl::<SubagentChatSync>(output, config);
+    push_decl::<ToolTerminalSync>(output, config);
+    push_decl::<TerminalOutputAppend>(output, config);
     push_decl::<StateUnsubscribeParams>(output, config);
     push_decl::<StateUnsubscribeResult>(output, config);
     push_decl::<SubscriptionScope>(output, config);
@@ -510,7 +518,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<PermissionToolCallRef>(output, config);
     push_decl::<PermissionRequestOption>(output, config);
     push_decl::<PermissionRequestOptionKind>(output, config);
-    push_decl::<PermissionRequestResponse>(output, config);
     push_decl::<QuestionRequestParams>(output, config);
     push_decl::<QuestionField>(output, config);
     push_decl::<QuestionStringFormat>(output, config);
@@ -626,8 +633,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationSection>(output, config);
     push_decl::<TaskNavigationRefreshParams>(output, config);
     push_decl::<TaskNavigationRefreshResult>(output, config);
-    push_decl::<TaskNavigationLoadMoreParams>(output, config);
-    push_decl::<TaskNavigationLoadMoreResult>(output, config);
+    push_decl::<TaskNavigationSearchParams>(output, config);
+    push_decl::<TaskNavigationSearchResult>(output, config);
+    push_decl::<TaskNavigationSearchHit>(output, config);
+    push_decl::<SearchSnippet>(output, config);
     push_decl::<NativeSessionArchiveParams>(output, config);
     push_decl::<NativeSessionArchiveResult>(output, config);
     push_decl::<NativeSessionSetTitleParams>(output, config);
@@ -660,13 +669,15 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<SupportRecoverStuckSessionsResult>(output, config);
 
     push_decl::<AppServerEvent>(output, config);
-    push_decl::<EventScope>(output, config);
     push_decl::<AppServerEventPayload>(output, config);
     push_decl::<ToolDetailDelta>(output, config);
     push_decl::<TaskChanges>(output, config);
     push_decl::<TaskChatChange>(output, config);
 
     push_decl::<ClientSnapshot>(output, config);
+    push_decl::<crate::global_state::GlobalState>(output, config);
+    push_decl::<crate::global_state::GlobalStateChanges>(output, config);
+    push_decl::<crate::global_state::SyncNotification>(output, config);
     push_decl::<ServerSnapshot>(output, config);
     push_decl::<ProtocolVersion>(output, config);
     push_decl::<ServerCapabilities>(output, config);
@@ -686,9 +697,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentAccountLimitWindow>(output, config);
     push_decl::<AgentAccountLimitWindowKind>(output, config);
     push_decl::<AgentAccountLimitStatus>(output, config);
-    push_decl::<TaskNavigationSnapshot>(output, config);
-    push_decl::<TaskNavigationGroup>(output, config);
-    push_decl::<TaskNavigationRefreshState>(output, config);
+    for_navigation_decls(output, config);
     push_decl::<TaskNavigationEntry>(output, config);
     push_decl::<NativeSessionSummary>(output, config);
     push_decl::<NativeSessionReference>(output, config);
@@ -770,4 +779,18 @@ fn push_decl<T: TS + 'static>(output: &mut String, config: &Config) {
     output.push_str("export ");
     output.push_str(&T::decl(config));
     output.push_str("\n\n");
+}
+
+fn for_navigation_decls(output: &mut String, config: &Config) {
+    push_decl::<NavigationRowRef>(output, config);
+    push_decl::<NavigationHistoryLimit>(output, config);
+    push_decl::<NavigationViewParams>(output, config);
+    push_decl::<NavigationSubscribeResult>(output, config);
+    push_decl::<NavigationUpdateResult>(output, config);
+    push_decl::<NavigationUnsubscribeParams>(output, config);
+    push_decl::<NavigationUnsubscribeResult>(output, config);
+    push_decl::<NavigationDiscovery>(output, config);
+    push_decl::<NavigationRow>(output, config);
+    push_decl::<NavigationGroupFrame>(output, config);
+    push_decl::<NavigationFrame>(output, config);
 }

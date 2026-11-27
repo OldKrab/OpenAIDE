@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
+import { navigationGroup, navigationState, sessionRow, taskRow } from "./navigationTestFixtures";
 import { mobileDrawerWidth } from "./useMobileNavigation";
 import { createInitialState, type AppState } from "../state/store";
 import type { FrontendShell } from "../services/frontendShell";
@@ -149,7 +150,7 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
         onArchiveTask: controller.callbacks.navigation.archiveTask,
-        onLoadNativeSessions: controller.callbacks.navigation.loadNativeSessions,
+        onRefreshNavigation: controller.callbacks.navigation.refreshNavigation,
         onNewTask: expect.any(Function),
         onOpenNativeSession: controller.callbacks.navigation.openNativeSession,
         onOpenTask: controller.callbacks.navigation.openTask,
@@ -366,14 +367,18 @@ describe("AppSurfaces callback wiring", () => {
       label: "OpenAIDE",
       workspaceRoot: "/workspace/OpenAIDE",
     }];
-    controller.state.newTask.nativeSessions.items = Array.from({ length: 6 }, (_, index) => ({
-      agent_id: "codex",
-      agent_name: "Codex",
-      cwd: "/workspace/OpenAIDE",
-      project_id: "project_1",
-      session_id: `session_${index}`,
-      title: `Session ${index}`,
-    }));
+    controller.state.newTask.nativeSessions = navigationState([navigationGroup(
+      "project_1",
+      "OpenAIDE",
+      Array.from({ length: 6 }, (_, index) => sessionRow({
+        agent_id: "codex",
+        agent_name: "Codex",
+        cwd: "/workspace/OpenAIDE",
+        project_id: "project_1",
+        session_id: `session_${index}`,
+        title: `Session ${index}`,
+      })),
+    )]);
     controller.intents.newTask.loadProjectTasks = vi.fn(async () => []);
     const tree = render(controller);
 
@@ -409,6 +414,10 @@ describe("AppSurfaces callback wiring", () => {
     routedTask.project_id = "project_1";
     routedTask.project_label = "OpenAIDE";
     controller.visibleTasks = [routedTask];
+    controller.state.newTask.nativeSessions = navigationState([
+      navigationGroup("project_1", "OpenAIDE", [taskRow(routedTask)]),
+      navigationGroup("project_2", "Next", []),
+    ]);
     controller.intents.newTask.loadProjectTasks = vi.fn(async () => [routedTask]);
     controller.intents.projects.remove = vi.fn(async () => 1);
     const tree = render(controller);
@@ -449,28 +458,27 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
-        groupByProject: true,
         projects: controller.state.projects,
       }),
       undefined,
     );
   });
 
-  it("uses the adaptive Task Navigation row budget for two Projects", () => {
+  it("renders every row App Server sent per Project without a client limit", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");
     controller.state.projects = [
       { projectId: "project_1", label: "OpenAIDE" },
       { projectId: "project_2", label: "Other" },
     ];
-    controller.visibleTasks = controller.state.projects.flatMap((project) =>
-      Array.from({ length: 24 }, (_, index) => {
+    controller.state.newTask.nativeSessions = navigationState(controller.state.projects.map((project) =>
+      navigationGroup(project.projectId, project.label, Array.from({ length: 24 }, (_, index) => {
         const task = snapshot(`${project.projectId}_task_${index}`).task;
         task.project_id = project.projectId;
         task.project_label = project.label;
-        return task;
-      }),
-    );
+        return taskRow(task);
+      })),
+    ));
 
     const tree = render(controller);
     const visibleRows = (projectLabel: string) =>
@@ -480,8 +488,9 @@ describe("AppSurfaces callback wiring", () => {
         && node.props.className.includes("task-row"),
       );
 
-    expect(visibleRows("OpenAIDE")).toHaveLength(7);
-    expect(visibleRows("Other")).toHaveLength(7);
+    // The window is App Server's: the Sidebar neither sorts nor trims the rows it receives.
+    expect(visibleRows("OpenAIDE")).toHaveLength(24);
+    expect(visibleRows("Other")).toHaveLength(24);
   });
 
   it("limits current-Project Task Navigation to Projects in the workspace", () => {
@@ -1373,7 +1382,7 @@ describe("AppSurfaces callback wiring", () => {
     );
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
-        tasks: controller.visibleTasks,
+        nativeSessions: controller.state.newTask.nativeSessions,
         taskListError: undefined,
       }),
       undefined,
@@ -1622,6 +1631,9 @@ function showWorktreeProject(controller: TestController, taskId: string) {
   task.project_id = "project_1";
   task.project_label = "OpenAIDE";
   controller.visibleTasks = [task];
+  controller.state.newTask.nativeSessions = navigationState([
+    navigationGroup("project_1", "OpenAIDE", [taskRow(task)]),
+  ]);
 }
 
 function controllerFor(surface: AppController["bootstrap"]["surface"]): TestController {
@@ -1642,7 +1654,9 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         forkNativeSession: vi.fn(),
         forkTask: vi.fn(),
         changeSearch: vi.fn(),
-        loadNativeSessions: vi.fn(),
+        refreshNavigation: vi.fn(),
+        setProjectHistoryLimit: vi.fn(),
+        searchNavigation: vi.fn(),
         openNativeSession: vi.fn(),
         openNewTask: vi.fn(),
         openSettings: vi.fn(),
@@ -1774,6 +1788,8 @@ function viewFor(state: AppState): AppController["view"] {
     appServerError: state.appServerError,
     navigation: {
       nativeSessions: state.newTask.nativeSessions,
+      historyLimit: 20,
+      historyLimitOverrides: state.navigationHistoryLimits,
       nativeSessionMutations: state.nativeSessionMutations,
       newTaskSelection: state.newTask.selection,
       projects: state.projects,

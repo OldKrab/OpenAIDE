@@ -1,49 +1,25 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{
-    ClientInstanceId, EventCursor, MessageId, StateRootId, SubagentId, TaskId, WorktreeRepositoryId,
-};
+use crate::ids::{MessageId, SubagentId, TaskId};
 use crate::snapshot::{
-    AgentCollectionSnapshot, AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot,
-    ClientSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot,
-    TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot, TaskNavigationSnapshot,
+    AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot, PendingRequestSnapshot,
+    SubagentCatalogSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
     TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
-use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
-use crate::worktree::WorktreeRepositorySnapshot;
+use crate::task::ToolDetailSnapshot;
 
+/// One `app/event` notification. `subscription` names the subscription that receives it. App
+/// Server sends a subscription's notifications in publish order after its subscribe reply
+/// (ADR-0086), so an event carries no cursor: Task, Subagent History and Tool detail payloads
+/// carry the entity's own revision, and a Navigation frame its view's revision.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AppServerEvent {
-    /// Identifies the independently ordered subscription stream carrying this event.
     pub subscription: SubscriptionScope,
-    pub previous_cursor: EventCursor,
-    pub cursor: EventCursor,
-    pub scope: EventScope,
     pub payload: AppServerEventPayload,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum EventScope {
-    StateRoot {
-        state_root_id: StateRootId,
-    },
-    Client {
-        state_root_id: StateRootId,
-        client_instance_id: ClientInstanceId,
-    },
-    Task {
-        state_root_id: StateRootId,
-        task_id: TaskId,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -56,9 +32,6 @@ pub enum EventScope {
     rename_all_fields = "camelCase"
 )]
 pub enum AppServerEventPayload {
-    SnapshotReplaced {
-        snapshot: ClientSnapshot,
-    },
     TaskChanged {
         task_id: TaskId,
         revision: u64,
@@ -68,31 +41,9 @@ pub enum AppServerEventPayload {
         task_id: TaskId,
         history_sync: TaskHistorySyncSnapshot,
     },
-    /// Updates row-visible fields for one Task already present in Navigation.
-    ///
-    /// Consumers must never treat this as an insertion or lifecycle move.
-    TaskUpdated {
-        project_id: crate::ids::ProjectId,
-        task: Box<crate::snapshot::TaskSummary>,
-    },
-    /// Replaces the bounded authoritative row window for one Project.
-    ProjectEntriesReplaced {
-        section: TaskNavigationSection,
-        project_id: crate::ids::ProjectId,
-        task_count: u64,
-        entries: Vec<crate::snapshot::TaskNavigationEntry>,
-        has_more: bool,
-        loading: bool,
-    },
-    RefreshStateChanged {
-        refresh: crate::snapshot::TaskNavigationRefreshState,
-    },
-    /// Recovers Navigation after initialization, reconnect, or cursor loss.
-    NavigationReplaced {
-        navigation: TaskNavigationSnapshot,
-    },
-    ProjectCollectionUpdated {
-        projects: ProjectCollectionSnapshot,
+    /// One Navigation view changed (design 2.2). Frames also carry the subscribe baseline.
+    NavigationFrame {
+        frame: crate::navigation::NavigationFrame,
     },
     TaskRequestsUpdated {
         task_id: TaskId,
@@ -113,34 +64,16 @@ pub enum AppServerEventPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current_plan: Option<Option<AgentPlanSnapshot>>,
     },
-    ToolDetailUpdated {
+    /// The Task is deleted, so its Subagent catalog, Subagent Histories and Tool details are
+    /// gone. The final notification of each of their subscriptions.
+    TaskContentRemoved {
         task_id: TaskId,
-        artifact_id: String,
-        details: ToolDetailSnapshot,
     },
     ToolDetailChanged {
         task_id: TaskId,
         artifact_id: String,
         revision: u64,
         deltas: Vec<ToolDetailDelta>,
-    },
-    RequestUpdated {
-        request: PendingRequestSnapshot,
-    },
-    AgentCollectionUpdated {
-        agents: AgentCollectionSnapshot,
-    },
-    WorktreeRepositoryUpdated {
-        repository_id: WorktreeRepositoryId,
-        repository: WorktreeRepositorySnapshot,
-    },
-    /// Replaces the trusted Remote Device list and its connection state.
-    DeviceCollectionUpdated {
-        devices: crate::devices::DeviceCollectionSnapshot,
-    },
-    /// Replaces the open Terminal list, including each Terminal's status.
-    TerminalCollectionUpdated {
-        terminals: crate::terminals::TerminalCollectionSnapshot,
     },
 }
 
@@ -192,6 +125,11 @@ pub struct TaskChanges {
     pub message_queue: Option<TaskMessageQueueSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat: Vec<TaskChatChange>,
+    /// The Chat version after `chat`: the number of the Chat frame the transaction committed.
+    /// Present exactly when `chat` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_version: Option<u64>,
+    /// The Task is deleted. This is the subscription's final notification.
     #[serde(default, skip_serializing_if = "is_false")]
     pub removed: bool,
 }

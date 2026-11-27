@@ -1,18 +1,11 @@
 import { memo, useRef, useState } from "react";
 import { Archive, ArrowLeft, FolderPlus, LoaderCircle, Plus, RefreshCcw, Search, Settings, X } from "lucide-react";
-import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
+import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import type { TaskArchiveOlderCutoff, TaskArchiveOlderResult } from "@openaide/app-server-client";
 import type { ProjectOption } from "../state/composerOptions";
-import { taskForkMutationKey, type AppState } from "../state/store";
-import {
-  initialTaskNavigationRowsPerProject,
-  taskNavigationPageSize,
-} from "../state/taskNavigationPolicy";
-import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
+import type { AppState } from "../state/store";
+import { taskNavigationPageSize } from "../state/taskNavigationPolicy";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
-import { SidebarTaskRow } from "./SidebarTaskRow";
-import { groupedTasks, projectGroupRows } from "./sidebarProjectModel";
-import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { usePullToRefresh } from "./usePullToRefresh";
@@ -24,6 +17,8 @@ import type { ComputersSnapshot } from "../services/computers";
 import type { ComputerSwitch } from "../services/computerSwitch";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
+import { SidebarSearchResults } from "./SidebarSearchResults";
+import type { RunNavigationSearch } from "./useNavigationSearch";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -32,7 +27,6 @@ type SidebarProps = {
   nativeSessionMutations?: AppState["nativeSessionMutations"];
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
-  nativeSessionProjectId?: string;
   forkableAgentIds?: ReadonlySet<string>;
   deletableAgentIds?: ReadonlySet<string>;
   onDeleteSession?: import("../intents/sessionDeletionIntent").DeleteSessionAction;
@@ -41,7 +35,14 @@ type SidebarProps = {
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
   onAddProject?: () => void;
-  onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
+  /** Asks App Server to read Agent sessions again; the view reports what changed. */
+  onRefreshNavigation: () => void;
+  /** The history rows each Project shows unless `historyLimitOverrides` names it. */
+  historyLimit: number;
+  /** Per-Project history limits the user changed: "Show more" raises one, collapsing sets 0. */
+  historyLimitOverrides: Readonly<Record<string, number>>;
+  /** Sets a Project's history limit, or clears it (back to `historyLimit`) with `undefined`. */
+  onSetProjectHistoryLimit: (projectId: string, historyLimit: number | undefined) => void;
   onBrowseProjectFiles?: (projectId: string) => void;
   onManageWorktrees?: (projectId: string) => void;
   onRemoveProject?: (project: {
@@ -72,6 +73,8 @@ type SidebarProps = {
     title: { kind: "user"; value: string } | { kind: "automatic" },
   ) => Promise<void>;
   onSearchChange: (query: string) => void;
+  /** Runs App Server's one-shot search; while the field has text its results replace the list. */
+  onSearchNavigation: RunNavigationSearch;
   onSettings: () => void;
   onToggleArchived: () => void;
   searchQuery: string;
@@ -88,14 +91,10 @@ type SidebarProps = {
   onUseAnotherComputer?: () => void;
   showArchived: boolean;
   taskListError?: string;
-  tasks: TaskSummary[];
-  groupByProject?: boolean;
   hiddenFromAccessibility?: boolean;
   modal?: boolean;
   projects?: ProjectOption[];
-  maxTasksPerProject?: number;
   loadingTasks?: boolean;
-  showNativeSessions?: boolean;
   /** The label of an Agent whose managed integration is installing, if any. */
   installingAgentLabel?: string;
 };
@@ -107,7 +106,6 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionMutations = {},
   nativeSessionAgentId,
   nativeSessionAgentName,
-  nativeSessionProjectId,
   forkableAgentIds = new Set(),
   deletableAgentIds = new Set(),
   onDeleteSession,
@@ -116,7 +114,10 @@ export const Sidebar = memo(function Sidebar({
   onForkNativeSession,
   onForkTask,
   onAddProject,
-  onLoadNativeSessions,
+  onRefreshNavigation,
+  historyLimit,
+  historyLimitOverrides,
+  onSetProjectHistoryLimit,
   onBrowseProjectFiles,
   onManageWorktrees,
   onRemoveProject,
@@ -136,6 +137,7 @@ export const Sidebar = memo(function Sidebar({
   onSetTaskPinned,
   onSetTaskTitle,
   onSearchChange,
+  onSearchNavigation,
   onSettings,
   onToggleArchived,
   searchQuery,
@@ -148,14 +150,10 @@ export const Sidebar = memo(function Sidebar({
   settingsActive = false,
   showArchived,
   taskListError,
-  tasks,
-  groupByProject = false,
   hiddenFromAccessibility = false,
   modal = false,
   projects = [],
-  maxTasksPerProject,
   loadingTasks = false,
-  showNativeSessions = true,
   installingAgentLabel,
 }: SidebarProps) {
   const taskListRef = useRef<HTMLDivElement>(null);
@@ -165,57 +163,20 @@ export const Sidebar = memo(function Sidebar({
   // appear here too; a Settings-only error would be invisible where the user clicked.
   const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
-  const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
-  const displayedNativeSessions = showNativeSessions
-    ? nativeSessions
-    : { adoptingSessionId: undefined, error: undefined, items: [], loaded: true, loading: false, nextCursor: undefined };
-  const viewModel = sidebarViewModel({
-    loadingTasks,
-    nativeSessionAgentName,
-    nativeSessions: displayedNativeSessions,
-    searchQuery,
-    showArchived,
-    taskCount: tasks.length,
-  });
-  const flatRows = projectGroupRows(
-    tasks,
-    showNativeSessions ? viewModel.visibleNativeSessions : [],
-  );
-  const groupSearchQuery = searchQuery.trim().toLowerCase();
+  // App Server owns the groups, their order, the window and the counts; typing in the field
+  // leaves this list for the search results below rather than filtering it.
+  const groups = nativeSessions.groups;
   const hasSearchInput = searchQuery.length > 0;
-  const hasSearchQuery = groupSearchQuery.length > 0;
-  const activeTask = activeTaskId ? tasks.find((task) => task.task_id === activeTaskId) : undefined;
-  const groups = groupedTasks(tasks, projects, {
-    includeProjectId: nativeSessionProjectId,
-    includedProjectSessions:
-      showNativeSessions ? viewModel.visibleNativeSessions : [],
-  }).filter((group) =>
-    !groupSearchQuery ||
-    group.tasks.length > 0 ||
-    group.label.toLowerCase().includes(groupSearchQuery) ||
-    group.nativeSessions.length > 0,
-  );
-  const initialProjectRowLimit = maxTasksPerProject
-    ?? initialTaskNavigationRowsPerProject(groups.length);
+  const hasSearchQuery = searchQuery.trim().length > 0;
   const projectPageSize = taskNavigationPageSize(groups.length);
-  // Every Project group renders; each group's own presentation limit keeps the list bounded.
-  const visibleGroups = groupByProject ? groups : [];
-  const projectHasMore = (projectKey: string) =>
-    !showArchived && nativeSessions.hasMoreProjectIds?.includes(projectKey) === true;
-  const projectCollapsed = (projectKey: string) => !groupSearchQuery && collapsedProjectKeys.has(projectKey);
-  const selectedSessionProjectCollapsed =
-    groupByProject &&
-    !groupSearchQuery &&
-    nativeSessionProjectId !== undefined &&
-    collapsedProjectKeys.has(nativeSessionProjectId);
-  const showEmptyState = !taskListError && !installingAgentLabel &&
-    (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
+  const projectCollapsed = (projectKey: string) => collapsedProjectKeys.has(projectKey);
+  const showEmptyState = !taskListError && !installingAgentLabel && groups.length === 0;
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
-  const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
-  const noProjects = groupByProject && projects.length === 0;
+  const showSessionRefresh = !showArchived && !showWorkspaceSetup;
+  const noProjects = projects.length === 0;
   const refreshBusy = nativeSessions.loading || nativeSessions.adoptingSessionId !== undefined;
   // Touch refreshes by pulling the list down; the heading button stays for pointers and is hidden on phones.
-  const pullToRefresh = usePullToRefresh(taskListRef, () => onLoadNativeSessions(), {
+  const pullToRefresh = usePullToRefresh(taskListRef, () => onRefreshNavigation(), {
     busy: refreshBusy,
     enabled: showSessionRefresh,
   });
@@ -250,6 +211,12 @@ export const Sidebar = memo(function Sidebar({
             aria-label={showArchived ? "Search archive" : "Search tasks"}
             disabled={noProjects}
             onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && hasSearchInput) {
+                event.preventDefault();
+                onSearchChange("");
+              }
+            }}
             placeholder={showArchived ? "Search archive" : "Search"}
             ref={searchInputRef}
             value={searchQuery}
@@ -280,7 +247,7 @@ export const Sidebar = memo(function Sidebar({
               aria-label="Refresh tasks"
               className="task-section-refresh"
               disabled={refreshBusy}
-              onClick={() => onLoadNativeSessions()}
+              onClick={() => onRefreshNavigation()}
               title={nativeSessions.loading ? "Refreshing tasks" : "Refresh tasks"}
               type="button"
             >
@@ -290,7 +257,16 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
-      <SidebarTaskPreviewProvider><div
+      {hasSearchQuery ? (
+        <SidebarSearchResults
+          activeTaskId={activeTaskId}
+          agentIcons={agentIcons}
+          onOpenNativeSession={onOpenNativeSession}
+          onOpenTask={onOpenTask}
+          query={searchQuery}
+          search={onSearchNavigation}
+        />
+      ) : <SidebarTaskPreviewProvider><div
         className="task-list-shell"
         data-more-above={String(taskListOverflow.moreAbove)}
         data-more-below={String(taskListOverflow.moreBelow)}
@@ -307,9 +283,7 @@ export const Sidebar = memo(function Sidebar({
       ) : null}<div
         className="task-list"
         role="list"
-        aria-label={hasSearchQuery
-          ? showArchived ? "Archive search results" : "Task search results"
-          : showArchived ? "Archived tasks" : "Tasks"}
+        aria-label={showArchived ? "Archived tasks" : "Tasks"}
         onScroll={taskListOverflow.onScroll}
         {...pullToRefresh.handlers}
         ref={taskListRef}
@@ -319,9 +293,9 @@ export const Sidebar = memo(function Sidebar({
           ? <WorkspaceSetupPrompt compact onOpenFolder={onOpenWorkspaceFolder} />
           : null}
         {!showWorkspaceSetup && showEmptyState
-          ? <p className="empty-list">{viewModel.emptyMessage}</p>
+          ? <p className="empty-list">{emptyListMessage({ loading: loadingTasks || nativeSessions.loading, showArchived })}</p>
           : null}
-        {!showWorkspaceSetup && !showArchived && showNativeSessions && nativeSessions.error ? (
+        {!showWorkspaceSetup && !showArchived && nativeSessions.error ? (
           <div className="native-session-recovery" role="status">
             <span>{nativeSessions.error}</span>
             {nativeSessions.recoveryKind && onRecoverNativeSessions ? (
@@ -347,7 +321,7 @@ export const Sidebar = memo(function Sidebar({
             ) : null}
           </div>
         ) : null}
-        {!showWorkspaceSetup && !showArchived && showNativeSessions && installingAgentLabel ? (
+        {!showWorkspaceSetup && !showArchived && installingAgentLabel ? (
           <div aria-busy={true} className="native-session-activity" role="status">
             <LoaderCircle aria-hidden="true" className="spin" size={14} />
             <span>
@@ -356,137 +330,70 @@ export const Sidebar = memo(function Sidebar({
             </span>
           </div>
         ) : null}
-        {!showWorkspaceSetup && (groupByProject
-          ? visibleGroups.map((group) => (
-              <SidebarProjectTaskGroup
-                activeTaskId={activeTaskId}
-                agentIcons={agentIcons}
-                collapsed={projectCollapsed(group.key)}
-                group={group}
-                key={group.key}
-                historyLimit={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
-                pageSize={projectPageSize}
-                nativeSessionAgentId={nativeSessionAgentId}
-                nativeSessionAgentName={nativeSessionAgentName}
-                nativeSessions={group.nativeSessions}
-                nativeSessionMutations={nativeSessionMutations}
-                nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-                nativeSessionsHaveMore={projectHasMore(group.key)}
-                searching={hasSearchQuery}
-                loading={
-                  !showArchived && nativeSessions.loadingProjectIds?.includes(group.key) === true
-                }
-                canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
-                forkableAgentIds={forkableAgentIds}
-                deletableAgentIds={deletableAgentIds}
-                onDeleteSession={onDeleteSession}
-                environmentLabel={environmentLabel}
-                onArchiveNativeSession={onArchiveNativeSession}
-                onArchiveOlderNativeSessions={onArchiveOlderTasks}
-                onArchiveTask={onArchiveTask}
-                onArchiveOlderTasks={onArchiveOlderTasks}
-                onForkNativeSession={onForkNativeSession}
-                onForkTask={onForkTask}
-                onLoadMore={(historyLimit, targetRowCount) => {
-                  setProjectRowLimits((current) => new Map(current).set(group.key, historyLimit));
-                  onLoadNativeSessions(undefined, group.key, targetRowCount);
-                }}
-                onBrowseFiles={onBrowseProjectFiles ? () => onBrowseProjectFiles(group.key) : undefined}
-                onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
-                onNewTask={() => onNewTask(group.key)}
-                onRemoveProject={onRemoveProject ? () => onRemoveProject({
-                  projectId: group.key,
-                  label: group.label,
-                  nativeSessionCount: group.nativeSessions.length,
-                  taskCount: group.tasks.length + group.nativeSessions.length,
-                }) : undefined}
-                onRenameProject={onRenameProject ? (label) => onRenameProject(group.key, label) : undefined}
-                onOpenNativeSession={onOpenNativeSession}
-                onOpenTask={onOpenTask}
-                onRestoreNativeSession={onRestoreNativeSession}
-                onSetNativeSessionPinned={onSetNativeSessionPinned}
-                onSetNativeSessionTitle={onSetNativeSessionTitle}
-                onRestoreTask={onRestoreTask}
-                onSetTaskPinned={onSetTaskPinned}
-                onSetTaskTitle={onSetTaskTitle}
-                onToggleCollapse={() =>
-                  setCollapsedProjectKeys((current) => {
-                    const next = new Set(current);
-                    if (next.has(group.key)) {
-                      next.delete(group.key);
-                      setProjectRowLimits((limits) => {
-                        const reset = new Map(limits);
-                        reset.delete(group.key);
-                        return reset;
-                      });
-                    } else {
-                      next.add(group.key);
-                    }
-                    return next;
-                  })
-                }
-                showArchived={showArchived}
-              />
-            ))
-          : flatRows.map((row) =>
-              row.kind === "task" ? (
-                <SidebarTaskRow
-                  key={`task:${row.task.task_id}`}
-                  activeTaskId={activeTaskId}
-                  canFork={forkableAgentIds.has(row.task.agent_id) && !showArchived}
-                onDeleteSession={deletableAgentIds.has(row.task.agent_id) ? onDeleteSession : undefined}
-                  forkMutation={nativeSessionMutations[taskForkMutationKey(row.task.task_id)]}
-                  onArchiveTask={onArchiveTask}
-                  onArchiveOlderTasks={onArchiveOlderTasks}
-                  onForkTask={onForkTask}
-                  onOpenTask={onOpenTask}
-                  onRestoreTask={onRestoreTask}
-                  onSetTaskPinned={onSetTaskPinned}
-                  onSetTaskTitle={onSetTaskTitle}
-                  showArchived={showArchived}
-                  task={row.task}
-                />
-              ) : (
-                <SidebarNativeSessionRow
-                  archived={showArchived}
-                  agentIcon={agentIcons?.[row.session.agent_id ?? nativeSessionAgentId]}
-                  canFork={forkableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) && !showArchived}
-                onDeleteSession={deletableAgentIds.has(row.session.agent_id ?? nativeSessionAgentId) ? onDeleteSession : undefined}
-                  key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
-                  mutation={nativeSessionMutations[
-                    `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
-                  ]}
-                  nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
-                  nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
-                  nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-                  onArchiveNativeSession={onArchiveNativeSession}
-                  onArchiveOlderNativeSessions={onArchiveOlderTasks}
-                  onForkNativeSession={onForkNativeSession}
-                  onOpenNativeSession={onOpenNativeSession}
-                  onRestoreNativeSession={onRestoreNativeSession}
-                  onSetNativeSessionPinned={onSetNativeSessionPinned}
-                  onSetNativeSessionTitle={onSetNativeSessionTitle}
-                  session={row.session}
-                />
-              ),
-            ))}
-        {!showWorkspaceSetup && !groupByProject && !showArchived && showNativeSessions && nativeSessions.nextCursor && !selectedSessionProjectCollapsed ? (
-          <button
-            className="session-more"
-            disabled={nativeSessions.adoptingSessionId !== undefined || nativeSessions.loading}
-            onClick={() => {
-              if (nativeSessions.nextCursor) {
-                onLoadNativeSessions(nativeSessions.nextCursor);
-              }
-            }}
-            type="button"
-          >
-            {nativeSessions.loading
-              ? hasSearchQuery ? "Searching tasks" : "Loading tasks"
-              : hasSearchQuery ? "Search more tasks" : "Load more tasks"}
-          </button>
-        ) : null}
-      </div></div></SidebarTaskPreviewProvider>
+        {!showWorkspaceSetup && groups.map((group) => {
+          const projectId = group.projectId;
+          const project = projects.find((candidate) => candidate.projectId === projectId);
+          return (
+            <SidebarProjectTaskGroup
+              activeTaskId={activeTaskId}
+              agentIcons={agentIcons}
+              collapsed={projectCollapsed(projectId)}
+              group={group}
+              key={projectId}
+              workspaceRoot={project?.workspaceRoot}
+              historyLimit={historyLimitOverrides[projectId] ?? historyLimit}
+              pageSize={projectPageSize}
+              nativeSessionAgentId={nativeSessionAgentId}
+              nativeSessionAgentName={nativeSessionAgentName}
+              nativeSessionMutations={nativeSessionMutations}
+              nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
+              canManageWorktrees={Boolean(project?.worktreeRepositoryId)}
+              forkableAgentIds={forkableAgentIds}
+              deletableAgentIds={deletableAgentIds}
+              onDeleteSession={onDeleteSession}
+              environmentLabel={environmentLabel}
+              onArchiveNativeSession={onArchiveNativeSession}
+              onArchiveOlderNativeSessions={onArchiveOlderTasks}
+              onArchiveTask={onArchiveTask}
+              onArchiveOlderTasks={onArchiveOlderTasks}
+              onForkNativeSession={onForkNativeSession}
+              onForkTask={onForkTask}
+              onLoadMore={(limit) => onSetProjectHistoryLimit(projectId, limit)}
+              onBrowseFiles={onBrowseProjectFiles ? () => onBrowseProjectFiles(projectId) : undefined}
+              onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(projectId) : undefined}
+              onNewTask={() => onNewTask(projectId)}
+              onRemoveProject={onRemoveProject ? () => onRemoveProject({
+                projectId,
+                label: group.label,
+                nativeSessionCount: group.rows.filter((row) => row.kind === "session").length,
+                taskCount: group.total,
+              }) : undefined}
+              onRenameProject={onRenameProject ? (label) => onRenameProject(projectId, label) : undefined}
+              onOpenNativeSession={onOpenNativeSession}
+              onOpenTask={onOpenTask}
+              onRestoreNativeSession={onRestoreNativeSession}
+              onSetNativeSessionPinned={onSetNativeSessionPinned}
+              onSetNativeSessionTitle={onSetNativeSessionTitle}
+              onRestoreTask={onRestoreTask}
+              onSetTaskPinned={onSetTaskPinned}
+              onSetTaskTitle={onSetTaskTitle}
+              onToggleCollapse={() => {
+                const collapsing = !collapsedProjectKeys.has(projectId);
+                setCollapsedProjectKeys((current) => {
+                  const next = new Set(current);
+                  if (collapsing) next.add(projectId);
+                  else next.delete(projectId);
+                  return next;
+                });
+                // Collapsing hides the history rows here at once and asks App Server to stop
+                // sending them; expanding goes back to the default window.
+                onSetProjectHistoryLimit(projectId, collapsing ? 0 : undefined);
+              }}
+              showArchived={showArchived}
+            />
+          );
+        })}
+      </div></div></SidebarTaskPreviewProvider>}
       <div className="sidebar-footer">
         {!showArchived && onAddProject ? (
           <button className="add-project-button" onClick={onAddProject} type="button">
@@ -536,12 +443,12 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.nativeSessionMutations === next.nativeSessionMutations &&
     prev.nativeSessionAgentId === next.nativeSessionAgentId &&
     prev.nativeSessionAgentName === next.nativeSessionAgentName &&
-    prev.nativeSessionProjectId === next.nativeSessionProjectId &&
     prev.forkableAgentIds === next.forkableAgentIds &&
     prev.deletableAgentIds === next.deletableAgentIds &&
     prev.onDeleteSession === next.onDeleteSession &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
+    prev.onSearchNavigation === next.onSearchNavigation &&
     prev.settingsStatus === next.settingsStatus &&
     prev.computers === next.computers &&
     prev.computerLink === next.computerLink &&
@@ -550,13 +457,16 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&
     prev.taskListError === next.taskListError &&
-    prev.tasks === next.tasks &&
-    prev.groupByProject === next.groupByProject &&
+    prev.historyLimit === next.historyLimit &&
+    prev.historyLimitOverrides === next.historyLimitOverrides &&
     prev.hiddenFromAccessibility === next.hiddenFromAccessibility &&
     prev.modal === next.modal &&
     prev.projects === next.projects &&
-    prev.maxTasksPerProject === next.maxTasksPerProject &&
     prev.loadingTasks === next.loadingTasks &&
-    prev.showNativeSessions === next.showNativeSessions &&
     prev.installingAgentLabel === next.installingAgentLabel;
+}
+
+function emptyListMessage({ loading, showArchived }: { loading: boolean; showArchived: boolean }) {
+  if (showArchived) return "Archive is empty. Archived Tasks and Native Sessions will appear here.";
+  return loading ? "Loading tasks." : "No tasks yet.";
 }

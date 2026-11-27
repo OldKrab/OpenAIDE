@@ -5,16 +5,9 @@ import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { PopupMenu } from "./Popup";
 import { useBackNavigation } from "./useBackNavigation";
 import { SidebarTaskRow } from "./SidebarTaskRow";
-import {
-  liveFirstVisibleRows,
-  projectGroupRows,
-  projectRowLive,
-  type SidebarProjectGroup,
-  type SidebarProjectRow,
-} from "./sidebarProjectModel";
 import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 import { useRef } from "react";
-import { taskForkMutationKey } from "../state/store";
+import { taskForkMutationKey, type NavigationGroupState, type NavigationRowState } from "../state/store";
 import { useTerminalSurface } from "./terminals/terminalSurface";
 import { currentFrontendShell } from "../services/frontendShell";
 import type { ArchiveOlderTasksAction } from "./SidebarArchiveOlderMenu";
@@ -23,19 +16,16 @@ type SidebarProjectTaskGroupProps = {
   activeTaskId?: string;
   agentIcons?: import("./AgentIcon").AgentIconLookup;
   collapsed: boolean;
-  group: SidebarProjectGroup;
-  /** History rows to show beside live rows, which are never limited. */
+  /** The Project's rows as App Server sent them, in its order and window. */
+  group: NavigationGroupState;
+  workspaceRoot?: string;
+  /** History rows App Server shows beside live rows, which no limit hides. */
   historyLimit: number;
   pageSize: number;
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
-  nativeSessions: AgentListedSession[];
   nativeSessionMutations: import("../state/store").AppState["nativeSessionMutations"];
   nativeSessionsAdoptingSessionId?: string;
-  nativeSessionsHaveMore: boolean;
-  /** The rows are search matches, so further pages extend the search rather than the list. */
-  searching?: boolean;
-  loading: boolean;
   canManageWorktrees: boolean;
   forkableAgentIds?: ReadonlySet<string>;
   deletableAgentIds?: ReadonlySet<string>;
@@ -47,8 +37,8 @@ type SidebarProjectTaskGroupProps = {
   onArchiveOlderTasks?: ArchiveOlderTasksAction;
   onForkNativeSession?: (session: AgentListedSession) => void;
   onForkTask?: (taskId: string) => void;
-  /** Reveals more history; `targetRowCount` is the total row demand for App Server discovery. */
-  onLoadMore: (historyLimit: number, targetRowCount: number) => void;
+  /** Asks App Server for a larger history window; it reports the rows and counts back. */
+  onLoadMore: (historyLimit: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
   /** Opens Project files as a page; absent where the App Shell cannot read files. */
@@ -75,16 +65,13 @@ export function SidebarProjectTaskGroup({
   agentIcons,
   collapsed,
   group,
+  workspaceRoot,
   historyLimit,
   pageSize,
   nativeSessionAgentId,
   nativeSessionAgentName,
-  nativeSessions,
   nativeSessionMutations,
   nativeSessionsAdoptingSessionId,
-  nativeSessionsHaveMore,
-  searching = false,
-  loading,
   canManageWorktrees,
   forkableAgentIds = new Set(),
   deletableAgentIds = new Set(),
@@ -129,24 +116,26 @@ export function SidebarProjectTaskGroup({
   useBackNavigation(renaming && !renameSaving, cancelRename);
   const headerRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
-  const taskRows = projectGroupRows(group.tasks, []);
-  const allRows = projectGroupRows(group.tasks, nativeSessions);
-  const visibleRows = liveFirstVisibleRows(allRows, historyLimit, activeTaskId);
-  const liveRows = visibleRows.filter((row) => projectRowLive(row, activeTaskId));
-  const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
+  const loading = group.discovery === "loading";
+  const isLive = (row: NavigationRowState) =>
+    row.live || (row.kind === "task" && row.task.task_id === activeTaskId);
+  const { rows } = group;
+  const liveRows = rows.filter(isLive);
+  // More exists when App Server's window hides rows or the Project's sessions are not all read.
+  const hasMore = group.hidden > 0 || group.undiscovered;
+  const shownCount = group.total;
   const countSummary = loading
     ? "Loading…"
-    : projectGroupCountSummary(taskRows.length, nativeSessions.length, searching && nativeSessionsHaveMore);
-  const totalCount = taskRows.length + nativeSessions.length;
+    : projectGroupCountSummary(shownCount);
   // A settled count renders its unit separately so phones can show the bare number.
-  const countLabel = !loading && countSummary === plainCountSummary(totalCount)
-    ? <>{totalCount}<span className="project-task-group-counts-unit">{` ${totalCount === 1 ? "task" : "tasks"}`}</span></>
+  const countLabel = !loading && countSummary === plainCountSummary(shownCount)
+    ? <>{shownCount}<span className="project-task-group-counts-unit">{` ${shownCount === 1 ? "task" : "tasks"}`}</span></>
     : countSummary;
   const projectPreview = {
     kind: "project" as const,
     state: countSummary || "No tasks",
     title: group.label,
-    workspaceLabel: group.workspaceRoot ?? "Path unavailable",
+    workspaceLabel: workspaceRoot ?? "Path unavailable",
   };
   const saveRename = async () => {
     if (!onRenameProject || renameSaving || !renameDraft.trim()) return;
@@ -162,7 +151,7 @@ export function SidebarProjectTaskGroup({
     }
   };
 
-  const renderRow = (row: SidebarProjectRow) => (
+  const renderRow = (row: NavigationRowState) => (
     row.kind === "task" ? (
       <SidebarTaskRow
         key={`task:${row.task.task_id}`}
@@ -254,12 +243,12 @@ export function SidebarProjectTaskGroup({
               </div>
             ) : null}
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
-            {(terminalSurface || nativeTerminal) && group.workspaceRoot ? (
+            {(terminalSurface || nativeTerminal) && workspaceRoot ? (
               <button
                 onClick={() => {
                   setMenuOpen(false);
-                  if (terminalSurface) terminalSurface.openPage({ projectId: group.key });
-                  else nativeTerminal?.open(group.workspaceRoot!);
+                  if (terminalSurface) terminalSurface.openPage({ projectId: group.projectId });
+                  else nativeTerminal?.open(workspaceRoot!);
                 }}
                 role="menuitem"
                 type="button"
@@ -284,19 +273,19 @@ export function SidebarProjectTaskGroup({
       >
         {/* Keep rows mounted so closing can animate before the clipped region reaches zero height. */}
         <div className="project-task-group-rows-inner">
-          {(collapsed ? visibleRows.filter((row) => !projectRowLive(row, activeTaskId)) : visibleRows).map(renderRow)}
-          {hiddenCount > 0 || nativeSessionsHaveMore ? (
+          {(collapsed ? rows.filter((row) => !isLive(row)) : rows).map(renderRow)}
+          {hasMore ? (
             <button
               aria-busy={loading || undefined}
               className="project-task-more"
               disabled={loading}
               onClick={() => {
-                const increment = hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize;
-                onLoadMore(historyLimit + increment, visibleRows.length + increment);
+                const increment = group.hidden > 0 ? Math.min(pageSize, group.hidden) : pageSize;
+                onLoadMore(historyLimit + increment);
               }}
               type="button"
             >
-              {searching ? "Search more tasks" : loadMoreLabel(hiddenCount, pageSize)}
+              {loadMoreLabel(group.hidden, pageSize)}
             </button>
           ) : null}
         </div>
@@ -310,15 +299,8 @@ function loadMoreLabel(hiddenCount: number, pageSize: number) {
   return hiddenCount > 0 ? `Show ${Math.min(pageSize, hiddenCount)} more` : "Show more";
 }
 
-function projectGroupCountSummary(taskCount: number, sessionCount: number, partialSearch: boolean) {
-  const totalCount = taskCount + sessionCount;
-  if (!totalCount) {
-    return "";
-  }
-  // An unfinished search has matched only the pages read so far; a bare count reads as final.
-  return partialSearch
-    ? `${totalCount} found so far`
-    : plainCountSummary(totalCount);
+function projectGroupCountSummary(totalCount: number) {
+  return totalCount ? plainCountSummary(totalCount) : "";
 }
 
 function plainCountSummary(totalCount: number) {

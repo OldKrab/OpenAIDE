@@ -88,7 +88,7 @@ fn durable_metadata_chat_and_commands_survive_reopen_without_live_option_catalog
 
     let task_dir = root.path().join("task-store-v1/tasks/task_split_authority");
     assert!(task_dir.join("task.json").is_file());
-    assert!(task_dir.join("chat.snapshot").is_file());
+    assert!(task_dir.join("chat.log").is_file());
     assert!(!task_dir.join("task.journal").exists());
 
     let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -151,7 +151,12 @@ fn idle_compaction_merges_chat_deltas_into_the_materialized_snapshot() {
     store.shutdown().unwrap();
 
     let task_dir = root.path().join("task-store-v1/tasks/task_split_compact");
-    assert!(!task_dir.join("chat.journal").exists());
+    assert!(!task_dir.join("chat.log.compact").exists());
+    // Compaction keeps the frame numbering: the log now holds one snapshot
+    // that covers all 128 frames.
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(task_dir.join("task.json")).unwrap()).unwrap();
+    assert_eq!(metadata["chatFrame"], 128);
     let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     assert_eq!(
         agent_text(&reopened.load("task_split_compact").unwrap().messages[0]),
@@ -190,7 +195,7 @@ fn chat_committed_before_metadata_is_repaired_after_restart() {
         .join("task-store-v1/tasks/task_metadata_lag/task.json");
     let mut metadata: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
-    metadata["chatSequence"] = serde_json::json!(0);
+    metadata["chatFrame"] = serde_json::json!(0);
     metadata["storageSequence"] = serde_json::json!(1);
     std::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
 
@@ -201,11 +206,11 @@ fn chat_committed_before_metadata_is_repaired_after_restart() {
 
     let repaired: serde_json::Value =
         serde_json::from_slice(&std::fs::read(metadata_path).unwrap()).unwrap();
-    assert_eq!(repaired["chatSequence"], 1);
+    assert_eq!(repaired["chatFrame"], 1);
 }
 
 #[test]
-fn stale_pre_compaction_chat_tail_is_ignored_after_snapshot_publication() {
+fn a_compaction_interrupted_before_its_rename_leaves_the_old_log_authoritative() {
     let root = TempDir::new().expect("create state root");
     let mut projection = task_projection("task_stale_tail");
     projection.messages.push(agent_message("agent_message", ""));
@@ -228,7 +233,7 @@ fn stale_pre_compaction_chat_tail_is_ignored_after_snapshot_publication() {
         .wait()
         .unwrap();
     let task_dir = root.path().join("task-store-v1/tasks/task_stale_tail");
-    let stale_tail = std::fs::read(task_dir.join("chat.journal")).unwrap();
+    let uncompacted = std::fs::read(task_dir.join("chat.log")).unwrap();
     store
         .submit(TaskWrite::compaction_barrier("task_stale_tail"))
         .unwrap()
@@ -236,15 +241,82 @@ fn stale_pre_compaction_chat_tail_is_ignored_after_snapshot_publication() {
         .unwrap();
     store.shutdown().unwrap();
 
-    // Models a crash after publishing the new snapshot pointer but before the
-    // obsolete generation was removed from the directory.
-    std::fs::write(task_dir.join("chat.journal"), stale_tail).unwrap();
+    // Models a crash after the compacted file was written and before it was
+    // renamed over the log: the old log stays, the new one is an orphan.
+    let compacted = std::fs::read(task_dir.join("chat.log")).unwrap();
+    std::fs::write(task_dir.join("chat.log"), uncompacted).unwrap();
+    std::fs::write(task_dir.join("chat.log.compact"), compacted).unwrap();
     let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert!(
+        !task_dir.join("chat.log.compact").exists(),
+        "the orphan is removed at startup"
+    );
     assert_eq!(
         agent_text(&reopened.load("task_stale_tail").unwrap().messages[0]),
         "once"
     );
     reopened.shutdown().unwrap();
+}
+
+#[test]
+fn numbering_continues_after_a_compaction_that_was_renamed() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_after_rename");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    for text in ["a", "b"] {
+        store
+            .submit(TaskWrite::stream_append_text(
+                "task_after_rename",
+                "agent_message",
+                text,
+                "1",
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    store
+        .submit(TaskWrite::compaction_barrier("task_after_rename"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    reopened
+        .submit(TaskWrite::stream_append_text(
+            "task_after_rename",
+            "agent_message",
+            "c",
+            "2",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    reopened.shutdown().unwrap();
+    let metadata: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            root.path()
+                .join("task-store-v1/tasks/task_after_rename/task.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata["chatFrame"], 3);
+    let (again, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        agent_text(&again.load("task_after_rename").unwrap().messages[0]),
+        "abc"
+    );
+    again.shutdown().unwrap();
 }
 
 #[test]
@@ -668,8 +740,10 @@ fn compaction_replaces_history_with_one_restart_safe_projection() {
         .unwrap()
         .wait()
         .unwrap();
-    assert!(before > 0);
-    assert!(!journal.exists());
+    assert!(
+        journal.metadata().unwrap().len() < before,
+        "compaction folds the frames into the snapshot"
+    );
     store.shutdown().unwrap();
 
     let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -737,8 +811,10 @@ fn idle_compaction_waits_for_a_measured_reclaim_threshold() {
         .wait()
         .unwrap();
     assert_eq!(compacted.journal_sequence, 129);
-    assert!(before_compaction > 0);
-    assert!(!journal.exists());
+    assert!(
+        journal.metadata().unwrap().len() < before_compaction,
+        "compaction folds the frames into the snapshot"
+    );
     store.shutdown().unwrap();
 }
 
@@ -948,7 +1024,7 @@ fn identical_task_replace_and_empty_text_create_no_frame_or_event() {
     commits.recv().unwrap();
     let task_dir = root.path().join("task-store-v1/tasks/task_noop");
     let before_task = std::fs::read(task_dir.join("task.json")).unwrap();
-    let before_chat = std::fs::read(task_dir.join("chat.snapshot")).unwrap();
+    let before_chat = std::fs::read(task_dir.join("chat.log")).unwrap();
 
     let replace = store
         .submit(TaskWrite::barrier_replace_task(projection.task.clone()))
@@ -973,7 +1049,7 @@ fn identical_task_replace_and_empty_text_create_no_frame_or_event() {
         before_task
     );
     assert_eq!(
-        std::fs::read(task_dir.join("chat.snapshot")).unwrap(),
+        std::fs::read(task_dir.join("chat.log")).unwrap(),
         before_chat
     );
     assert!(commits.try_recv().is_err());
@@ -1161,7 +1237,7 @@ fn task_journal_path(root: &std::path::Path, task_id: &str) -> std::path::PathBu
     root.join("task-store-v1")
         .join("tasks")
         .join(task_id)
-        .join("chat.journal")
+        .join("chat.log")
 }
 
 fn append_incomplete_frame(root: &std::path::Path, task_id: &str) {
@@ -1169,7 +1245,7 @@ fn append_incomplete_frame(root: &std::path::Path, task_id: &str) {
         .join("task-store-v1")
         .join("tasks")
         .join(task_id)
-        .join("chat.journal");
+        .join("chat.log");
     let mut file = OpenOptions::new()
         .append(true)
         .open(path)
@@ -1273,6 +1349,7 @@ fn assert_tool_artifact(
 
 fn task_projection(task_id: &str) -> TaskProjection {
     TaskProjection {
+        chat_version: 0,
         task: TaskRecord {
             task_id: task_id.to_string(),
             title: Default::default(),

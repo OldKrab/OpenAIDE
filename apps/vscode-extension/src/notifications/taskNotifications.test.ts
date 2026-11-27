@@ -58,9 +58,14 @@ describe("VS Code Task notification registration", () => {
       {
         kind: "taskNavigation",
         section: "tasks",
-        projectIds: ["project-1"],
       },
       expect.any(Object),
+      {
+        section: "tasks",
+        projectIds: ["project-1"],
+        historyLimit: 0,
+        historyLimits: [],
+      },
     );
 
     observer?.onSnapshot(navigationSnapshot([]));
@@ -159,10 +164,16 @@ function navigationSnapshot(
       groups: [{
         projectId: "project-1" as import("@openaide/app-server-client").ProjectId,
         projectLabel: "Project",
-        taskCount: tasks.length,
-        entries: tasks.map((task) => ({ kind: "task" as const, task })),
+        order: tasks.map((task) => `task:${task.taskId}`),
+        rowsById: Object.fromEntries(tasks.map((task) => [
+          `task:${task.taskId}`,
+          { live: false, entry: { kind: "task" as const, task } },
+        ])),
+        total: tasks.length,
+        hidden: 0,
+        undiscovered: false,
+        discovery: "settled" as const,
       }],
-      refresh: { state: "idle" },
     },
   };
 }

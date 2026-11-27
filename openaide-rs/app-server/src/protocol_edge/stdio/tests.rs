@@ -3,6 +3,7 @@ use super::*;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage};
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
@@ -14,10 +15,12 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
     ATTACHMENT_TRANSFER, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE,
-    NATIVE_SESSION_RESTORE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
+    NATIVE_SESSION_RESTORE, NAVIGATION_SUBSCRIBE, PENDING_REQUEST_RESOLVE,
+    SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
+    TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
+    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
 };
+use openaide_app_server_protocol::navigation::NavigationViewParams;
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 
@@ -68,6 +71,7 @@ fn initialize_params(client_id: &str) -> Value {
 fn gateway_request(id: &str, method: &str, params: Value) -> InboundProtocolMessage {
     InboundProtocolMessage::ClientRequest {
         id: id.to_string(),
+        wire_id: json!(id),
         method: method.to_string(),
         params,
         meta: RequestMeta::default(),
@@ -145,29 +149,29 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
         "client-1"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["newTaskDefaults"],
+        response["result"]["result"]["snapshot"]["global"]["newTaskDefaults"],
         serde_json::json!({})
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][0]["agentId"],
         "codex"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][1]["agentId"],
         "claude-code"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["settings"]["runtime"]["developer"]["acpTrace"]
-            ["enabled"],
+        response["result"]["result"]["snapshot"]["global"]["settings"]["runtime"]["developer"]
+            ["acpTrace"]["enabled"],
         false
     );
     assert!(
-        response["result"]["result"]["snapshot"]["settings"]["runtime"]["developer"]["acpTrace"]
-            ["directory"]
+        response["result"]["result"]["snapshot"]["global"]["settings"]["runtime"]["developer"]
+            ["acpTrace"]["directory"]
             .as_str()
             .expect("ACP trace directory")
             .contains("diagnostics/acp-traces")
@@ -221,7 +225,7 @@ fn reset_task_history_removes_local_tasks_without_touching_project_files() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-reset"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         })
         .to_string(),
@@ -717,15 +721,15 @@ fn initialize_uses_stored_agent_catalog_in_production_startup_path() {
 
     let response = response(&responses[0]);
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][0]["agentId"],
         "claude-code"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][1]["agentId"],
         "custom.local"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
 }
@@ -759,31 +763,20 @@ fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-1")).unwrap();
+        store.write_task(&navigable_task_record("task-1")).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
 
-    let responses = dispatcher.handle_line(&init_request("1", "client-1"));
-    assert!(response(&responses[0])["result"]["result"]["snapshot"]["tasks"].is_null());
-    let responses = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-navigation",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
-        })
-        .to_string(),
-    );
-    let response = response(&responses[0]);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    let responses = dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-navigation",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
+    // Discovery may queue a frame ahead of the reply; the reply carries the baseline.
+    let response = response(responses.last().unwrap());
     assert_eq!(
-        response["result"]["result"]["snapshot"]["navigation"]["groups"][0]["entries"][0]["task"]
+        response["result"]["result"]["frame"]["groups"][0]["rows"]["task:task-1"]["entry"]["task"]
             ["taskId"],
         "task-1"
     );
@@ -823,18 +816,7 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
             openaide_app_server_protocol::task::TaskNavigationSection::Archive,
         ),
     ] {
-        dispatcher.handle_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": STATE_SUBSCRIBE,
-                "params": StateSubscribeParams {
-                    scope: SubscriptionScope::TaskNavigation { section, project_ids: None },
-                    known_revision: None,
-                }
-            })
-            .to_string(),
-        );
+        dispatcher.handle_line(&navigation_subscribe_line(id, section));
     }
 
     let archived = dispatcher.handle_line(
@@ -846,12 +828,13 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
         })
         .to_string(),
     );
-    assert!(response(&archived[0])["result"]["result"]["archived"]
+    let (reply, events) = archived.split_last().unwrap();
+    assert!(response(reply)["result"]["result"]["archived"]
         .as_bool()
         .unwrap());
-    let sections = archived[1..]
+    let sections = events
         .iter()
-        .map(|line| response(line)["params"]["payload"]["section"].clone())
+        .map(|line| response(line)["params"]["payload"]["frame"]["section"].clone())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(
         sections,
@@ -867,9 +850,11 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
         })
         .to_string(),
     );
-    assert!(!response(&restored[0])["result"]["result"]["archived"]
-        .as_bool()
-        .unwrap());
+    assert!(
+        !response(restored.last().unwrap())["result"]["result"]["archived"]
+            .as_bool()
+            .unwrap()
+    );
     drop(dispatcher);
     let reopened = crate::native_sessions::catalog::NativeSessionCatalog::open(
         open_store_after_dispatcher_drop(temp.path()),
@@ -913,21 +898,10 @@ fn native_session_title_override_publishes_and_survives_restart() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-tasks",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-tasks",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let renamed = dispatcher.handle_line(
         &json!({
@@ -943,11 +917,12 @@ fn native_session_title_override_publishes_and_survives_restart() {
         .to_string(),
     );
     assert_eq!(
-        response(&renamed[0])["result"]["result"]["session"]["title"],
+        response(&renamed[1])["result"]["result"]["session"]["title"],
         "My session"
     );
     assert_eq!(
-        response(&renamed[1])["params"]["payload"]["entries"][0]["session"]["title"],
+        response(&renamed[0])["params"]["payload"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["title"],
         "My session"
     );
     let pinned = dispatcher.handle_line(
@@ -964,11 +939,12 @@ fn native_session_title_override_publishes_and_survives_restart() {
         .to_string(),
     );
     assert_eq!(
-        response(&pinned[0])["result"]["result"]["session"]["pinned"],
+        response(&pinned[1])["result"]["result"]["session"]["pinned"],
         true
     );
     assert_eq!(
-        response(&pinned[1])["params"]["payload"]["entries"][0]["session"]["pinned"],
+        response(&pinned[0])["params"]["payload"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["pinned"],
         true
     );
     let cleanup = dispatcher.handle_line(
@@ -995,29 +971,18 @@ fn native_session_title_override_publishes_and_survives_restart() {
 
     let mut reopened = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     reopened.handle_line(&init_request("2", "client-2"));
-    let baseline = reopened.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-after-restart",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
-        })
-        .to_string(),
-    );
+    let baseline = reopened.handle_line(&navigation_subscribe_line(
+        "subscribe-after-restart",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
     assert_eq!(
-        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
-            ["entries"][0]["session"]["title"],
+        response(baseline.last().unwrap())["result"]["result"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["title"],
         "My session"
     );
     assert_eq!(
-        response(&baseline[0])["result"]["result"]["snapshot"]["navigation"]["groups"][0]
-            ["entries"][0]["session"]["pinned"],
+        response(baseline.last().unwrap())["result"]["result"]["frame"]["groups"][0]["rows"]
+            ["session:codex:native-session"]["entry"]["session"]["pinned"],
         true
     );
 }
@@ -1026,18 +991,6 @@ fn native_session_title_override_publishes_and_survives_restart() {
 fn agent_probe_updates_agent_snapshot_and_emits_event() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_revision: None,
-            }
-        })
-        .to_string(),
-    );
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -1049,8 +1002,9 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
         .to_string(),
     );
 
+    // The probe's published change precedes its reply.
     assert_eq!(responses.len(), 2);
-    let probe_response = response(&responses[0]);
+    let probe_response = response(&responses[1]);
     assert_eq!(probe_response["id"], "2");
     assert_eq!(
         probe_response["result"]["result"]["agents"]["agents"][0]["agentId"],
@@ -1061,11 +1015,10 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
         "connected"
     );
 
-    let event = response(&responses[1]);
-    assert_eq!(event["method"], "app/event");
-    assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
+    let event = response(&responses[0]);
+    assert_eq!(event["method"], "sync");
     assert_eq!(
-        event["params"]["payload"]["agents"]["agents"][0]["status"],
+        event["params"]["changes"]["agents"]["agents"][0]["status"],
         "connected"
     );
 }
@@ -1084,18 +1037,6 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
         let state_root = StateRoot::resolve(temp.path()).expect("state root");
         let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
         dispatcher.handle_line(&init_request("1", "client-1"));
-        dispatcher.handle_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": "subscribe",
-                "method": STATE_SUBSCRIBE,
-                "params": StateSubscribeParams {
-                    scope: SubscriptionScope::Agents,
-                    known_revision: None,
-                }
-            })
-            .to_string(),
-        );
 
         let responses = dispatcher.handle_line(
             &json!({
@@ -1115,7 +1056,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
         );
 
         assert_eq!(responses.len(), 2);
-        let create_response = response(&responses[0]);
+        let create_response = response(&responses[1]);
         assert_eq!(create_response["id"], "create-agent");
         custom_agent_id = create_response["result"]["result"]["agentId"]
             .as_str()
@@ -1132,10 +1073,9 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
             .iter()
             .any(|agent| agent["agentId"] == custom_agent_id));
 
-        let event = response(&responses[1]);
-        assert_eq!(event["method"], "app/event");
-        assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
-        assert!(event["params"]["payload"]["agents"]["agents"]
+        let event = response(&responses[0]);
+        assert_eq!(event["method"], "sync");
+        assert!(event["params"]["changes"]["agents"]["agents"]
             .as_array()
             .unwrap()
             .iter()
@@ -1168,7 +1108,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
     let responses = restarted.handle_line(&init_request("restart", "client-2"));
     let restart_response = response(&responses[0]);
     assert!(
-        restart_response["result"]["result"]["snapshot"]["agents"]["agents"]
+        restart_response["result"]["result"]["snapshot"]["global"]["agents"]["agents"]
             .as_array()
             .unwrap()
             .iter()
@@ -1211,7 +1151,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         })
         .to_string(),
     );
-    let custom_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let custom_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1229,7 +1169,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         .to_string(),
     );
 
-    let disabled_response = response(&disabled[0]);
+    let disabled_response = response(disabled.last().unwrap());
     assert!(disabled_response["result"]["result"]["agents"]["agents"]
         .as_array()
         .unwrap()
@@ -1248,7 +1188,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         .to_string(),
     );
 
-    let delete_response = response(&deleted[0]);
+    let delete_response = response(deleted.last().unwrap());
     assert_eq!(
         delete_response["result"]["result"]["agentId"],
         custom_agent_id
@@ -1278,7 +1218,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let old_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let old_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1297,7 +1237,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let update_response = response(&updated[0]);
+    let update_response = response(updated.last().unwrap());
     assert_eq!(update_response["result"]["result"]["agentId"], old_agent_id);
 
     let metadata_only_replace = dispatcher.handle_line(
@@ -1367,7 +1307,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let replace_response = response(&replaced[0]);
+    let replace_response = response(replaced.last().unwrap());
     let new_agent_id = replace_response["result"]["result"]["newAgentId"]
         .as_str()
         .unwrap();
@@ -1400,18 +1340,6 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
 fn rejected_agent_mutations_return_errors_without_agent_events() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_revision: None,
-            }
-        })
-        .to_string(),
-    );
 
     let invalid_create = dispatcher.handle_line(
         &json!({
@@ -1463,7 +1391,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
         })
         .to_string(),
     );
-    let custom_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let custom_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1551,7 +1479,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
         })
         .to_string(),
     );
-    let create_disabled_response = response(&create_disabled[0]);
+    let create_disabled_response = response(create_disabled.last().unwrap());
     assert_eq!(create_disabled_response["id"], "create-disabled");
     assert!(create_disabled_response["result"]["result"]["agentId"]
         .as_str()
@@ -1758,7 +1686,7 @@ fn corrupt_last_byte(path: &std::path::Path) {
 }
 
 #[test]
-fn task_subscription_emits_pending_server_request_over_stdio() {
+fn task_subscription_lists_pending_request_as_task_state_over_stdio() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1767,67 +1695,141 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    let opened = dispatcher.gateway.open_server_request(
-        task_secret_request("task-1"),
+    dispatcher.gateway.open_server_request(
+        task_permission_request("task-1"),
         crate::client_lifecycle::AppServerTime(2),
     );
-    assert!(matches!(
-        opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.is_empty()
-    ));
 
     let responses = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
             "method": STATE_SUBSCRIBE,
-            "params": {
-                "scope": {
-                    "kind": "task",
-                    "taskId": "task-1"
-                }
-            }
+            "params": { "scope": { "kind": "task", "taskId": "task-1" } }
         })
         .to_string(),
     );
 
-    assert_eq!(responses.len(), 2);
+    // Pending requests are Task state: nothing is resent as a server request on subscribe.
+    assert_eq!(responses.len(), 1);
     let subscribe_response = response(&responses[0]);
     assert_eq!(subscribe_response["id"], "2");
-    assert_eq!(
-        subscribe_response["result"]["result"]["snapshot"]["task"]["task"]["title"],
-        serde_json::json!({ "value": "Task", "source": "user" })
-    );
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["pendingRequests"][0]
             ["requestId"],
         "server-request-1"
     );
-    let server_request = response(&responses[1]);
-    assert_eq!(server_request["jsonrpc"], "2.0");
-    assert_eq!(server_request["id"], "server-request-1");
-    assert_eq!(server_request["method"], "secret/read");
-    assert_eq!(server_request["params"]["key"], "agent.secret");
 
-    let updates = dispatcher.handle_line(
+    let resolved = resolve_pending_permission(
+        &mut dispatcher,
+        &json!({ "requestId": "server-request-1" }),
+        "allow-once",
+    );
+
+    assert!(resolved.iter().any(|line| {
+        let update = response(line);
+        update["params"]["payload"]["kind"] == "taskRequestsUpdated"
+            && update["params"]["payload"]["requests"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+    }));
+    assert!(dispatcher
+        .gateway
+        .pending_server_requests_for_task(&TaskId::from("task-1"))
+        .is_empty());
+    drop(temp);
+}
+
+fn vscode_init_request(client_id: &str, workspace_root: &str) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": "init",
+        "method": CLIENT_INITIALIZE,
+        "params": {
+            "clientInstanceId": client_id,
+            "shell": { "kind": "vscodeExtension" },
+            "requestedSurface": { "kind": "home" },
+            "workspaceRoots": [{ "path": workspace_root }]
+        }
+    })
+    .to_string()
+}
+
+fn answer_error_code(lines: &[String]) -> Option<String> {
+    lines
+        .iter()
+        .map(|line| response(line))
+        .find(|message| message["id"] == "resolve")
+        .and_then(|message| {
+            message["error"]["error"]["code"]
+                .as_str()
+                .map(str::to_string)
+        })
+}
+
+fn dispatcher_with_pending_permission(temp: &tempfile::TempDir) -> ProtocolEdgeStdioDispatcher {
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("task-1")).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    dispatcher.gateway.open_server_request(
+        task_permission_request("task-1"),
+        crate::client_lifecycle::AppServerTime(2),
+    );
+    dispatcher
+}
+
+#[test]
+fn a_vscode_client_answers_only_tasks_of_its_projects() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let mut dispatcher = dispatcher_with_pending_permission(&temp);
+    // client-1 (web) never opened the Task; the VS Code client works in another Project.
+    dispatcher.handle_line(&vscode_init_request(
+        "vscode-other",
+        "/tmp/openaide-stdio-workspace/other",
+    ));
+    let denied = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "decision": "allow" }
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }
         })
         .to_string(),
     );
+    // The stdio dispatcher serves one connection, the latest initialized client.
+    assert_eq!(answer_error_code(&denied).as_deref(), Some("unauthorized"));
+    assert_eq!(
+        dispatcher
+            .gateway
+            .pending_server_requests_for_task(&TaskId::from("task-1"))
+            .len(),
+        1
+    );
 
-    assert_eq!(updates.len(), 1);
-    let update = response(&updates[0]);
-    assert_eq!(update["method"], "app/event");
-    assert_eq!(update["params"]["payload"]["kind"], "taskRequestsUpdated");
-    assert!(update["params"]["payload"]["requests"]
-        .as_array()
-        .is_some_and(Vec::is_empty));
+    dispatcher.handle_line(&vscode_init_request(
+        "vscode-same",
+        "/tmp/openaide-stdio-workspace/a",
+    ));
+    let accepted = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(answer_error_code(&accepted), None);
     assert!(dispatcher
         .gateway
         .pending_server_requests_for_task(&TaskId::from("task-1"))
@@ -1836,8 +1838,14 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
 }
 
 #[test]
-fn stdio_error_response_does_not_resolve_pending_server_request() {
-    let (temp, mut dispatcher) = dispatcher();
+fn stdio_error_response_is_refused_and_does_not_resolve_pending_server_request() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("task-1")).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -1855,7 +1863,7 @@ fn stdio_error_response_does_not_resolve_pending_server_request() {
     );
     let opened = dispatcher
         .gateway
-        .open_server_request(task_server_request("task-1"), AppServerTime(2));
+        .open_server_request(task_secret_request("task-1"), AppServerTime(2));
     assert!(matches!(
         opened,
         OpenRequestOutcome::Opened {
@@ -1873,7 +1881,13 @@ fn stdio_error_response_does_not_resolve_pending_server_request() {
         .to_string(),
     );
 
-    assert!(responses.is_empty());
+    // App Server refuses the error answer and says so, as it does on every transport.
+    let [refusal] = responses.as_slice() else {
+        panic!("expected one refusal, got {responses:?}");
+    };
+    let refusal = response(refusal);
+    assert_eq!(refusal["id"], "server-request-1");
+    assert_eq!(refusal["error"]["error"]["code"], "validationFailed");
     assert_eq!(
         dispatcher
             .gateway
@@ -1971,15 +1985,6 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-projects",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
-        })
-        .to_string(),
-    );
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2105,18 +2110,10 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
-            }
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2133,10 +2130,11 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
 
     assert_eq!(
         responses.len(),
-        1,
-        "the mutation response must not duplicate notifier events"
+        2,
+        "the mutation queues one navigation frame before its reply and nothing else"
     );
-    let response = response(&responses[0]);
+    assert!(event_payload_kind(&responses[0], "navigationFrame"));
+    let response = response(&responses[1]);
     assert_eq!(
         response["result"]["result"]["task"]["task"]["status"],
         "starting"
@@ -2162,7 +2160,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
         navigation_updated = dispatcher
             .handle_task_update(committed)
             .iter()
-            .any(|line| event_payload_kind(line, "taskUpdated"));
+            .any(|line| event_payload_kind(line, "navigationFrame"));
         if navigation_updated {
             break;
         }
@@ -2200,7 +2198,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2222,62 +2220,57 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
 }
 
 #[test]
-fn task_update_notification_emits_focused_task_and_navigation_changes() {
+fn a_mutation_queues_the_changed_rows_navigation_frame_before_its_reply() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let record = task_record("task-existing");
-    let navigation_task = crate::snapshots::project_task_summary(record.clone());
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&record).unwrap();
+        store
+            .write_task(&navigable_task_record("task-existing"))
+            .unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe-navigation",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
+    // Frames queued by the subscription's own discovery are not what this test observes.
+    dispatcher.outbound().flush(|lines| lines);
+
+    let messages = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
-            "id": "subscribe-task",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Task { task_id: TaskId::from("task-existing") },
-                known_revision: None,
-            }
-        })
-        .to_string(),
-    );
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-navigation",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
-            }
+            "id": "pin",
+            "method": TASK_SET_PINNED,
+            "params": { "taskId": "task-existing", "pinned": true }
         })
         .to_string(),
     );
 
-    let messages = dispatcher.handle_task_update(TaskUpdate {
-        task_id: "task-existing".to_string(),
-        revision: 2,
-        kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
-            crate::task_events::CommittedTaskChange {
-                changes: openaide_app_server_protocol::events::TaskChanges::default(),
-                tool_details: Vec::new(),
-                navigation: Some(crate::task_events::CommittedNavigationChange::TaskUpdated(
-                    Box::new(navigation_task),
-                )),
-            },
-        )),
-    });
-
-    assert!(messages
+    // The subscription's background discovery may still land a frame after the reply, so the
+    // reply is found by id and only the lines ahead of it are inspected.
+    let reply_index = messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskUpdated")));
-    assert!(!messages
+        .position(|line| response(line)["id"] == "pin")
+        .expect("pin reply");
+    let (events, reply) = (&messages[..reply_index], &messages[reply_index]);
+    assert_eq!(response(reply)["result"]["result"]["task"]["pinned"], true);
+    let frame = events
         .iter()
-        .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
+        .find(|line| {
+            event_payload_kind(line, "navigationFrame")
+                && !response(line)["params"]["payload"]["frame"]["groups"][0]["rows"]
+                    ["task:task-existing"]
+                    .is_null()
+        })
+        .expect("navigation frame with the changed row ahead of the reply");
+    assert_eq!(
+        response(frame)["params"]["payload"]["frame"]["groups"][0]["rows"]["task:task-existing"]
+            ["entry"]["task"]["pinned"],
+        true
+    );
+    assert!(!events.iter().any(|line| response(line)["method"] == "sync"));
 }
 
 #[test]
@@ -2300,7 +2293,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2318,25 +2311,18 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
         .to_string(),
     );
 
-    let request = wait_for_server_request(&mut dispatcher, &notifications, "permission/request");
-    assert_eq!(request["id"], "server-request-1");
-    assert!(request["params"]["requestId"]
-        .as_str()
-        .expect("agent permission request id")
-        .starts_with("perm_"));
-    let option_id = request["params"]["options"][0]["optionId"]
+    let request = wait_for_pending_permission(&mut dispatcher, &notifications);
+    assert_eq!(request["requestId"], "server-request-1");
+    assert!(!request["permission"]["options"]
+        .as_array()
+        .expect("permission options")
+        .is_empty());
+    let option_id = request["permission"]["options"][0]["optionId"]
         .as_str()
         .expect("option id")
         .to_string();
 
-    let updates = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": request["id"],
-            "result": { "optionId": option_id }
-        })
-        .to_string(),
-    );
+    let updates = resolve_pending_permission(&mut dispatcher, &request, &option_id);
     assert!(updates.iter().any(|line| {
         let value = response(line);
         value["method"] == "app/event"
@@ -2389,7 +2375,7 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2407,19 +2393,12 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
         .to_string(),
     );
 
-    let request = wait_for_server_request(&mut dispatcher, &notifications, "permission/request");
-    let option_id = request["params"]["options"][1]["optionId"]
+    let request = wait_for_pending_permission(&mut dispatcher, &notifications);
+    let option_id = request["permission"]["options"][1]["optionId"]
         .as_str()
         .expect("reject option id")
         .to_string();
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": request["id"],
-            "result": { "optionId": option_id }
-        })
-        .to_string(),
-    );
+    resolve_pending_permission(&mut dispatcher, &request, &option_id);
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
     drop(dispatcher);
@@ -2554,8 +2533,10 @@ fn product_request_before_initialize_is_rejected_by_gateway() {
             "id": "2",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
+                known_version: None,
             }
         })
         .to_string(),
@@ -2611,18 +2592,10 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
-            }
-        })
-        .to_string(),
-    );
+    dispatcher.handle_line(&navigation_subscribe_line(
+        "subscribe",
+        openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    ));
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2800,6 +2773,55 @@ fn task_archive_older_previews_then_archives_only_safe_tasks_in_the_cutoff_proje
                 "native-old",
             ))
     );
+}
+
+#[test]
+fn task_archive_older_archives_a_task_open_in_a_view() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut old = task_record("task-old");
+        old.last_activity = "2026-01-01T00:00:00.000Z".to_string();
+        let mut cutoff = task_record("task-cutoff");
+        cutoff.last_activity = "2026-01-03T00:00:00.000Z".to_string();
+        for task in [old, cutoff] {
+            store.write_task(&task).unwrap();
+        }
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    // A subscription is only "send me this data": it protects nothing.
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe",
+            "method": STATE_SUBSCRIBE,
+            "params": { "scope": { "kind": "task", "taskId": "task-old" } }
+        })
+        .to_string(),
+    );
+
+    let archived = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "archive-older",
+            "method": "task/archiveOlder",
+            "params": { "cutoff": { "kind": "task", "taskId": "task-cutoff" }, "preview": false }
+        })
+        .to_string(),
+    );
+
+    let result = archived
+        .iter()
+        .map(|line| response(line))
+        .find(|message| message["id"] == "archive-older")
+        .expect("archiveOlder reply");
+    assert_eq!(
+        result["result"]["result"]["archivedTaskIds"],
+        json!(["task-old"])
+    );
+    assert_eq!(result["result"]["result"]["protected"], json!([]));
 }
 
 #[test]
@@ -3003,19 +3025,10 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         configured_projects,
     );
     let notifications = dispatcher.take_task_updates().expect("task updates");
-    dispatcher.handle_line(&init_request("1", "client-1"));
-    let subscription = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-projects",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
-        })
-        .to_string(),
-    );
-    let project_snapshot = response(&subscription[0]);
+    let initialized = dispatcher.handle_line(&init_request("1", "client-1"));
+    let project_snapshot = response(&initialized[0]);
     assert_eq!(
-        project_snapshot["result"]["result"]["snapshot"]["projects"]["projects"],
+        project_snapshot["result"]["result"]["snapshot"]["global"]["projects"]["projects"],
         json!([{
             "projectId": project_id_for_workspace(workspace_root),
             "label": "configured-project",
@@ -3169,6 +3182,13 @@ fn notifications_do_not_emit_responses() {
     assert!(responses.is_empty());
 }
 
+/// A Task with message history, which is what Navigation's membership filter requires.
+fn navigable_task_record(task_id: &str) -> TaskRecord {
+    let mut record = task_record(task_id);
+    record.message_history_version = 1;
+    record
+}
+
 fn task_record(task_id: &str) -> TaskRecord {
     let workspace_root = "/tmp/openaide-stdio-workspace/a";
     std::fs::create_dir_all(workspace_root).unwrap();
@@ -3221,14 +3241,18 @@ fn task_record(task_id: &str) -> TaskRecord {
     }
 }
 
-fn task_server_request(task_id: &str) -> ServerRequestDraft {
+fn task_permission_request(task_id: &str) -> ServerRequestDraft {
     ServerRequestDraft {
         scope: PendingRequestScope::Task {
             task_id: TaskId::from(task_id),
         },
         method: "permission/request".to_string(),
         title: "Permission needed".to_string(),
-        params: json!({ "prompt": "Allow?" }),
+        params: json!({
+            "title": "Run a command",
+            "toolCall": { "id": "call-1", "title": "Run" },
+            "options": [{ "optionId": "allow-once", "name": "Allow", "kind": "allowOnce" }]
+        }),
     }
 }
 
@@ -3249,15 +3273,36 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
     })
 }
 
+/// A `navigation/subscribe` request with the default window used by the Web shell.
+fn navigation_subscribe_line(
+    id: &str,
+    section: openaide_app_server_protocol::task::TaskNavigationSection,
+) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": NAVIGATION_SUBSCRIBE,
+        "params": NavigationViewParams {
+            section,
+            project_ids: None,
+            history_limit: 20,
+            history_limits: Vec::new(),
+            open_row: None,
+        },
+    })
+    .to_string()
+}
+
 fn event_payload_kind(line: &str, kind: &str) -> bool {
     let value = response(line);
     value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind
 }
 
-fn wait_for_server_request(
+/// Waits for the pending Permission to arrive as Task state. It never arrives as a server
+/// request (ADR-0086).
+fn wait_for_pending_permission(
     dispatcher: &mut ProtocolEdgeStdioDispatcher,
     notifications: &mpsc::Receiver<TaskUpdate>,
-    method: &str,
 ) -> Value {
     let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
@@ -3268,12 +3313,38 @@ fn wait_for_server_request(
         };
         for line in dispatcher.handle_task_update(notification) {
             let value = response(&line);
-            if value["method"] == method {
-                return value;
+            assert_ne!(
+                value["method"], "permission/request",
+                "a Permission must not be sent as a server request"
+            );
+            let payload = &value["params"]["payload"];
+            if value["method"] == "app/event" && payload["kind"] == "taskRequestsUpdated" {
+                if let Some(request) = payload["requests"].as_array().and_then(|r| r.first()) {
+                    return request.clone();
+                }
             }
         }
     }
-    panic!("server request {method} was not emitted");
+    panic!("no pending Permission reached the Task state");
+}
+
+fn resolve_pending_permission(
+    dispatcher: &mut ProtocolEdgeStdioDispatcher,
+    request: &Value,
+    option_id: &str,
+) -> Vec<String> {
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": request["requestId"],
+                "resolution": { "kind": "permission", "optionId": option_id }
+            }
+        })
+        .to_string(),
+    )
 }
 
 fn wait_for_protocol_task_status(
@@ -3316,4 +3387,40 @@ fn stdio_time_follows_the_wall_clock_and_never_repeats() {
     let (stepped_back, _) = next_stdio_time(next, 20_000);
     assert_eq!(same_ms, AppServerTime(34_001));
     assert_eq!(stepped_back, AppServerTime(34_002));
+}
+
+#[test]
+fn stdio_writes_a_reply_and_a_later_publication_in_publish_order() {
+    let (_temp, mut dispatcher) = dispatcher();
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    dispatcher.dispatch_line(
+        &json!({ "jsonrpc": "2.0", "id": "3", "method": CLIENT_HEARTBEAT, "params": {} })
+            .to_string(),
+    );
+    dispatcher.publish_worktree_update(
+        serde_json::from_value(json!({
+            "repositoryId": "repo-new",
+            "revision": 1,
+            "worktrees": [],
+        }))
+        .unwrap(),
+    );
+    let lines = dispatcher.outbound().flush(|lines| lines);
+
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(response(&lines[0])["id"], "3");
+    assert_eq!(response(&lines[1])["method"], "sync");
+}
+
+#[test]
+fn stdio_dispatches_a_client_notification_without_a_reply() {
+    let (_temp, mut dispatcher) = dispatcher();
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let lines = dispatcher.handle_line(
+        &json!({ "jsonrpc": "2.0", "method": "client/unknown", "params": {} }).to_string(),
+    );
+
+    assert!(lines.is_empty(), "{lines:?}");
 }

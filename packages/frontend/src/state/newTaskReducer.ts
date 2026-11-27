@@ -17,7 +17,7 @@ import {
   type WorkspaceRoot,
 } from "./composerOptions";
 import type { AppAction } from "./appReducer";
-import type { AppState } from "./store";
+import type { AppState, NativeSessionsState } from "./store";
 import { newTaskPreparationKey } from "./newTaskPreparationContext";
 
 type NewTaskAction =
@@ -226,7 +226,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptions: sameAgent ? state.newTask.configOptions : undefined,
           configOptionsLoading: sameAgent ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameAgent ? state.newTask.configOptionsError : undefined,
-          nativeSessions: sameAgent ? state.newTask.nativeSessions : emptyNativeSessions(),
+          nativeSessions: sameAgent ? state.newTask.nativeSessions : emptyNativeSessions(state.newTask.nativeSessions),
       }, action.newTaskId);
     }
     case "newTask:project":
@@ -237,7 +237,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
-          nativeSessions: emptyNativeSessions(),
+          nativeSessions: emptyNativeSessions(state.newTask.nativeSessions),
       }, action.newTaskId);
     case "newTask:projectId": {
       const project = state.projects.find((candidate) => candidate.projectId === action.projectId);
@@ -253,7 +253,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptions: sameProject ? state.newTask.configOptions : undefined,
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameProject ? state.newTask.configOptionsError : undefined,
-          nativeSessions: sameProject ? state.newTask.nativeSessions : emptyNativeSessions(),
+          nativeSessions: sameProject ? state.newTask.nativeSessions : emptyNativeSessions(state.newTask.nativeSessions),
       }, action.newTaskId);
     }
     case "newTask:isolation":
@@ -394,7 +394,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
-          nativeSessions: emptyNativeSessions(),
+          nativeSessions: emptyNativeSessions(state.newTask.nativeSessions),
       }, action.newTaskId);
     case "newTask:worktree":
       return replacePreparedDraftOnContextChange(state, {
@@ -468,10 +468,15 @@ function isNewTaskAction(action: AppAction): action is NewTaskAction {
     || action.type.startsWith("newTask:");
 }
 
-function emptyNativeSessions() {
+/**
+ * Clears a selection's transient session state. The rows belong to the Navigation subscription,
+ * which sends a frame only when they change, so a selection change must not drop them.
+ */
+function emptyNativeSessions(current?: NativeSessionsState): NativeSessionsState {
   return {
-    items: [],
+    items: current?.items ?? [],
+    groups: current?.groups ?? [],
     loading: false,
-    loaded: false,
+    loaded: current?.loaded ?? false,
   };
 }

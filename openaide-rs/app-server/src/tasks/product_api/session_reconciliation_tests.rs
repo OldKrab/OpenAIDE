@@ -322,10 +322,16 @@ fn incomplete_listing_never_removes_missing_history() {
                 }],
             )
             .unwrap();
-        let result = api.refresh_native_session_project_trees(
-            None,
-            Some(if scenario == "bounded" { 1 } else { 20 }),
+        api.native_session_catalog().discovery().replace_demand(
+            [(
+                project_id_for_workspace(workspace.to_str().unwrap())
+                    .as_str()
+                    .to_string(),
+                if scenario == "bounded" { 1 } else { 20 },
+            )]
+            .into(),
         );
+        let result = api.refresh_native_session_project_trees(None);
         assert_eq!(result.is_err(), scenario == "failed");
         assert!(
             !store.read_task("preserved-history").unwrap().tombstoned,

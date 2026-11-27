@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  PERMISSION_REQUEST,
-  QUESTION_REQUEST,
   SECRET_READ,
   SHELL_OPEN_EXTERNAL,
   SHELL_SHOW_NOTIFICATION,

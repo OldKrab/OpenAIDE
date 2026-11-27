@@ -1,8 +1,13 @@
+import type { NavigationReplica } from "./stateIngestionTaskNavigation.js";
 import type {
   AppServerEvent,
   ClientProbeResult,
   InitializeParams,
   InitializeResult,
+  ClientNotificationMethod,
+  ClientNotificationParamsByMethod,
+  GlobalStateChanges,
+  NavigationViewParams,
   ProtocolMethod,
   RequestId,
   RequestMeta,
@@ -12,11 +17,17 @@ import type {
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
   StateRootId,
+  SubagentHistorySnapshot,
   SubscriptionScope,
   SubscriptionSnapshot,
+  TaskId,
+  TaskSnapshot,
+  ToolDetailSnapshot,
 } from "./generated/protocol.js";
 
 export type BackendEventListener = (event: AppServerEvent) => void;
+/** Receives the changes of one `sync` notification: every changed area of the global state. */
+export type BackendSyncListener = (changes: GlobalStateChanges) => void;
 export type BackendUnsubscribe = () => void;
 export type BackendGenerationInvalidation = {
   reason:
@@ -38,10 +49,38 @@ export type AppServerSessionStatus =
   | { status: "recovering"; generation: number; reason: BackendGenerationInvalidation["reason"] }
   | { status: "unavailable"; generation: number; error: unknown };
 /**
- * A scope replica's installed state. A subscribe reply's `taskResume` is rebuilt into
- * a complete `task` snapshot before any observer sees it (ADR-0073).
+ * A Task replica's installed state: its complete current fields and Chat, and the Chat version
+ * they were built at. A subscribe reply's `chatSync` is resolved into a complete Chat before any
+ * observer sees it (ADR-0086), so it is not kept.
  */
-export type ReplicaSnapshot = Exclude<SubscriptionSnapshot, { kind: "taskResume" }>;
+export type TaskReplicaSnapshot = { kind: "task"; task: TaskSnapshot; chatVersion: number };
+/**
+ * A Tool detail replica's installed state: complete fields and the whole terminal output.
+ * `details.revision` is the artifact sequence it was built at.
+ */
+export type ToolDetailReplicaSnapshot = {
+  kind: "toolDetail";
+  taskId: TaskId;
+  artifactId: string;
+  details: ToolDetailSnapshot;
+};
+/**
+ * A Subagent History replica's installed state: complete fields and the Chat page it holds.
+ * `history.revision` is the history revision it was built at.
+ */
+export type SubagentHistoryReplicaSnapshot = { kind: "subagentHistory"; history: SubagentHistorySnapshot };
+/** An entity replica's installed state: what a subscribe reply resumes from (ADR-0086). */
+export type EntityReplicaSnapshot =
+  | TaskReplicaSnapshot
+  | ToolDetailReplicaSnapshot
+  | SubagentHistoryReplicaSnapshot;
+/** A Navigation view's installed state: groups and rows exactly as App Server computed them. */
+export type NavigationReplicaSnapshot = { kind: "taskNavigation"; navigation: NavigationReplica };
+/** A scope replica's installed state. */
+export type ReplicaSnapshot =
+  | Exclude<SubscriptionSnapshot, { kind: "task" | "toolDetail" | "subagentHistory" }>
+  | EntityReplicaSnapshot
+  | NavigationReplicaSnapshot;
 export type AppServerStateObserver = {
   onSnapshot(snapshot: ReplicaSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
   onBaselineLost?(): void;
@@ -72,6 +111,15 @@ export interface BackendConnection {
     params: RequestParamsByMethod[M],
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]>;
+  /**
+   * Sends a client notification: no reply, no retry of its own. A lost notification is made good
+   * by the sender re-sending its current state after the session is re-initialized. Absent on
+   * connections that cannot carry one (an App Shell bridge).
+   */
+  notify?<M extends ClientNotificationMethod>(
+    method: M,
+    params: ClientNotificationParamsByMethod[M],
+  ): void;
   /** Registers a typed inbound request handler; its return value is the protocol response. */
   handleRequest<M extends ServerRequestMethod>(
     method: M,
@@ -82,6 +130,12 @@ export interface BackendConnection {
   ): BackendUnsubscribe;
   /** Registers a typed App Server event notification handler. */
   handleNotification(method: "app/event", handler: BackendEventListener): BackendUnsubscribe;
+  /**
+   * Registers a handler for `sync`, the global state's changes (ADR-0086). The state itself is
+   * in the `client/initialize` reply and in each recovery baseline; a change applies to the
+   * state of the current initialization.
+   */
+  handleNotification(method: "sync", handler: BackendSyncListener): BackendUnsubscribe;
   /** Signals that active state subscriptions must install fresh authoritative baselines. */
   handleGenerationInvalidated(
     handler: (event: BackendGenerationInvalidation) => void,
@@ -105,8 +159,16 @@ export interface BackendConnection {
 
 /** One logical initialized client session across replaceable physical transports. */
 export interface AppServerSession extends BackendConnection {
-  /** Owns one scope replica, including cursor-gap and transport-generation recovery. */
-  subscribeState(scope: SubscriptionScope, observer: AppServerStateObserver): BackendUnsubscribe;
+  /**
+   * Owns one scope replica, including cursor-gap and transport-generation recovery. A
+   * `taskNavigation` scope needs `view`, the parameters of its Navigation view; later changes go
+   * through `request(NAVIGATION_UPDATE, ...)`, which the session also remembers for recovery.
+   */
+  subscribeState(
+    scope: SubscriptionScope,
+    observer: AppServerStateObserver,
+    view?: NavigationViewParams,
+  ): BackendUnsubscribe;
   /** Reports the single request-readiness state for the logical session. */
   handleSessionStatus(handler: (status: AppServerSessionStatus) => void): BackendUnsubscribe;
 }

@@ -1,15 +1,10 @@
 import type {
   AppServerEventPayload,
-  ClientSnapshot,
   SubscriptionScope,
 } from "./generated/protocol.js";
 import type { ReplicaSnapshot } from "./backendConnection.js";
-import {
-  filterTaskNavigationForScope,
-  replaceNavigationProjectEntries,
-  updateExistingNavigationTask,
-} from "./stateIngestionTaskNavigation.js";
-import { updateSubagentHistorySnapshot } from "./stateIngestionSubagentHistory.js";
+import { applyNavigationFrame } from "./stateIngestionTaskNavigation.js";
+import { updateSubagentHistorySnapshot, updateToolDetailSnapshot } from "./stateIngestionEntities.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
@@ -19,31 +14,9 @@ export function updateSubscriptionSnapshot(
   snapshot: ReplicaSnapshot,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
-  if (payload.kind === "snapshotReplaced") {
-    return updateFromClientSnapshot(scope, snapshot, payload.snapshot);
-  }
-
   switch (snapshot.kind) {
-    case "projects":
-      return payload.kind === "projectCollectionUpdated"
-        ? changed({ kind: "projects", projects: payload.projects })
-        : unchanged(snapshot);
-    case "agents":
-      return payload.kind === "agentCollectionUpdated"
-        ? changed({ kind: "agents", agents: payload.agents })
-        : unchanged(snapshot);
-    case "devices":
-      return payload.kind === "deviceCollectionUpdated"
-        ? changed({ kind: "devices", devices: payload.devices })
-        : unchanged(snapshot);
-    case "terminals":
-      return payload.kind === "terminalCollectionUpdated"
-        ? changed({ kind: "terminals", terminals: payload.terminals })
-        : unchanged(snapshot);
-    case "settings":
-      return unchanged(snapshot);
     case "taskNavigation":
-      return updateTaskNavigationSnapshot(scope, snapshot, payload);
+      return updateTaskNavigationSnapshot(snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
     case "subagentCatalog":
@@ -55,121 +28,17 @@ export function updateSubscriptionSnapshot(
     case "subagentHistory":
       return updateSubagentHistorySnapshot(snapshot, payload);
     case "toolDetail":
-      if ((payload.kind !== "toolDetailUpdated" && payload.kind !== "toolDetailChanged")
-        || payload.taskId !== snapshot.taskId
-        || payload.artifactId !== snapshot.artifactId) {
-        return unchanged(snapshot);
-      }
-      if (payload.kind === "toolDetailUpdated") {
-        if (payload.details.revision < snapshot.details.revision) return unchanged(snapshot);
-        return changed({ ...snapshot, details: payload.details });
-      }
-      if (payload.kind === "toolDetailChanged") {
-        // A baseline can race with dispatch of the durable delta it already contains.
-        if (payload.revision <= snapshot.details.revision) return unchanged(snapshot);
-        if (payload.revision !== snapshot.details.revision + 1) {
-          return { kind: "resyncRequired", reason: "toolDetailRevisionGap" };
-        }
-        const terminalOutputs = (snapshot.details.terminalOutputs ?? []).map((terminal) => ({ ...terminal }));
-        let details = snapshot.details;
-        for (const delta of payload.deltas) {
-          if (delta.kind === "replaceDetails") {
-            details = {
-              ...delta.details,
-              revision: payload.revision,
-              terminalOutputs,
-            };
-            continue;
-          }
-          const existing = terminalOutputs.find((terminal) => terminal.terminalId === delta.terminalId);
-          if (existing) existing.output += delta.data;
-          else terminalOutputs.push({ terminalId: delta.terminalId, output: delta.data });
-        }
-        return changed({
-          ...snapshot,
-          details: { ...details, revision: payload.revision, terminalOutputs },
-        });
-      }
-      return unchanged(snapshot);
-    case "worktreeRepository":
-      return payload.kind === "worktreeRepositoryUpdated"
-        && payload.repositoryId === snapshot.repository.repositoryId
-        ? changed({ kind: "worktreeRepository", repository: payload.repository })
-        : unchanged(snapshot);
-  }
-}
-
-function updateFromClientSnapshot(
-  scope: SubscriptionScope,
-  snapshot: ReplicaSnapshot,
-  clientSnapshot: ClientSnapshot,
-): SnapshotUpdate {
-  switch (snapshot.kind) {
-    case "projects":
-      return clientSnapshot.projects ? changed({ kind: "projects", projects: clientSnapshot.projects }) : unchanged(snapshot);
-    case "agents":
-      return clientSnapshot.agents ? changed({ kind: "agents", agents: clientSnapshot.agents }) : unchanged(snapshot);
-    case "settings":
-      return clientSnapshot.settings ? changed({ kind: "settings", settings: clientSnapshot.settings }) : unchanged(snapshot);
-    case "taskNavigation":
-      return clientSnapshot.tasks
-        ? changed({ kind: "taskNavigation", navigation: filterTaskNavigationForScope(clientSnapshot.tasks, scope) })
-        : unchanged(snapshot);
-    case "task":
-      return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
-        ? changed({ kind: "task", task: clientSnapshot.activeTask })
-        : unchanged(snapshot);
-    case "subagentCatalog":
-    case "subagentHistory":
-      return unchanged(snapshot);
-    case "devices":
-    case "terminals":
-    case "toolDetail":
-    case "worktreeRepository":
-      return unchanged(snapshot);
+      return updateToolDetailSnapshot(snapshot, payload);
   }
 }
 
 function updateTaskNavigationSnapshot(
-  scope: SubscriptionScope,
   snapshot: Extract<ReplicaSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
-  if (payload.kind === "navigationReplaced") {
-    return changed({
-      ...snapshot,
-      navigation: filterTaskNavigationForScope(payload.navigation, scope),
-    });
-  }
-  if (payload.kind === "refreshStateChanged") {
-    return changed({
-      ...snapshot,
-      navigation: {
-        ...snapshot.navigation,
-        refresh: payload.refresh,
-      },
-    });
-  }
-  if (payload.kind === "taskUpdated") {
-    const navigation = updateExistingNavigationTask(
-      snapshot.navigation,
-      payload.projectId,
-      payload.task,
-    );
-    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
-  }
-  if (payload.kind === "projectEntriesReplaced") {
-    if (payload.section !== snapshot.navigation.section) return unchanged(snapshot);
-    const navigation = replaceNavigationProjectEntries(
-      snapshot.navigation,
-      payload.projectId,
-      payload.taskCount,
-      payload.entries,
-      payload.hasMore,
-      payload.loading,
-    );
-    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
-  }
-
-  return unchanged(snapshot);
+  if (payload.kind !== "navigationFrame") return unchanged(snapshot);
+  const applied = applyNavigationFrame(snapshot.navigation, payload.frame);
+  if (applied.kind === "stale") return unchanged(snapshot);
+  if (applied.kind === "resyncRequired") return { kind: "resyncRequired", reason: applied.reason, detail: applied.detail };
+  return changed({ kind: "taskNavigation", navigation: applied.navigation });
 }

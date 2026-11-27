@@ -5,6 +5,7 @@ import type {
   ProjectId,
   SubscriptionScope,
 } from "@openaide/app-server-client";
+import { navigationGroupRows, type NavigationViewParams } from "@openaide/app-server-client";
 import { createTaskNotificationManager } from "./taskNotificationManager";
 import { workspaceRoots } from "../workspace/roots";
 
@@ -14,6 +15,7 @@ type TaskNotificationRuntime = {
   subscribeAppServerState(
     scope: SubscriptionScope,
     observer: AppServerStateObserver,
+    view?: NavigationViewParams,
   ): Promise<BackendUnsubscribe>;
 };
 
@@ -66,15 +68,11 @@ export async function registerTaskNotifications(
   let stop: BackendUnsubscribe;
   try {
     stop = await runtime.subscribeAppServerState(
-      {
-        kind: "taskNavigation",
-        section: "tasks",
-        projectIds: workspaceRoots().map((root) => root.projectId as ProjectId),
-      },
+      { kind: "taskNavigation", section: "tasks" },
       {
         onSnapshot(snapshot) {
           if (snapshot.kind !== "taskNavigation") return;
-          manager.reconcile(snapshot.navigation.groups.flatMap((group) => group.entries).flatMap((entry) => (
+          manager.reconcile(snapshot.navigation.groups.flatMap(navigationGroupRows).flatMap(({ entry }) => (
             entry.kind === "task" ? [entry.task] : []
           )));
         },
@@ -83,6 +81,13 @@ export async function registerTaskNotifications(
             error: error instanceof Error ? error.message : String(error),
           });
         },
+      },
+      {
+        section: "tasks",
+        projectIds: workspaceRoots().map((root) => root.projectId as ProjectId),
+        // Notifications need only live Tasks, which every window includes.
+        historyLimit: 0,
+        historyLimits: [],
       },
     );
   } catch (error) {

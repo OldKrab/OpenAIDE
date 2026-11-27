@@ -3,6 +3,7 @@ import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import type { NativeSessionsState } from "../state/store";
+import { navigationGroup, navigationState, taskRow } from "./navigationTestFixtures";
 import { Sidebar } from "./Sidebar";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import { LONG_PRESS_DELAY_MS, LONG_PRESS_SLOP_PX } from "./useTouchLongPress";
@@ -56,33 +57,33 @@ describe("task row long press", () => {
 
 describe("task list pull to refresh", () => {
   it("refreshes when a pull from the top passes the threshold", () => {
-    const onLoadNativeSessions = vi.fn();
-    const tree = renderSidebar(onLoadNativeSessions);
+    const onRefreshNavigation = vi.fn();
+    const tree = renderSidebar(onRefreshNavigation);
     const list = tree.root.findByProps({ role: "list" });
 
     act(() => list.props.onTouchStart(touch(100, 100)));
     act(() => list.props.onTouchMove(touch(100, 100 + PULL_REFRESH_THRESHOLD_PX / 2)));
     act(() => list.props.onTouchEnd());
-    expect(onLoadNativeSessions).not.toHaveBeenCalled();
+    expect(onRefreshNavigation).not.toHaveBeenCalled();
 
     act(() => list.props.onTouchStart(touch(100, 100)));
     act(() => list.props.onTouchMove(touch(100, 110)));
     act(() => list.props.onTouchMove(touch(100, 100 + PULL_REFRESH_THRESHOLD_PX + 10)));
     expect(tree.root.findByProps({ className: "task-pull-refresh" }).props["data-armed"]).toBe(true);
     act(() => list.props.onTouchEnd());
-    expect(onLoadNativeSessions).toHaveBeenCalledTimes(1);
+    expect(onRefreshNavigation).toHaveBeenCalledTimes(1);
   });
 
   it("leaves a horizontal drag to the drawer swipe", () => {
-    const onLoadNativeSessions = vi.fn();
-    const tree = renderSidebar(onLoadNativeSessions);
+    const onRefreshNavigation = vi.fn();
+    const tree = renderSidebar(onRefreshNavigation);
     const list = tree.root.findByProps({ role: "list" });
 
     act(() => list.props.onTouchStart(touch(100, 100)));
     act(() => list.props.onTouchMove(touch(40, 104)));
     act(() => list.props.onTouchMove(touch(40, 100 + PULL_REFRESH_THRESHOLD_PX + 10)));
     act(() => list.props.onTouchEnd());
-    expect(onLoadNativeSessions).not.toHaveBeenCalled();
+    expect(onRefreshNavigation).not.toHaveBeenCalled();
   });
 });
 
@@ -102,8 +103,10 @@ function renderRow(onOpenTask: (taskId: string) => void) {
   return tree!;
 }
 
-function renderSidebar(onLoadNativeSessions: () => void) {
-  const nativeSessions: NativeSessionsState = { items: [], loaded: true, loading: false };
+function renderSidebar(onRefreshNavigation: () => void) {
+  const nativeSessions: NativeSessionsState = navigationState([
+    navigationGroup("project_1", "Project", [taskRow(task())]),
+  ]);
   let tree: ReturnType<typeof create> | undefined;
   act(() => {
     tree = create(
@@ -113,7 +116,7 @@ function renderSidebar(onLoadNativeSessions: () => void) {
         nativeSessions={nativeSessions}
         onArchiveNativeSession={vi.fn()}
         onArchiveTask={vi.fn()}
-        onLoadNativeSessions={onLoadNativeSessions}
+        onRefreshNavigation={onRefreshNavigation}
         onNewTask={vi.fn()}
         onOpenNativeSession={vi.fn()}
         onOpenTask={vi.fn()}
@@ -122,9 +125,12 @@ function renderSidebar(onLoadNativeSessions: () => void) {
         onSearchChange={vi.fn()}
         onSettings={vi.fn()}
         onToggleArchived={vi.fn()}
+        onSearchNavigation={vi.fn()}
         searchQuery=""
         showArchived={false}
-        tasks={[task()]}
+        historyLimit={20}
+        historyLimitOverrides={{}}
+        onSetProjectHistoryLimit={vi.fn()}
       />,
       // The list is scrolled to its top, where a pull may start.
       { createNodeMock: () => ({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 }) },

@@ -1,6 +1,7 @@
 import type {
   BackendConnection,
   BackendEventListener,
+  BackendSyncListener,
   BackendGenerationInvalidation,
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
@@ -98,6 +99,7 @@ function createReliableHttpBackendConnection(
 ): BackendConnection {
   const logger = options.logger ?? createDiagnosticsLogger();
   const eventListeners = new Set<BackendEventListener>();
+  const syncListeners = new Set<BackendSyncListener>();
   const generationInvalidationListeners = new Set<
     (event: BackendGenerationInvalidation) => void
   >();
@@ -241,6 +243,10 @@ function createReliableHttpBackendConnection(
         return active.connection.request(method, params, meta);
       }
     },
+    notify(method, params) {
+      if (closed || terminalError) return;
+      active.connection.notify?.(method, params);
+    },
     handleRequest(method, handler) {
       let unsubscribe = active.connection.handleRequest(method, handler);
       const registration = {
@@ -256,9 +262,10 @@ function createReliableHttpBackendConnection(
       requestRegistrations.add(registration);
       return registration.dispose;
     },
-    handleNotification(_method, handler) {
-      eventListeners.add(handler);
-      return () => eventListeners.delete(handler);
+    handleNotification(method: "app/event" | "sync", handler: BackendEventListener | BackendSyncListener) {
+      const listeners = (method === "sync" ? syncListeners : eventListeners) as Set<typeof handler>;
+      listeners.add(handler);
+      return () => listeners.delete(handler);
     },
     handleGenerationInvalidated(handler) {
       generationInvalidationListeners.add(handler);
@@ -289,6 +296,7 @@ function createReliableHttpBackendConnection(
       generations.clear();
       requestRegistrations.clear();
       eventListeners.clear();
+      syncListeners.clear();
       generationInvalidationListeners.clear();
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();
@@ -430,9 +438,16 @@ function createReliableHttpBackendConnection(
     linkLost = false;
     heartbeatSilent = false;
     publishResponsiveness();
-    generation.unsubscribeEvent = generation.connection.handleNotification("app/event", (event) => {
+    const stopEvents = generation.connection.handleNotification("app/event", (event) => {
       for (const listener of eventListeners) listener(event);
     });
+    const stopSync = generation.connection.handleNotification("sync", (changes) => {
+      for (const listener of syncListeners) listener(changes);
+    });
+    generation.unsubscribeEvent = () => {
+      stopEvents();
+      stopSync();
+    };
     for (const registration of requestRegistrations) registration.bind(generation.connection);
   }
 

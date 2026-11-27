@@ -133,6 +133,60 @@ test("split store discovers target state and replays committed chat deltas", () 
   assert.ok(damagedDoctor.findings.some((finding) => finding.code === "chat-storage-invalid"));
 });
 
+test("chat.log tasks replay only the frames the checkpoint commits", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "oa-artifacts-repo-"));
+  const state = path.join(repo, ".openaide-web-target", "state");
+  const taskDir = path.join(state, "task-store-v1", "tasks", "task_log");
+  fs.mkdirSync(taskDir, { recursive: true });
+  const taskFile = path.join(taskDir, "task.json");
+  fs.writeFileSync(
+    taskFile,
+    JSON.stringify({
+      schemaVersion: 2,
+      storageSequence: 2,
+      chatFrame: 5,
+      task: { task_id: "task_log", status: "inactive", message_history_version: 2 },
+    }),
+  );
+  const meta = (version, count) => ({
+    task_id: "task_log",
+    version,
+    message_count: count,
+    first_cursor: "m:1",
+    last_cursor: `m:${count}`,
+  });
+  const append = (sequence, text, count) => ({
+    format_version: 1,
+    schema_version: 2,
+    sequence,
+    operations: [
+      { operation: "append_message", message: storedAgentMessage(count, `agent:${count}`, text) },
+      { operation: "replace_message_meta", message_meta: meta(count, count) },
+    ],
+  });
+  // The snapshot covers frames through 4, so numbering continues at 5.
+  const snapshot = {
+    schemaVersion: 2,
+    messages: [storedAgentMessage(1, "agent:1", "before")],
+    messageMeta: meta(1, 1),
+    artifactHeads: {},
+  };
+  writeChatLog(path.join(taskDir, "chat.log"), 4, snapshot, [append(5, "after", 2), append(6, "uncommitted", 3)]);
+
+  const run = (...args) =>
+    JSON.parse(execFileSync(process.execPath, [scriptPath, ...args, "--root", state, "--json"], { cwd: repo, encoding: "utf8" }));
+  assert.deepEqual(
+    run("messages", "task_log").messages.map((stored) => stored.chat.message.parts[0].text),
+    ["before", "after"],
+  );
+  assert.equal(run("doctor", "task_log").finding_count, 0);
+
+  const damaged = JSON.parse(fs.readFileSync(taskFile, "utf8"));
+  damaged.chatFrame = 9;
+  fs.writeFileSync(taskFile, JSON.stringify(damaged));
+  assert.ok(run("doctor", "task_log").findings.some((finding) => finding.code === "chat-storage-invalid"));
+});
+
 test("roots discovers repo-local web app state", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "oa-artifacts-repo-"));
   const state = path.join(repo, ".openaide-web-dev", "state");
@@ -253,6 +307,23 @@ function writeJournal(file, frames) {
   const chunks = [Buffer.from("OAIDETJ\0"), Buffer.from([1, 0])];
   for (const frame of frames) {
     const payload = Buffer.from(JSON.stringify(frame));
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64LE(BigInt(payload.length));
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32LE(crc32(payload));
+    chunks.push(length, payload, checksum);
+  }
+  fs.writeFileSync(file, Buffer.concat(chunks));
+}
+
+function writeChatLog(file, covers, snapshot, frames) {
+  const header = Buffer.alloc(18);
+  Buffer.from("OAIDECL\0").copy(header);
+  header.writeUInt16LE(1, 8);
+  header.writeBigUInt64LE(BigInt(covers), 10);
+  const chunks = [header];
+  for (const record of [snapshot, ...frames]) {
+    const payload = Buffer.from(JSON.stringify(record));
     const length = Buffer.alloc(8);
     length.writeBigUInt64LE(BigInt(payload.length));
     const checksum = Buffer.alloc(4);

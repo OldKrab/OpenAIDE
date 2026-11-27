@@ -1,5 +1,5 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_SEARCH | typeof NAVIGATION_SUBSCRIBE | typeof NAVIGATION_UPDATE | typeof NAVIGATION_UNSUBSCRIBE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;\n");
     // Append new methods outside the legacy monolithic literal so additions remain reviewable.
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
@@ -148,7 +148,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryParams;\n");
     output.push_str("  [TASK_LIST]: TaskListParams;\n");
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshParams;\n");
-    output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;\n");
+    output.push_str("  [NAVIGATION_SUBSCRIBE]: NavigationViewParams;\n");
+    output.push_str("  [NAVIGATION_UPDATE]: NavigationViewParams;\n");
+    output.push_str("  [NAVIGATION_UNSUBSCRIBE]: NavigationUnsubscribeParams;\n");
+    output.push_str("  [TASK_NAVIGATION_SEARCH]: TaskNavigationSearchParams;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveParams;\n");
     output.push_str("  [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleParams;\n");
     output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedParams;\n");
@@ -283,7 +286,10 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryResult;\n");
     output.push_str("  [TASK_LIST]: TaskListResult;\n");
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshResult;\n");
-    output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;\n");
+    output.push_str("  [NAVIGATION_SUBSCRIBE]: NavigationSubscribeResult;\n");
+    output.push_str("  [NAVIGATION_UPDATE]: NavigationUpdateResult;\n");
+    output.push_str("  [NAVIGATION_UNSUBSCRIBE]: NavigationUnsubscribeResult;\n");
+    output.push_str("  [TASK_NAVIGATION_SEARCH]: TaskNavigationSearchResult;\n");
     output.push_str("  [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveResult;\n");
     output.push_str("  [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleResult;\n");
     output.push_str("  [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedResult;\n");
@@ -514,10 +520,12 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type TaskArchiveResponse = ResponseEnvelope<TaskArchiveResult>;\nexport type TaskRestoreResponse = ResponseEnvelope<TaskRestoreResult>;\n",
     );
     output.push('\n');
-    output.push_str("export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
+    output.push_str("export type ClientNotificationMethod = typeof CLIENT_SECRET_KEYS_CHANGED;\n");
+    output.push_str("export type ClientNotificationParamsByMethod = {\n");
+    output.push_str("  [CLIENT_SECRET_KEYS_CHANGED]: ClientSecretKeysChangedParams;\n");
+    output.push_str("};\n\n");
+    output.push_str("export type ServerRequestMethod = typeof SECRET_READ | typeof SHELL_AUTH_TERMINAL | typeof SHELL_OPEN_EXTERNAL | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;\n");
     output.push_str("export type ServerRequestParamsByMethod = {\n");
-    output.push_str("  [PERMISSION_REQUEST]: PermissionRequestParams;\n");
-    output.push_str("  [QUESTION_REQUEST]: QuestionRequestParams;\n");
     output.push_str("  [SECRET_READ]: SecretReadParams;\n");
     output.push_str("  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalParams;\n");
     output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalParams;\n");
@@ -525,8 +533,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_REVEAL_FILE]: ShellRevealFileParams;\n");
     output.push_str("};\n\n");
     output.push_str("export type ServerRequestResponseResultByMethod = {\n");
-    output.push_str("  [PERMISSION_REQUEST]: PermissionRequestResponse;\n");
-    output.push_str("  [QUESTION_REQUEST]: QuestionRequestResponse;\n");
     output.push_str("  [SECRET_READ]: SecretReadResponse;\n");
     output.push_str("  [SHELL_AUTH_TERMINAL]: ShellAuthTerminalResponse;\n");
     output.push_str("  [SHELL_OPEN_EXTERNAL]: ShellOpenExternalResponse;\n");

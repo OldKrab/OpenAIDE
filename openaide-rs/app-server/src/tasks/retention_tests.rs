@@ -12,7 +12,7 @@ use crate::storage::records::{
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
 use crate::tasks::product_api::TaskProductApi;
-use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
+use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 
 #[test]
@@ -71,7 +71,6 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
         server_requests.clone(),
     )
     .unwrap();
-    let presence = api.task_subscription_presence();
 
     let old = crate::time::activity_millis("2026-07-01T00:00:00Z").unwrap();
     let now = crate::time::activity_millis("2026-08-07T00:00:00Z").unwrap();
@@ -82,7 +81,7 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
         "pinned",
         "active",
         "queued",
-        "subscribed",
+        "open-in-a-view",
         "pending-request",
         "prepared",
     ] {
@@ -110,10 +109,6 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
     }
     api.mark_task_used_at_for_test("recently-opened", now)
         .unwrap();
-    presence.subscribe_for_test(
-        ClientInstanceId::from("client-1"),
-        TaskId::from("subscribed"),
-    );
     server_requests.open(
         ServerRequestDraft {
             scope: PendingRequestScope::Task {
@@ -129,8 +124,10 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
 
     let report = api.run_storage_maintenance_at(now).unwrap();
 
-    assert_eq!(report.purged_tasks, 2);
-    for purged in ["expired", "archived"] {
+    // A Task open in some view is not protected: only `task/open` (the last-used marker) and
+    // the activity rules keep a Task, so an unused one is purged and its views get the removal.
+    assert_eq!(report.purged_tasks, 3);
+    for purged in ["expired", "archived", "open-in-a-view"] {
         assert!(matches!(
             store.read_task(purged),
             Err(RuntimeError::TaskNotFound(_))
@@ -149,7 +146,6 @@ fn retention_sweep_purges_only_seven_day_old_idle_unpinned_local_task_state() {
         "pinned",
         "active",
         "queued",
-        "subscribed",
         "pending-request",
         "prepared",
     ] {

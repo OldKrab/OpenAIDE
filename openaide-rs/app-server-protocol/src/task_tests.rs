@@ -172,3 +172,44 @@ fn task_image_request_without_a_variant_still_means_the_original() {
         json!({ "data": "aGk=" })
     );
 }
+
+#[test]
+fn navigation_search_hit_carries_section_snippet_and_message() {
+    let params: TaskNavigationSearchParams =
+        serde_json::from_value(json!({ "text": "parser" })).unwrap();
+    assert_eq!(params.project_ids, None);
+
+    let hit = TaskNavigationSearchHit {
+        row: crate::navigation::NavigationRow {
+            live: false,
+            entry: crate::snapshot::TaskNavigationEntry::NativeSession {
+                session: crate::snapshot::NativeSessionSummary {
+                    reference: crate::snapshot::NativeSessionReference {
+                        agent_id: AgentId::new("agent-a"),
+                        session_id: "native-1".to_string(),
+                    },
+                    project_id: ProjectId::new("project-1"),
+                    workspace_root: "/workspace".to_string(),
+                    worktree_id: None,
+                    title: Some("Parser".to_string()),
+                    pinned: false,
+                    last_activity: None,
+                },
+            },
+        },
+        section: TaskNavigationSection::Archive,
+        title_highlights: vec![(0, 6)],
+        snippet: Some(SearchSnippet {
+            text: "the parser".to_string(),
+            highlights: vec![(4, 10)],
+        }),
+        message_id: Some(MessageId::new("message-1")),
+    };
+    let value = serde_json::to_value(hit).unwrap();
+
+    assert_eq!(value["section"], "archive");
+    assert_eq!(value["titleHighlights"], json!([[0, 6]]));
+    assert_eq!(value["snippet"]["highlights"], json!([[4, 10]]));
+    assert_eq!(value["messageId"], "message-1");
+    assert_eq!(value["row"]["entry"]["kind"], "nativeSession");
+}

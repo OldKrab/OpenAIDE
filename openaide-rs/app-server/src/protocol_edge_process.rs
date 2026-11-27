@@ -1,73 +1,62 @@
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
-use openaide_app_server::client_lifecycle::AppServerTime;
 use openaide_app_server::protocol_edge::run_task_update_publisher;
 use openaide_app_server::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 
+/// Bounds how long a queued server request waits when nothing signals a delivery.
+const STDIO_FLUSH_FALLBACK_WAKE: Duration = Duration::from_millis(250);
+
+/// Every line App Server sends to stdout, except host bridge requests, leaves through the stdio
+/// connection's outbound sequence. Publisher threads only publish; the flusher moves the sequence
+/// to stdout on each delivery signal, and the stdin loop flushes after each line so replies and
+/// rejections do not wait for a wake.
 pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
     let task_updates = dispatcher.take_task_updates();
     let worktree_updates = dispatcher.take_worktree_updates();
     let agent_status_updates = dispatcher.take_agent_status_updates();
     let host_requests = dispatcher.take_host_requests();
+    let outbound = dispatcher.outbound();
     let dispatcher = Arc::new(Mutex::new(dispatcher));
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));
     if let Some(task_updates) = task_updates {
         let dispatcher = dispatcher.clone();
-        let stdout = stdout.clone();
         thread::spawn(move || {
             for update in task_updates {
-                let messages = dispatcher
-                    .lock()
-                    .expect("protocol edge dispatcher lock poisoned")
-                    .handle_task_update(update);
-                for message in messages {
-                    let mut stdout = stdout.lock().expect("stdout lock poisoned");
-                    if writeln!(stdout, "{message}").is_err() {
-                        return;
-                    }
-                    let _ = stdout.flush();
-                }
+                lock(&dispatcher).publish_task_update(update);
             }
         });
     }
     if let Some(worktree_updates) = worktree_updates {
         let dispatcher = dispatcher.clone();
-        let stdout = stdout.clone();
         thread::spawn(move || {
             for repository in worktree_updates {
-                let messages = dispatcher
-                    .lock()
-                    .expect("protocol edge dispatcher lock poisoned")
-                    .handle_worktree_update(repository);
-                for message in messages {
-                    let mut stdout = stdout.lock().expect("stdout lock poisoned");
-                    if writeln!(stdout, "{message}").is_err() {
-                        return;
-                    }
-                    let _ = stdout.flush();
-                }
+                lock(&dispatcher).publish_worktree_update(repository);
             }
         });
     }
     if let Some(agent_status_updates) = agent_status_updates {
         let dispatcher = dispatcher.clone();
-        let stdout = stdout.clone();
         thread::spawn(move || {
             for _ in agent_status_updates {
-                let messages = dispatcher
-                    .lock()
-                    .expect("protocol edge dispatcher lock poisoned")
-                    .handle_agent_status_update();
-                for message in messages {
-                    let mut stdout = stdout.lock().expect("stdout lock poisoned");
-                    if writeln!(stdout, "{message}").is_err() {
-                        return;
-                    }
-                    let _ = stdout.flush();
+                lock(&dispatcher).publish_agent_status_update();
+            }
+        });
+    }
+    {
+        let outbound = outbound.clone();
+        let stdout = stdout.clone();
+        thread::spawn(move || {
+            let signal = outbound.delivery_signal();
+            loop {
+                let seen = signal.generation();
+                if !outbound.flush_with_server_requests(|lines| write_lines(&stdout, lines)) {
+                    return;
                 }
+                signal.wait_changed(seen, STDIO_FLUSH_FALLBACK_WAKE);
             }
         });
     }
@@ -78,11 +67,9 @@ pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
                 let Ok(line) = serde_json::to_string(&request) else {
                     continue;
                 };
-                let mut stdout = stdout.lock().expect("stdout lock poisoned");
-                if writeln!(stdout, "{line}").is_err() {
+                if !write_lines(&stdout, vec![line]) {
                     return;
                 }
-                let _ = stdout.flush();
             }
         });
     }
@@ -93,19 +80,35 @@ pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
         if line.trim().is_empty() {
             continue;
         }
-        let responses = dispatcher
-            .lock()
-            .expect("protocol edge dispatcher lock poisoned")
-            .handle_line(&line);
-        for response in responses {
-            let mut stdout = stdout.lock().expect("stdout lock poisoned");
-            if writeln!(stdout, "{response}").is_err() {
-                return;
-            }
-            let _ = stdout.flush();
+        lock(&dispatcher).dispatch_line(&line);
+        if !outbound.flush(|lines| write_lines(&stdout, lines)) {
+            return;
         }
     }
     openaide_app_server::logging::info("protocol_edge_app_server_stopped", serde_json::json!({}));
+}
+
+fn lock(
+    dispatcher: &Mutex<ProtocolEdgeStdioDispatcher>,
+) -> std::sync::MutexGuard<'_, ProtocolEdgeStdioDispatcher> {
+    dispatcher
+        .lock()
+        .expect("protocol edge dispatcher lock poisoned")
+}
+
+/// Writes lines to stdout. False once stdout is closed, which ends the writer.
+fn write_lines(stdout: &Mutex<io::Stdout>, lines: Vec<String>) -> bool {
+    if lines.is_empty() {
+        return true;
+    }
+    let mut stdout = stdout.lock().expect("stdout lock poisoned");
+    for line in lines {
+        if writeln!(stdout, "{line}").is_err() {
+            return false;
+        }
+    }
+    let _ = stdout.flush();
+    true
 }
 
 pub(super) fn run_local_http_handoff(
@@ -134,7 +137,7 @@ pub(super) fn run_local_http_handoff(
         let gateway = dispatcher.shared_gateway();
         spawn_named("openaide-pub-worktrees", move || {
             for repository in worktree_updates {
-                gateway.publish_worktree_repository_update(repository, AppServerTime::now());
+                gateway.publish_worktree_repository_update(repository);
             }
         });
     }
@@ -142,7 +145,7 @@ pub(super) fn run_local_http_handoff(
         let gateway = dispatcher.shared_gateway();
         spawn_named("openaide-pub-agents", move || {
             for _ in agent_status_updates {
-                gateway.publish_agent_status_update(AppServerTime::now());
+                gateway.publish_agent_status_update();
             }
         });
     }

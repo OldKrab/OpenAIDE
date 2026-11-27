@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::{atomic::AtomicU64, Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -12,6 +12,7 @@ use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LOGOUT, FILE_VIEWER_CHANGES, FILE_VIEWER_DIFF,
     FILE_VIEWER_EXISTING_FILES, FILE_VIEWER_LIST_DIRECTORY, FILE_VIEWER_OPEN,
     FILE_VIEWER_OPEN_FROM_HANDLE, FILE_VIEWER_REFRESH, FILE_VIEWER_SEARCH, TASK_IMAGE,
+    TASK_NAVIGATION_SEARCH,
 };
 use openaide_app_server_protocol::server_requests::SHELL_OPEN_EXTERNAL;
 use serde_json::{json, Value};
@@ -19,27 +20,27 @@ use serde_json::{json, Value};
 use crate::app_lifecycle::{LifecycleState, ShutdownCause, ShutdownCompletion};
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
 use crate::protocol::errors::RuntimeError;
-use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::shell_file_handles::ShellFileRevealTarget;
-use crate::snapshots::TaskNavigationSnapshotSource;
 use crate::task_events::TaskUpdate;
 #[cfg(test)]
 use crate::tasks::product_api::NativeCatalogRefreshRequester;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
-use super::task_handlers::publication::PreparedProjectEntries;
+use super::outbox::{OutboundMessage, Outbox, ProtocolExchange, ReplyRoute};
+use super::stdio::wire::InboundRejection;
 use super::task_update_publisher::TaskUpdatePublication;
 use super::{
-    AppServerProbeFacts, DeliverySignal, GatewayEventDelivery, GatewayOutcome,
-    InboundProtocolMessage, RpcGateway,
+    AppServerProbeFacts, DeliverySignal, GatewayOutcome, InboundProtocolMessage, RpcGateway,
 };
 
 /// A client request waiting this long for the protocol lock is user-visible latency:
 /// every request and publication on this gateway is serialized behind one mutex.
 const SLOW_LOCK_WAIT: Duration = Duration::from_millis(100);
 
+mod lock_free;
+mod navigation_search;
 mod relay;
 mod task_image;
 mod uploads;
@@ -47,12 +48,15 @@ mod uploads;
 #[derive(Clone)]
 pub struct SharedRpcGateway {
     gateway: Arc<Mutex<RpcGateway>>,
+    /// The gateway's outbox, reachable without the protocol lock so transports can drain it.
+    outbox: Outbox,
     deliveries: DeliverySignal,
     slow_lock_wait: Duration,
-    /// Held here so publications can read navigation without the protocol lock.
-    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
-    project_entries_generation: Arc<AtomicU64>,
 }
+
+/// A handled inbound message: the outcome, and the protocol lock it was produced under. The
+/// outcome joins the outbox before this guard is released.
+type Handled<'a> = (SignallingGateway<'a>, GatewayOutcome);
 
 /// Gateway access that may have queued client deliveries. Releasing it wakes
 /// transport links, so no publication site has to remember to signal.
@@ -77,6 +81,13 @@ impl DerefMut for SignallingGateway<'_> {
 
 impl Drop for SignallingGateway<'_> {
     fn drop(&mut self) {
+        // Whatever this holder changed reaches the views before the lock is released, so no
+        // later publication can overtake the frames it owes.
+        if let Some(gateway) = self.gateway.as_mut() {
+            if gateway.navigation.is_dirty() {
+                gateway.flush_navigation(crate::client_lifecycle::AppServerTime::now());
+            }
+        }
         // Unlock first: a woken link drains through the same mutex.
         self.gateway.take();
         self.deliveries.notify();
@@ -110,8 +121,7 @@ impl SharedRpcGateway {
     }
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
-            task_navigation: gateway.snapshots.task_navigation_source(),
-            project_entries_generation: gateway.project_entries_generation.clone(),
+            outbox: gateway.outbox.clone(),
             gateway: Arc::new(Mutex::new(gateway)),
             deliveries: DeliverySignal::default(),
             slow_lock_wait: SLOW_LOCK_WAIT,
@@ -179,44 +189,65 @@ impl SharedRpcGateway {
 
     /// Asked every second and only reads, so it stays silent.
     pub fn has_task_navigation_subscribers(&self) -> bool {
-        self.lock_quiet()
-            .state_stream
-            .subscription_count_for_kind(|scope| {
-                matches!(
-                    scope,
-                    openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation {
-                        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                        ..
-                    }
-                )
-            })
-            > 0
+        self.lock_quiet().navigation.has_tasks_view()
     }
 
-    pub fn handle_inbound(
+    /// Runs one inbound message and appends everything it produced to the outbound sequences
+    /// before the protocol lock is released, so no later publication can overtake it. Returns
+    /// whether a reply was queued.
+    pub fn dispatch_inbound(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+    ) -> bool {
+        let clock = completion_clock(now);
+        self.handle_queued(connection_id, message, now, clock, |_| ())
+            .1
+    }
+
+    /// Like [`Self::dispatch_inbound`], and also returns a copy of the outcome to inspect.
+    #[cfg(test)]
+    pub(crate) fn handle_inbound(
         &self,
         connection_id: ConnectionId,
         message: InboundProtocolMessage,
         now: AppServerTime,
     ) -> GatewayOutcome {
-        let started_at = Instant::now();
-        self.handle_inbound_with_completion_clock(connection_id, message, now, || {
-            let elapsed_ms = started_at
-                .elapsed()
-                .as_millis()
-                .try_into()
-                .unwrap_or(u64::MAX);
-            AppServerTime(now.0.saturating_add(elapsed_ms))
-        })
+        let clock = completion_clock(now);
+        self.handle_queued(connection_id, message, now, clock, Clone::clone)
+            .0
     }
 
-    fn handle_inbound_with_completion_clock(
+    fn handle_queued<R>(
         &self,
         connection_id: ConnectionId,
         message: InboundProtocolMessage,
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
+        inspect: impl FnOnce(&GatewayOutcome) -> R,
+    ) -> (R, bool) {
+        let route = ReplyRoute::for_message(&message);
+        let (mut gateway, outcome) =
+            self.handle_with_completion_clock(connection_id, message, now, completion_clock);
+        // Frames for what this request changed go out ahead of its reply, but after the frames its
+        // handler already stamped (those are in the outcome): the client drops a frame whose
+        // revision is not above the held one, and a later frame carries no bodies the earlier
+        // one introduced, so the two must reach the outbox in revision order.
+        let outcome = gateway.append_navigation_flush(outcome, now);
+        let inspected = inspect(&outcome);
+        let replied = gateway.outbox.push_outcome(outcome, route);
+        drop(gateway);
+        (inspected, replied)
+    }
+
+    fn handle_with_completion_clock(
+        &self,
+        connection_id: ConnectionId,
+        message: InboundProtocolMessage,
+        now: AppServerTime,
+        completion_clock: impl FnOnce() -> AppServerTime,
+    ) -> Handled<'_> {
         if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. }
             if matches!(method.as_str(), FILE_VIEWER_LIST_DIRECTORY | FILE_VIEWER_SEARCH | FILE_VIEWER_EXISTING_FILES | FILE_VIEWER_CHANGES | FILE_VIEWER_DIFF))
         {
@@ -255,27 +286,32 @@ impl SharedRpcGateway {
                 completion_clock,
             );
         }
-        if matches!(
-            &message,
-            InboundProtocolMessage::ClientRequest { method, .. }
-                if method == AGENT_AUTHENTICATE || method == AGENT_LOGOUT
-        ) {
-            return if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == AGENT_AUTHENTICATE)
-            {
-                self.handle_agent_authenticate_without_protocol_lock(
-                    connection_id,
-                    message,
-                    now,
-                    completion_clock,
-                )
-            } else {
-                self.handle_agent_logout_without_protocol_lock(
-                    connection_id,
-                    message,
-                    now,
-                    completion_clock,
-                )
-            };
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == TASK_NAVIGATION_SEARCH)
+        {
+            return self.handle_navigation_search_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == AGENT_AUTHENTICATE)
+        {
+            return self.handle_agent_authenticate_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
+        }
+        if matches!(&message, InboundProtocolMessage::ClientRequest { method, .. } if method == AGENT_LOGOUT)
+        {
+            return self.handle_agent_logout_without_protocol_lock(
+                connection_id,
+                message,
+                now,
+                completion_clock,
+            );
         }
         let wait_started_at = Instant::now();
         let mut gateway = self.lock();
@@ -289,251 +325,7 @@ impl SharedRpcGateway {
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
-        outcome
-    }
-
-    fn handle_project_files_without_protocol_lock(
-        &self,
-        connection_id: ConnectionId,
-        message: InboundProtocolMessage,
-        now: AppServerTime,
-        completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
-        let read = {
-            let mut gateway = self.lock();
-            if gateway.update_shutdown.is_some()
-                || gateway
-                    .client_hub
-                    .context_for_connection(&connection_id)
-                    .is_none()
-            {
-                return gateway.handle_inbound(connection_id, message, now);
-            }
-            gateway
-                .client_hub
-                .observe_connection_activity(&connection_id, now);
-            let InboundProtocolMessage::ClientRequest {
-                id,
-                method,
-                params,
-                meta,
-            } = &message
-            else {
-                unreachable!()
-            };
-            match gateway.prepare_project_files(&connection_id, method, params.clone()) {
-                Ok(read) => read,
-                Err(error) => return gateway.error(connection_id, id.clone(), meta.clone(), error),
-            }
-        };
-        let InboundProtocolMessage::ClientRequest {
-            id, method, meta, ..
-        } = message
-        else {
-            unreachable!()
-        };
-        let result = read.run(&id, &meta);
-        let mut gateway = self.lock();
-        if !gateway
-            .client_hub
-            .context_for_connection(&connection_id)
-            .is_some_and(|client| client.client_instance_id == read.owner)
-        {
-            return gateway.error(
-                connection_id,
-                id,
-                meta,
-                super::responses::not_initialized(method),
-            );
-        }
-        gateway
-            .client_hub
-            .observe_connection_activity(&connection_id, completion_clock());
-        gateway.result(connection_id, id, meta, result)
-    }
-
-    fn handle_file_viewer_without_protocol_lock(
-        &self,
-        connection_id: ConnectionId,
-        message: InboundProtocolMessage,
-        now: AppServerTime,
-        completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
-        let read = {
-            let mut gateway = self.lock();
-            // Keep routing's initialization/shutdown rejection and lease activity semantics.
-            if gateway.update_shutdown.is_some()
-                || gateway
-                    .client_hub
-                    .context_for_connection(&connection_id)
-                    .is_none()
-            {
-                return gateway.handle_inbound(connection_id, message, now);
-            }
-            if let Some(client) = gateway
-                .client_hub
-                .observe_connection_activity(&connection_id, now)
-            {
-                gateway.attachments.keep_alive_for_client(&client);
-            }
-            let InboundProtocolMessage::ClientRequest {
-                id,
-                method,
-                params,
-                meta,
-            } = &message
-            else {
-                unreachable!()
-            };
-            match gateway.prepare_file_viewer_read(&connection_id, method, params.clone()) {
-                Ok(read) => read,
-                Err(error) => return gateway.error(connection_id, id.clone(), meta.clone(), error),
-            }
-        };
-        let InboundProtocolMessage::ClientRequest {
-            id, method, meta, ..
-        } = message
-        else {
-            unreachable!()
-        };
-        let snapshot = read.run(&id);
-        let mut gateway = self.lock();
-        // A reconnect or detach while decoding must not deliver old contents to a new owner.
-        if !gateway
-            .client_hub
-            .context_for_connection(&connection_id)
-            .is_some_and(|client| client.client_instance_id == read.owner)
-        {
-            gateway.file_viewer.release(&read.owner, &snapshot.handle);
-            return gateway.error(
-                connection_id,
-                id,
-                meta,
-                super::responses::not_initialized(method),
-            );
-        }
-        gateway
-            .client_hub
-            .observe_connection_activity(&connection_id, completion_clock());
-        gateway.result(connection_id, id, meta, snapshot)
-    }
-
-    fn handle_agent_authenticate_without_protocol_lock(
-        &self,
-        connection_id: ConnectionId,
-        message: InboundProtocolMessage,
-        now: AppServerTime,
-        completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
-        let InboundProtocolMessage::ClientRequest {
-            id, params, meta, ..
-        } = message
-        else {
-            unreachable!("authenticate path only handles client requests");
-        };
-        let prepared = {
-            let mut gateway = self.lock();
-            gateway.prepare_agent_authenticate(
-                connection_id.clone(),
-                id.clone(),
-                params,
-                meta.clone(),
-                now,
-            )
-        };
-        let outcome = match prepared {
-            Err(outcome) => *outcome,
-            Ok((params, workflow)) => {
-                let secret_resolver = if params.secret_env.is_empty()
-                    || !connection_id.as_str().starts_with("local-http:")
-                {
-                    None
-                } else {
-                    self.client_secret_resolver(&connection_id)
-                };
-                let terminal_runner = self.client_auth_terminal(&connection_id);
-                let result =
-                    workflow.authenticate_with_client(params, secret_resolver, terminal_runner);
-                let mut gateway = self.lock();
-                gateway.finish_agent_authenticate(connection_id.clone(), id, meta, now, result)
-            }
-        };
-        self.lock()
-            .client_hub
-            .observe_connection_activity(&connection_id, completion_clock());
-        outcome
-    }
-
-    fn client_secret_resolver(
-        &self,
-        connection_id: &ConnectionId,
-    ) -> Option<Arc<dyn crate::agent::AgentSecretResolver>> {
-        let gateway = self.lock();
-        let client_instance_id = gateway
-            .client_hub
-            .context_for_connection(connection_id)?
-            .client_instance_id;
-        let delivery = gateway.client_hub.delivery_for(&client_instance_id)?;
-        Some(Arc::new(crate::agent::ClientSecretResolver::new(
-            gateway.server_requests.clone(),
-            client_instance_id,
-            delivery,
-        )))
-    }
-
-    fn client_auth_terminal(
-        &self,
-        connection_id: &ConnectionId,
-    ) -> Option<Arc<dyn crate::agent::auth_terminal::AuthTerminalRunner>> {
-        if !connection_id.as_str().starts_with("local-http:") {
-            return None;
-        }
-        let gateway = self.lock();
-        let context = gateway.client_hub.context_for_connection(connection_id)?;
-        let delivery = gateway
-            .client_hub
-            .delivery_for(&context.client_instance_id)?;
-        Some(Arc::new(
-            crate::agent::auth_terminal::ClientAuthTerminal::new(
-                gateway.server_requests.clone(),
-                context.client_instance_id,
-                delivery,
-            ),
-        ))
-    }
-
-    fn handle_agent_logout_without_protocol_lock(
-        &self,
-        connection_id: ConnectionId,
-        message: InboundProtocolMessage,
-        now: AppServerTime,
-        completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
-        let InboundProtocolMessage::ClientRequest {
-            id, params, meta, ..
-        } = message
-        else {
-            unreachable!("logout path only handles client requests");
-        };
-        let prepared = self.lock().prepare_agent_logout(
-            connection_id.clone(),
-            id.clone(),
-            params,
-            meta.clone(),
-            now,
-        );
-        let outcome = match prepared {
-            Err(outcome) => *outcome,
-            Ok((params, workflow)) => {
-                let result = workflow.logout(params);
-                self.lock()
-                    .finish_agent_logout(connection_id.clone(), id, meta, now, result)
-            }
-        };
-        self.lock()
-            .client_hub
-            .observe_connection_activity(&connection_id, completion_clock());
-        outcome
+        (gateway, outcome)
     }
 
     #[cfg(test)]
@@ -544,7 +336,8 @@ impl SharedRpcGateway {
         now: AppServerTime,
         completed_at: AppServerTime,
     ) -> GatewayOutcome {
-        self.handle_inbound_with_completion_clock(connection_id, message, now, || completed_at)
+        self.handle_queued(connection_id, message, now, || completed_at, Clone::clone)
+            .0
     }
 
     pub fn probe_facts(&self) -> AppServerProbeFacts {
@@ -594,18 +387,51 @@ impl SharedRpcGateway {
         )
     }
 
-    /// Keeps an initialized client live while its authenticated transport is active.
-    pub fn observe_connection_activity(
-        &self,
-        connection_id: &ConnectionId,
-        now: AppServerTime,
-    ) -> bool {
+    /// Keeps an initialized client live while its link is active, and queues the server
+    /// requests it can now answer. Returns false when no initialized client owns the connection.
+    pub fn observe_link_activity(&self, connection_id: &ConnectionId, now: AppServerTime) -> bool {
         let wait_started_at = Instant::now();
         let mut gateway = self.lock_quiet();
         // Every link takes this before writing a frame, so a slow wait here is latency
         // on the server-to-client path that no request duration shows.
         self.log_slow_lock_wait(connection_id, "delivery", None, wait_started_at.elapsed());
-        gateway.observe_connection_activity(connection_id, now)
+        if !gateway.observe_connection_activity(connection_id, now) {
+            return false;
+        }
+        let requests = gateway.drain_server_requests_for_connection(connection_id, now);
+        gateway.outbox.push_server_requests(requests);
+        true
+    }
+
+    /// Queues the server requests this connection can now answer, without counting as client
+    /// activity.
+    pub fn queue_deliverable_server_requests(
+        &self,
+        connection_id: &ConnectionId,
+        now: AppServerTime,
+    ) {
+        let mut gateway = self.lock_quiet();
+        let requests = gateway.drain_server_requests_for_connection(connection_id, now);
+        gateway.outbox.push_server_requests(requests);
+    }
+
+    /// Answers a message the transport refused before dispatch, in sequence with everything
+    /// already queued for the connection.
+    pub(crate) fn queue_rejection(
+        &self,
+        connection_id: &ConnectionId,
+        rejection: InboundRejection,
+    ) {
+        self.outbox.push(connection_id, rejection.into_outbound());
+    }
+
+    /// Moves the connection's outbound sequence to `write`. See [`Outbox::transfer`].
+    pub(crate) fn transfer_outbound<R>(
+        &self,
+        connection_id: &ConnectionId,
+        write: impl FnOnce(Vec<OutboundMessage>) -> R,
+    ) -> R {
+        self.outbox.transfer(connection_id, write)
     }
 
     /// The Task attention cursor this connection would be answered with now.
@@ -639,20 +465,13 @@ impl SharedRpcGateway {
         update: &TaskUpdate,
         now: AppServerTime,
     ) -> TaskUpdatePublication {
-        let projection_started_at = Instant::now();
-        let prepared = PreparedProjectEntries::for_update(
-            update,
-            self.task_navigation.as_ref(),
-            &self.project_entries_generation,
-        );
         let wait_started_at = Instant::now();
         let mut gateway = self.lock();
         let held_since = Instant::now();
-        gateway.publish_prepared_task_update(update, prepared, now);
+        gateway.publish_task_update(update, now);
         TaskUpdatePublication {
             lock_wait: held_since.duration_since(wait_started_at),
             lock_held: held_since.elapsed(),
-            projection: wait_started_at.duration_since(projection_started_at),
         }
     }
 
@@ -694,50 +513,29 @@ impl SharedRpcGateway {
         );
     }
 
-    pub fn publish_worktree_repository_update(
-        &self,
-        repository: WorktreeRepositorySnapshot,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
+    pub fn publish_worktree_repository_update(&self, repository: WorktreeRepositorySnapshot) {
         self.lock()
-            .publish_background_worktree_repository_update(repository, now)
+            .publish_background_worktree_repository_update(repository);
     }
 
-    pub fn publish_agent_status_update(&self, now: AppServerTime) -> Vec<GatewayEventDelivery> {
-        self.lock().publish_background_agent_status_update(now)
+    pub fn publish_agent_status_update(&self) {
+        self.lock().publish_background_agent_status_update();
     }
 
     pub fn remote_devices(&self) -> Option<crate::remote_devices::RemoteDevices> {
         self.lock_quiet().remote_device_service()
     }
 
-    pub fn publish_device_collection_update(
-        &self,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        self.lock().publish_background_device_collection_update(now)
+    pub fn publish_device_collection_update(&self) {
+        self.lock().publish_background_device_collection_update();
     }
 
     pub fn terminals(&self) -> crate::terminals::Terminals {
         self.lock_quiet().terminals.clone()
     }
 
-    pub fn publish_terminal_collection_update(
-        &self,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        self.lock()
-            .publish_background_terminal_collection_update(now)
-    }
-
-    pub fn publish_committed_task_update_for_connection(
-        &self,
-        connection_id: &ConnectionId,
-        update: &TaskUpdate,
-        now: AppServerTime,
-    ) -> (Vec<GatewayEventDelivery>, Vec<ServerRequestDelivery>) {
-        self.lock()
-            .publish_committed_task_update_for_connection(connection_id, update, now)
+    pub fn publish_terminal_collection_update(&self) {
+        self.lock().publish_background_terminal_collection_update();
     }
 
     /// Records an Agent's sign-in URL as Sign-in Flow state that every client renders. The URL is
@@ -776,21 +574,34 @@ impl SharedRpcGateway {
         })
     }
 
-    pub fn drain_server_requests_for_connection(
+    #[cfg(test)]
+    pub(crate) fn drain_event_deliveries_for_connection(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Vec<openaide_app_server_protocol::events::AppServerEvent> {
+        self.lock_quiet()
+            .drain_event_deliveries_for_connection(connection_id)
+    }
+
+    /// Queues the connection's deliverable server requests and takes them, dropping anything
+    /// else queued for it.
+    #[cfg(test)]
+    pub(crate) fn drain_server_requests_for_connection(
         &self,
         connection_id: &ConnectionId,
         now: AppServerTime,
-    ) -> Vec<ServerRequestDelivery> {
-        self.lock_quiet()
-            .drain_server_requests_for_connection(connection_id, now)
-    }
-
-    pub fn drain_event_deliveries_for_connection(
-        &self,
-        connection_id: &ConnectionId,
-    ) -> Vec<GatewayEventDelivery> {
-        self.lock_quiet()
-            .drain_event_deliveries_for_connection(connection_id)
+    ) -> Vec<openaide_app_server_protocol::envelopes::ServerRequestEnvelope<serde_json::Value>>
+    {
+        self.queue_deliverable_server_requests(connection_id, now);
+        self.transfer_outbound(connection_id, |messages| {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    OutboundMessage::ServerRequest(envelope) => Some(envelope),
+                    _ => None,
+                })
+                .collect()
+        })
     }
 
     pub fn expire_client_after_reconnect_grace(
@@ -844,5 +655,36 @@ impl SharedRpcGateway {
         task_id: &TaskId,
     ) -> Vec<openaide_app_server_protocol::snapshot::PendingRequestSnapshot> {
         self.lock().server_requests.pending_for_task(task_id)
+    }
+}
+
+/// The request's start time advanced by its wall-clock duration, read when it completes.
+fn completion_clock(now: AppServerTime) -> impl FnOnce() -> AppServerTime {
+    let started_at = Instant::now();
+    move || {
+        let elapsed_ms = started_at
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        AppServerTime(now.0.saturating_add(elapsed_ms))
+    }
+}
+
+impl ProtocolExchange for SharedRpcGateway {
+    fn dispatch(&self, connection_id: ConnectionId, message: InboundProtocolMessage) -> bool {
+        self.dispatch_inbound(connection_id, message, AppServerTime::now())
+    }
+
+    fn observe_link(&self, connection_id: &ConnectionId) -> bool {
+        self.observe_link_activity(connection_id, AppServerTime::now())
+    }
+
+    fn transfer<R>(
+        &self,
+        connection_id: &ConnectionId,
+        write: impl FnOnce(Vec<OutboundMessage>) -> R,
+    ) -> R {
+        self.transfer_outbound(connection_id, write)
     }
 }

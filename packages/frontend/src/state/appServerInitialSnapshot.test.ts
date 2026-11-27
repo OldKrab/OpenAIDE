@@ -3,7 +3,6 @@ import type {
   AgentId,
   ClientInstanceId,
   ClientSnapshot,
-  EventCursor,
   ProjectId,
   ServerId,
   StateRootId,
@@ -13,16 +12,20 @@ import { actionsFromInitialSnapshot } from "./appServerInitialSnapshot";
 
 describe("App Server initial snapshot ingestion", () => {
   it("maps initialization state without creating a Navigation replica", () => {
+    const base = clientSnapshot();
     const ingestion = actionsFromInitialSnapshot(clientSnapshot({
-      settings: {
-        sections: [],
-        runtime: {
-          developer: {
-            acpTrace: { enabled: true, directory: "/runtime/traces" },
+      global: {
+        ...base.global,
+        settings: {
+          sections: [],
+          runtime: {
+            developer: {
+              acpTrace: { enabled: true, directory: "/runtime/traces" },
+            },
           },
-        },
-        preferences: {
-          preferences: { composerSubmitShortcut: "enter" },
+          preferences: {
+            preferences: { composerSubmitShortcut: "enter" },
+          },
         },
       },
     }));
@@ -32,33 +35,35 @@ describe("App Server initial snapshot ingestion", () => {
       { type: "newTask:agent", agentId: "codex" },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
+      { type: "settings:agentCollection" },
+      { type: "settings:devices" },
+      { type: "terminals" },
       { type: "snapshot", intent: "open", snapshot: { task: { task_id: "task-1" } } },
     ]);
     expect(ingestion.requiresNativeSurface).toBe(false);
   });
 
-  it("returns no actions when initialize did not include renderable task state", () => {
-    expect(actionsFromInitialSnapshot(clientSnapshot({ projects: null, tasks: null, activeTask: null }))).toEqual({
-      actions: [{ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" }],
-      warnings: [],
-      requiresNativeSurface: false,
-      newTaskProjectSelection: {
-        projectId: undefined,
-        source: "none",
-        shellProjectPresent: false,
-        shellProjectValid: false,
-        retainedProjectPresent: false,
-        retainedProjectValid: false,
-        defaultProjectPresent: false,
-        defaultProjectValid: false,
-      },
-    });
+  it("installs the global areas even when initialize carries no active Task", () => {
+    const ingestion = actionsFromInitialSnapshot(clientSnapshot({ activeTask: null }));
+
+    expect(ingestion.actions.map((action) => action.type)).toEqual([
+      "projects",
+      "newTask:agent",
+      "settings:agentCollection",
+      "settings:devices",
+      "terminals",
+    ]);
+    expect(ingestion.warnings).toEqual([]);
+    expect(ingestion.requiresNativeSurface).toBe(false);
   });
 
   it("can suppress the focused Task while Navigation remains subscription-owned", () => {
     expect(actionsFromInitialSnapshot(clientSnapshot(), { includeActiveTask: false }).actions).toMatchObject([
       { type: "projects" },
       { type: "newTask:agent" },
+      { type: "settings:agentCollection" },
+      { type: "settings:devices" },
+      { type: "terminals" },
     ]);
   });
 
@@ -69,6 +74,8 @@ describe("App Server initial snapshot ingestion", () => {
         shellKind: "web",
         surface: { kind: "newTask", projectId: "project-1" as ProjectId },
       },
+      global: {
+        ...clientSnapshot().global,
       projects: {
         projects: [
           { projectId: "project-1" as ProjectId, label: "API", workspaceRoot: "/workspace/API", available: true },
@@ -85,7 +92,7 @@ describe("App Server initial snapshot ingestion", () => {
         projectId: "project-1" as ProjectId,
         agentId: "codex" as AgentId,
       },
-      tasks: null,
+      },
       activeTask: null,
     }), {
       retainedNewTaskContext: { projectId: "project-2", agentId: "opencode" },
@@ -125,7 +132,6 @@ describe("App Server initial snapshot ingestion", () => {
 
 function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot {
   return {
-    cursor: "cursor-1" as EventCursor,
     server: {
       serverId: "server-1" as ServerId,
       protocolVersion: { major: 1, minor: 0 },
@@ -136,34 +142,18 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       shellKind: "vscodeExtension",
       surface: { kind: "task", taskId: "task-1" as TaskId },
     },
-    newTaskDefaults: {},
-    projects: {
-      projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", available: true }],
-    },
-    agents: {
-      agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" }],
-    },
-    tasks: {
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{
-        projectId: "project-1" as ProjectId,
-        projectLabel: "Project",
-        taskCount: 1,
-        entries: [
-        { kind: "task", task: taskSummary() },
-        {
-          kind: "nativeSession",
-          session: {
-            reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
-            projectId: "project-1" as ProjectId,
-            workspaceRoot: "/workspace/Project",
-            title: "Cached Native Session",
-            pinned: false,
-          },
-        },
-        ],
-      }],
+    global: {
+      newTaskDefaults: {},
+      projects: {
+        projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", available: true }],
+      },
+      worktrees: [],
+      agents: {
+        agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" }],
+      },
+      settings: { sections: [] },
+      devices: { remoteAccess: "off", serverName: "test" },
+      terminals: { terminals: [] },
     },
     activeTask: {
       task: taskSummary(),

@@ -5,7 +5,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, Tas
 use openaide_app_server_protocol::snapshot::{
     TaskAttentionEvent, TaskAttentionReason, TaskLifecycle, TaskSnapshot, TaskStatus, TaskSummary,
 };
-use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot};
+use openaide_app_server_protocol::task::TaskListLifecycle;
 
 use super::current_task_attention;
 use crate::snapshots::{TaskListSnapshot, TaskSnapshotSource};
@@ -72,7 +72,8 @@ impl TaskSnapshotSource for OpenTasks {
         _client_instance_id: &ClientInstanceId,
         _task_id: &TaskId,
         _artifact_id: &str,
-    ) -> Result<ToolDetailSnapshot, ProtocolError> {
+        _known_version: Option<u64>,
+    ) -> Result<crate::snapshots::ToolDetailSubscription, ProtocolError> {
         Err(not_found())
     }
 }

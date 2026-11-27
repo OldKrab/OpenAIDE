@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { createInitialState } from "../state/store";
-import { appControllerDerivedStateDeps, deriveAppControllerState, visibleTasks } from "./appControllerDerivedState";
+import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appControllerDerivedState";
 
 describe("deriveAppControllerState", () => {
   it("does not invalidate navigation derivation when only the new task draft changes", () => {
@@ -21,7 +21,7 @@ describe("deriveAppControllerState", () => {
     expect(appControllerDerivedStateDeps(nextState)).toEqual(depsBefore);
   });
 
-  it("returns the active task and filtered visible tasks", () => {
+  it("returns the active task and the view's tasks, whatever the search field holds", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.searchQuery = " CODEX ";
@@ -34,22 +34,7 @@ describe("deriveAppControllerState", () => {
 
     expect(derived.activeTask?.task_id).toBe("task_2");
     expect(derived.hasActiveTask).toBe(true);
-    expect(derived.visibleTasks.map((task) => task.task_id)).toEqual(["task_2"]);
-  });
-
-  it("keeps a non-matching active task open but excludes it from search results", () => {
-    const state = createInitialState();
-    state.activeTaskId = "task_2";
-    state.searchQuery = "no-match-navigation-qa";
-    state.tasks = [
-      task({ task_id: "task_1", agent_name: "Codex", title: "Matching no-match-navigation-qa" }),
-      task({ task_id: "task_2", agent_name: "Codex", title: "Current work" }),
-    ];
-
-    const derived = deriveAppControllerState(state);
-
-    expect(derived.activeTask?.task_id).toBe("task_2");
-    expect(derived.visibleTasks.map((item) => item.task_id)).toEqual(["task_1"]);
+    expect(derived.visibleTasks.map((task) => task.task_id)).toEqual(["task_1", "task_2"]);
   });
 
   it("uses shell editor focus for Task Navigation without changing active product state", () => {
@@ -68,16 +53,7 @@ describe("deriveAppControllerState", () => {
     expect(cleared.activeNavigationTaskId).toBeUndefined();
   });
 
-  it("keeps message-bearing tasks and hides empty placeholder tasks when the search query is blank", () => {
-    const tasks = [
-      task({ task_id: "task_1", has_messages: true }),
-      task({ task_id: "task_2", has_messages: false }),
-    ];
-
-    expect(visibleTasks(tasks, "   ").map((visible) => visible.task_id)).toEqual(["task_1"]);
-  });
-
-  it("keeps a private empty New Task out of navigation while first Send is in flight", () => {
+  it("does not filter by message count while first Send is in flight", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.newTask.submitting = true;
@@ -97,10 +73,10 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
   });
 
-  it("keeps a private empty New Task out of navigation after switching tasks", () => {
+  it("does not filter by message count after switching tasks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.tasks = [
@@ -115,7 +91,7 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
   });
 
   it("does not invent a sidebar row while the New Task remains private", () => {
@@ -178,19 +154,8 @@ describe("deriveAppControllerState", () => {
 
     expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual(["Previous task"]);
     expect(afterCreate.activeNavigationTaskId).toBeUndefined();
-    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
-  });
-
-  it("matches visible tasks by title, agent name, and status", () => {
-    const tasks = [
-      task({ task_id: "task_1", title: "Refactor plan", agent_name: "Codex", status: "inactive" }),
-      task({ task_id: "task_2", title: "Other", agent_name: "OpenCode", status: "active" }),
-      task({ task_id: "task_3", title: "Archive", agent_name: "Other", status: "waiting" }),
-    ];
-
-    expect(visibleTasks(tasks, "plan").map((task) => task.task_id)).toEqual(["task_1"]);
-    expect(visibleTasks(tasks, "opencode").map((task) => task.task_id)).toEqual(["task_2"]);
-    expect(visibleTasks(tasks, "WAITING").map((task) => task.task_id)).toEqual(["task_3"]);
+    // A private empty Task never reaches the view: App Server's membership filter keeps it out.
+    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_new", "task_1"]);
   });
 });
 

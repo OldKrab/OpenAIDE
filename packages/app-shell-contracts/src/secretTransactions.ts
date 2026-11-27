@@ -1,5 +1,7 @@
 import type {
   HostToWebviewMessage,
+  SecretKeysRequestMessage,
+  SecretKeysResultMessage,
   SecretRef,
   SecretSyncPayload,
   SecretSyncWrite,
@@ -9,8 +11,51 @@ import type {
 export type AppShellSecretStore = {
   delete(key: string): PromiseLike<void> | void;
   get(key: string): PromiseLike<string | undefined> | string | undefined;
+  /** Every stored key id, for a store that can enumerate (names only). Absent when it cannot. */
+  keys?(): PromiseLike<string[]> | string[];
   store(key: string, value: string): PromiseLike<void> | void;
 };
+
+/**
+ * Key ids this shell declares to the App Server so `secret/read` is routed to a client that has
+ * the key. A store that can enumerate lists them directly, which covers secrets saved before any
+ * index existed. A store that cannot (a native keychain) keeps an index of the ids it saved,
+ * and the shell stays an "unknown holder": it may also hold older secrets it cannot list, so the
+ * App Server asks it when no client declared the key. Names only, never values.
+ */
+export const SECRET_KEY_INDEX_KEY = "openaide.secret-key-index";
+
+export async function readSecretKeyIndex(secretStore: AppShellSecretStore | undefined): Promise<string[]> {
+  if (!secretStore) return [];
+  try {
+    const raw = await secretStore.get(SECRET_KEY_INDEX_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Answers a `secret.keys.request`; an unreadable store holds no declarable keys. */
+export async function secretKeysResult(
+  message: SecretKeysRequestMessage,
+  secretStore: AppShellSecretStore | undefined,
+): Promise<SecretKeysResultMessage> {
+  const requestId = message.payload.requestId;
+  if (secretStore?.keys) {
+    try {
+      const keyIds = (await secretStore.keys()).filter((key) => key !== SECRET_KEY_INDEX_KEY);
+      return { type: "secret.keys.result", payload: { requestId, keyIds, unknownHolder: false } };
+    } catch {
+      // Fall through: an unlistable store may still hold keys, so the shell stays an unknown holder.
+      return { type: "secret.keys.result", payload: { requestId, keyIds: [], unknownHolder: true } };
+    }
+  }
+  return {
+    type: "secret.keys.result",
+    payload: { requestId, keyIds: await readSecretKeyIndex(secretStore), unknownHolder: Boolean(secretStore) },
+  };
+}
 
 type SecretTransactionResult = Extract<HostToWebviewMessage, { type: "secret.transaction.result" }>;
 type PendingTransaction = {
@@ -62,7 +107,7 @@ async function applyTransaction(
   }
 
   const before = new Map<string, string | undefined>();
-  for (const key of affectedKeys) before.set(key, await secretStore.get(key));
+  for (const key of secretStore.keys ? affectedKeys : [...affectedKeys, SECRET_KEY_INDEX_KEY]) before.set(key, await secretStore.get(key));
   const resolvedWrites: Array<{ key: string; value: string }> = [];
   for (const write of changes.writes) {
     const value = "value" in write
@@ -75,6 +120,12 @@ async function applyTransaction(
   try {
     for (const write of resolvedWrites) await secretStore.store(write.key, write.value);
     for (const key of deleteKeys) await secretStore.delete(key);
+    if (!secretStore.keys) {
+      const index = new Set(await readSecretKeyIndex(secretStore));
+      for (const write of resolvedWrites) index.add(write.key);
+      for (const key of deleteKeys) index.delete(key);
+      await secretStore.store(SECRET_KEY_INDEX_KEY, JSON.stringify([...index].sort()));
+    }
   } catch {
     await restoreSecrets(secretStore, before);
     throw new Error("Secure storage transaction could not be applied.");

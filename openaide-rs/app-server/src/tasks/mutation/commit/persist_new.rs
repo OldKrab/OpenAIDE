@@ -2,7 +2,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::task_events::{CommittedChatChange, CommittedNavigationChange, CommittedTaskChange};
+use crate::task_events::CommittedTaskChange;
 
 use super::{navigation_change::navigation_member, project_committed_changes, ChangedFields};
 use crate::tasks::mutation::{TaskCommitFacts, TaskMutations};
@@ -78,10 +78,7 @@ pub(super) fn persist_new_task(
         message_queue: true,
         removed: task.tombstoned,
     };
-    let navigation =
-        navigation_member(task).then(|| CommittedNavigationChange::ProjectEntriesChanged {
-            project_id: projected.task.project_id.clone(),
-        });
+    let navigation = navigation_member(task).then(|| projected.task.project_id.clone());
     // Test-only injected writers validate failure before any durable frame.
     write_task(&target.store, task)?;
     let projection = crate::storage::task_journal::TaskProjection {
@@ -89,14 +86,9 @@ pub(super) fn persist_new_task(
         messages: stored_messages,
         message_meta,
         artifact_heads: Default::default(),
+        chat_version: 0,
     };
-    let changes = project_committed_changes(
-        target,
-        &projected,
-        &projection,
-        fields,
-        vec![CommittedChatChange::Replace],
-    )?;
+    let changes = project_committed_changes(target, &projected, &projection, fields, Vec::new())?;
     target
         .store
         .task_journal()

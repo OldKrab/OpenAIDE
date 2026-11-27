@@ -7,9 +7,7 @@ use std::time::Duration;
 
 use openaide_app_server_protocol::client::ShellKind;
 use openaide_app_server_protocol::devices::DeviceCollectionSnapshot;
-use openaide_app_server_protocol::methods::{
-    CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, STATE_SUBSCRIBE,
-};
+use openaide_app_server_protocol::methods::{CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE};
 use serde_json::{json, Value};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
@@ -94,7 +92,12 @@ impl LocalClient {
     }
 
     pub(crate) fn initialize(&mut self) -> Result<(), ClientError> {
-        self.request(
+        self.initialize_for_global_state().map(|_| ())
+    }
+
+    /// Initializes this client and returns the full global state from the reply.
+    fn initialize_for_global_state(&mut self) -> Result<Value, ClientError> {
+        let answer = self.request(
             CLIENT_INITIALIZE,
             json!({
                 "clientInstanceId": self.client_instance_id,
@@ -106,8 +109,8 @@ impl LocalClient {
                 "requestedSurface": { "kind": "home" },
                 "workspaceRoots": [],
             }),
-        )
-        .map(|_| ())
+        )?;
+        Ok(answer.result["snapshot"]["global"].clone())
     }
 
     /// Renews this client's liveness and collects what happened since the last call.
@@ -117,15 +120,14 @@ impl LocalClient {
     }
 
     pub(crate) fn devices(&mut self) -> Result<DeviceCollectionSnapshot, ClientError> {
-        let answer = self.request(STATE_SUBSCRIBE, json!({ "scope": { "kind": "devices" } }))?;
-        serde_json::from_value(answer.result["snapshot"]["devices"].clone())
-            .map_err(|_| ClientError::Malformed)
+        let global = self.initialize_for_global_state()?;
+        serde_json::from_value(global["devices"].clone()).map_err(|_| ClientError::Malformed)
     }
 
-    /// Running Tasks across every Agent, read from the Settings projection.
+    /// Running Tasks across every Agent, read from the global state's settings area.
     pub(crate) fn running_task_count(&mut self) -> Result<u64, ClientError> {
-        let answer = self.request(STATE_SUBSCRIBE, json!({ "scope": { "kind": "settings" } }))?;
-        Ok(sum_field(&answer.result, "runningTaskCount"))
+        let global = self.initialize_for_global_state()?;
+        Ok(sum_field(&global["settings"], "runningTaskCount"))
     }
 
     pub(crate) fn detach(&mut self) -> Result<(), ClientError> {

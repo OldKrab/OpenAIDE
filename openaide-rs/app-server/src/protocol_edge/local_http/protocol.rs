@@ -3,19 +3,15 @@ use openaide_app_server_protocol::methods::{
 };
 use serde_json::{json, Value};
 
-use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::client_lifecycle::ConnectionId;
 use crate::logging;
+use crate::protocol_edge::outbox::ProtocolExchange;
 use crate::protocol_edge::stdio::wire::{
-    client_response, event_wire_messages, id_to_gateway_id,
-    invalid_request as wire_invalid_request, parse_error, server_request_wire_messages,
-    wire_messages, WireMessage, WireRequest, WireRequestId,
+    parse_inbound, parse_rejection, InboundRejection, WireMessage,
 };
-use crate::protocol_edge::{
-    GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway,
-};
+use crate::protocol_edge::{InboundProtocolMessage, SharedRpcGateway};
 
 use super::attention_wait::{self, AttentionWaitTiming, HoldEnd};
-use super::event_streams::{EventStreamLease, EventStreamRegistry};
 use super::reliable_upload_chunks::{
     AppendOutcome as ReliableChunkOutcome, ReliableUploadChunkRegistry,
 };
@@ -42,7 +38,6 @@ struct ReliableUploadChunk {
 pub struct LocalHttpProtocolHandler {
     pub(super) gateway: SharedRpcGateway,
     pub(super) auth_token: String,
-    event_streams: EventStreamRegistry,
     pub(super) sessions: ReliableSessionRegistry,
     upload_chunks: ReliableUploadChunkRegistry,
     attention_wait: AttentionWaitTiming,
@@ -53,7 +48,6 @@ impl Clone for LocalHttpProtocolHandler {
         Self {
             gateway: self.gateway.clone(),
             auth_token: self.auth_token.clone(),
-            event_streams: self.event_streams.clone(),
             sessions: self.sessions.clone(),
             upload_chunks: self.upload_chunks.clone(),
             attention_wait: self.attention_wait,
@@ -69,7 +63,6 @@ impl LocalHttpProtocolHandler {
     ) -> Self {
         Self {
             auth_token: auth_token.into(),
-            event_streams: EventStreamRegistry::default(),
             // Session frames and gateway deliveries wake the same waiting links.
             sessions: ReliableSessionRegistry::with_delivery_signal(
                 server_id,
@@ -132,22 +125,12 @@ impl LocalHttpProtocolHandler {
             self.handle_reliable_session_upload(authorization, connection_id, body)
         } else {
             hold_end = self.hold_attention_wait(authorization, connection_id, parsed.as_ref());
-            let now = AppServerTime::now();
-            let gateway = self.gateway.clone();
             handle_local_http_protocol(
                 authorization,
                 &self.auth_token,
                 connection_id,
                 body,
-                |connection_id, message| gateway.handle_inbound(connection_id, message, now),
-                |connection_id| {
-                    if self.event_streams.is_active(connection_id) {
-                        Vec::new()
-                    } else {
-                        self.gateway
-                            .drain_event_deliveries_for_connection(connection_id)
-                    }
-                },
+                &self.gateway,
             )
         };
         if should_log && (!quiet_unless_failed || response.status != 200) {
@@ -207,15 +190,13 @@ impl LocalHttpProtocolHandler {
             Err(response) => return response,
         };
         if !is_agent_authenticate_request(&accepted.message) {
-            let now = AppServerTime::now();
-            let gateway = self.gateway.clone();
             return dispatch_reliable_session_upload(
                 authorization,
                 &self.auth_token,
                 connection_id,
                 accepted,
                 &self.sessions,
-                move |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+                &self.gateway,
             );
         }
 
@@ -238,14 +219,13 @@ impl LocalHttpProtocolHandler {
                     "method": AGENT_AUTHENTICATE,
                 }),
             );
-            let now = AppServerTime::now();
             let response = dispatch_reliable_session_upload(
                 authorization.as_deref(),
                 &auth_token,
                 raw_connection_id.as_deref(),
                 accepted,
                 &sessions,
-                move |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+                &gateway,
             );
             let outcome = if response.status == 204 {
                 "completed"
@@ -318,7 +298,6 @@ impl LocalHttpProtocolHandler {
         session_id: &str,
         after: u64,
     ) -> LocalHttpResponse {
-        let now = AppServerTime::now();
         let started_at = std::time::Instant::now();
         let response = handle_reliable_session_poll(
             authorization,
@@ -327,18 +306,7 @@ impl LocalHttpProtocolHandler {
             session_id,
             after,
             &self.sessions,
-            |connection_id| {
-                self.gateway
-                    .observe_connection_activity(connection_id, now)
-                    .then(|| {
-                        (
-                            self.gateway
-                                .drain_event_deliveries_for_connection(connection_id),
-                            self.gateway
-                                .drain_server_requests_for_connection(connection_id, now),
-                        )
-                    })
-            },
+            &self.gateway,
         );
         if response.status != 204 {
             logging::info(
@@ -354,66 +322,6 @@ impl LocalHttpProtocolHandler {
         }
         response
     }
-
-    pub(crate) fn begin_event_stream(
-        &self,
-        authorization: Option<&str>,
-        connection_id: Option<&str>,
-    ) -> Result<EventStreamLease, LocalHttpResponse> {
-        match auth_status(authorization, &self.auth_token) {
-            AuthStatus::Authorized => {}
-            AuthStatus::Missing => return Err(empty_response(401)),
-            AuthStatus::Invalid => return Err(empty_response(403)),
-        }
-        let connection_id =
-            valid_connection_id(connection_id).ok_or_else(|| empty_response(400))?;
-        if !self.gateway.connection_is_initialized(&connection_id) {
-            return Err(empty_response(409));
-        }
-        Ok(self.event_streams.begin(connection_id))
-    }
-
-    pub(crate) fn event_stream_is_current(&self, lease: &EventStreamLease) -> bool {
-        self.event_streams.is_current(lease)
-    }
-
-    pub(crate) fn observe_event_stream_activity(&self, lease: &EventStreamLease) -> bool {
-        self.event_streams.is_current(lease)
-            && self
-                .gateway
-                .observe_connection_activity(lease.connection_id(), AppServerTime::now())
-    }
-
-    pub(crate) fn finish_event_stream(&self, lease: &EventStreamLease) {
-        self.event_streams.finish(lease);
-    }
-
-    pub(crate) fn drain_push_messages(&self, lease: &EventStreamLease) -> String {
-        self.event_streams
-            .with_current(lease, || {
-                let connection_id = lease.connection_id();
-                let events = self
-                    .gateway
-                    .drain_event_deliveries_for_connection(connection_id);
-                let server_requests = self
-                    .gateway
-                    .drain_server_requests_for_connection(connection_id, AppServerTime::now());
-                if events.is_empty() && server_requests.is_empty() {
-                    return String::new();
-                }
-                serde_json::to_string(
-                    &event_wire_messages(connection_id.clone(), events)
-                        .into_iter()
-                        .chain(server_request_wire_messages(
-                            connection_id.clone(),
-                            server_requests,
-                        ))
-                        .collect::<Vec<_>>(),
-                )
-                .expect("LocalHttp push messages serialize")
-            })
-            .unwrap_or_default()
-    }
 }
 
 pub(super) fn handle_local_http_protocol(
@@ -421,183 +329,77 @@ pub(super) fn handle_local_http_protocol(
     expected_token: &str,
     connection_id: Option<&str>,
     body: &str,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
-    drain_events: impl FnOnce(&ConnectionId) -> Vec<crate::protocol_edge::GatewayEventDelivery>,
+    exchange: &impl ProtocolExchange,
 ) -> LocalHttpResponse {
     match auth_status(authorization, expected_token) {
         AuthStatus::Authorized => {}
         AuthStatus::Missing => return empty_response(401),
         AuthStatus::Invalid => return empty_response(403),
     }
-    let raw_connection_id = connection_id;
-    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
-        return protocol_rejection(
+    let Some(connection_id) = valid_connection_id(connection_id) else {
+        return protocol_rejection(InboundRejection::invalid_request(
             "invalid_connection_id",
-            wire_value(wire_invalid_request(
-                None,
-                "missing or invalid X-OpenAIDE-Connection-Id".to_string(),
-            )),
-        );
+            None,
+            "missing or invalid X-OpenAIDE-Connection-Id",
+        ));
     };
-    dispatch_protocol_message(connection_id, body, dispatch, drain_events)
-}
-
-/// Dispatches one JSON-RPC message for an already authenticated connection.
-/// Shared by plain HTTP requests and by links that authenticate once per link.
-pub(super) fn dispatch_protocol_message(
-    connection_id: ConnectionId,
-    body: &str,
-    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
-    drain_events: impl FnOnce(&ConnectionId) -> Vec<crate::protocol_edge::GatewayEventDelivery>,
-) -> LocalHttpResponse {
-    let value = match serde_json::from_str::<Value>(body) {
-        Ok(value) => value,
-        Err(error) => return protocol_rejection("malformed_json", wire_value(parse_error(error))),
+    let message = match parse_protocol_message(body) {
+        Ok(message) => message,
+        Err(rejection) => return protocol_rejection(rejection),
     };
-    if let Some(response) = client_response(&value) {
-        let InboundProtocolMessage::ClientResponse { request_id, .. } = &response else {
-            unreachable!("client_response only returns client responses");
-        };
-        let request_id = request_id.clone();
-        return match dispatch(connection_id.clone(), response) {
-            GatewayOutcome::Respond {
-                connection_id,
-                response,
-                events,
-                server_requests,
-                ..
-            } => {
-                if matches!(response, GatewayResponse::Error(_)) {
-                    return json_response(
-                        200,
-                        serde_json::to_value(wire_messages(
-                            Value::String(request_id),
-                            connection_id,
-                            response,
-                            events,
-                            server_requests,
-                        ))
-                        .expect("wire messages serialize"),
-                    );
-                }
-                json_response(
-                    200,
-                    side_effect_messages(&connection_id, Vec::new(), server_requests, events),
-                )
-            }
-            GatewayOutcome::Noop => json_response(
-                200,
-                side_effect_messages(&connection_id, Vec::new(), Vec::new(), Vec::new()),
-            ),
-        };
-    }
-    let request = match serde_json::from_value::<WireRequest>(value) {
-        Ok(request) => request,
-        Err(error) => {
-            return protocol_rejection(
-                "invalid_request_envelope",
-                wire_value(wire_invalid_request(None, error.to_string())),
-            )
-        }
+    let request_id = match &message {
+        InboundProtocolMessage::ClientRequest { wire_id, .. } => Some(wire_id.clone()),
+        _ => None,
     };
-    let id = match request.id {
-        WireRequestId::Notification => {
-            return protocol_rejection(
-                "unsupported_notification",
-                wire_value(wire_invalid_request(
-                    None,
-                    "notifications are not supported".into(),
-                )),
-            );
-        }
-        WireRequestId::Invalid => {
-            return protocol_rejection(
-                "invalid_request_id",
-                wire_value(wire_invalid_request(
-                    Some(Value::Null),
-                    "invalid JSON-RPC id".into(),
-                )),
-            );
-        }
-        WireRequestId::Request(id) => id,
-    };
-    if request.jsonrpc != "2.0" {
-        return protocol_rejection(
-            "invalid_jsonrpc_version",
-            wire_value(wire_invalid_request(Some(id), "jsonrpc must be 2.0".into())),
-        );
-    }
-    let Some(method) = request.method else {
-        return protocol_rejection(
-            "missing_method",
-            wire_value(wire_invalid_request(Some(id), "method is required".into())),
-        );
-    };
-    let inbound = InboundProtocolMessage::ClientRequest {
-        id: id_to_gateway_id(&id),
-        method,
-        params: request.params.unwrap_or_else(|| json!({})),
-        meta: request.meta,
-    };
-    let queued_events = drain_events(&connection_id);
-    match dispatch(connection_id.clone(), inbound) {
-        GatewayOutcome::Respond {
-            response,
-            events,
-            server_requests,
-            ..
-        } => json_response(
-            200,
-            serde_json::to_value(wire_messages(
-                id,
-                connection_id,
-                response,
-                queued_events.into_iter().chain(events).collect(),
-                server_requests,
-            ))
-            .expect("wire messages serialize"),
-        ),
-        GatewayOutcome::Noop => json_response(
+    let replied = exchange.dispatch(connection_id.clone(), message);
+    if let (Some(id), false) = (request_id, replied) {
+        return json_response(
             500,
-            wire_value(wire_invalid_request(
+            rejection_body(InboundRejection::invalid_request(
+                "request_produced_no_response",
                 Some(id),
-                "request produced no response".into(),
+                "request produced no response",
             )),
-        ),
+        );
     }
+    // A plain HTTP caller has no other channel, so its response carries everything queued for
+    // the connection, in sequence order, ending with this reply.
+    let messages = exchange.transfer(&connection_id, |messages| {
+        messages
+            .into_iter()
+            .map(WireMessage::from)
+            .collect::<Vec<_>>()
+    });
+    json_response(
+        200,
+        serde_json::to_value(messages).expect("wire messages serialize"),
+    )
 }
 
-/// Adds a stable, non-sensitive reason to protocol-level HTTP 400 responses.
-fn protocol_rejection(reason_code: &'static str, mut value: Value) -> LocalHttpResponse {
+/// Reads one JSON-RPC message body.
+pub(super) fn parse_protocol_message(
+    body: &str,
+) -> Result<InboundProtocolMessage, InboundRejection> {
+    let value = serde_json::from_str::<Value>(body).map_err(parse_rejection)?;
+    parse_inbound(value)
+}
+
+/// An HTTP 400 carrying the JSON-RPC error and a stable, non-sensitive reason code.
+fn protocol_rejection(rejection: InboundRejection) -> LocalHttpResponse {
     crate::logging::warn(
         "local_http_protocol_rejected",
-        json!({ "reason_code": reason_code }),
+        json!({ "reason_code": rejection.reason_code }),
     );
+    json_response(400, rejection_body(rejection))
+}
+
+pub(super) fn rejection_body(rejection: InboundRejection) -> Value {
+    let reason_code = rejection.reason_code;
+    let mut value = serde_json::to_value(rejection.into_wire()).expect("wire message serializes");
     if let Some(object) = value.as_object_mut() {
         object.insert("code".to_string(), json!(reason_code));
     }
-    json_response(400, value)
-}
-
-fn side_effect_messages(
-    connection_id: &ConnectionId,
-    first_events: Vec<crate::protocol_edge::GatewayEventDelivery>,
-    server_requests: Vec<crate::server_requests::ServerRequestDelivery>,
-    later_events: Vec<crate::protocol_edge::GatewayEventDelivery>,
-) -> Value {
-    serde_json::to_value(
-        event_wire_messages(
-            connection_id.clone(),
-            first_events.into_iter().chain(later_events).collect(),
-        )
-        .into_iter()
-        .chain(server_request_wire_messages(
-            connection_id.clone(),
-            server_requests,
-        ))
-        .collect::<Vec<_>>(),
-    )
-    .expect("wire messages serialize")
+    value
 }
 
 pub(super) fn valid_connection_id(value: Option<&str>) -> Option<ConnectionId> {
@@ -612,10 +414,6 @@ pub(super) fn valid_connection_id(value: Option<&str>) -> Option<ConnectionId> {
         return None;
     }
     Some(ConnectionId::new(format!("local-http:{value}")))
-}
-
-fn wire_value(message: WireMessage) -> Value {
-    serde_json::to_value(message).expect("wire message serializes")
 }
 
 #[cfg(test)]

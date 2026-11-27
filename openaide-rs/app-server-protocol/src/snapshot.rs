@@ -3,8 +3,7 @@ use ts_rs::TS;
 
 use crate::client::{RequestedSurface, ShellKind};
 use crate::ids::{
-    AgentId, ClientInstanceId, EventCursor, ProjectId, ServerId, StateRootId, WorktreeId,
-    WorktreeRepositoryId,
+    AgentId, ClientInstanceId, ProjectId, ServerId, StateRootId, WorktreeId, WorktreeRepositoryId,
 };
 
 pub(crate) mod chat;
@@ -22,23 +21,14 @@ pub use task::*;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientSnapshot {
-    pub cursor: EventCursor,
     pub server: ServerSnapshot,
     pub state_root: StateRootSnapshot,
     pub client: ClientSnapshotScope,
-    pub new_task_defaults: NewTaskDefaultsSnapshot,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub projects: Option<ProjectCollectionSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agents: Option<AgentCollectionSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tasks: Option<TaskNavigationSnapshot>,
+    /// The complete global state, filtered to the client's Projects for VS Code (ADR-0086). Later
+    /// changes arrive as `sync` notifications.
+    pub global: crate::global_state::GlobalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_task: Option<TaskSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<SettingsSnapshot>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_requests: Vec<PendingRequestSnapshot>,
 }
 
 /// State-root-wide initial selection for a client that has no retained New Task choice.

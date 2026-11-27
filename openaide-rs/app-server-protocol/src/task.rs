@@ -3,9 +3,11 @@ use ts_rs::TS;
 
 mod attention;
 mod images;
+mod search;
 mod session_deletion;
 pub use attention::*;
 pub use images::*;
+pub use search::*;
 pub use session_deletion::*;
 
 use crate::attachment::PreSendAttachment;
@@ -660,19 +662,6 @@ pub struct TaskNavigationRefreshResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskNavigationLoadMoreParams {
-    pub project_id: ProjectId,
-    pub target_row_count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskNavigationLoadMoreResult {
-    pub accepted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct NativeSessionArchiveParams {
     pub agent_id: AgentId,
     pub native_session_id: String,
@@ -809,7 +798,6 @@ pub enum TaskArchiveOlderProtectedReason {
     Active,
     Queued,
     PendingRequest,
-    OpenElsewhere,
     Changed,
 }
 

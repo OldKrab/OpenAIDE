@@ -72,8 +72,8 @@ use crate::task::{
     TaskArchiveOlderResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
     TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
-    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskNavigationSearchParams, TaskNavigationSearchResult,
     TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
     TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
     TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
@@ -140,11 +140,13 @@ macro_rules! protocol_method {
 // Declared after the macro so the modules can use it.
 mod devices;
 mod diagnostics;
+mod navigation;
 mod task_attention;
 mod terminals;
 
 pub use devices::*;
 pub use diagnostics::*;
+pub use navigation::*;
 pub use task_attention::*;
 pub use terminals::*;
 
@@ -559,10 +561,10 @@ protocol_method!(
     TaskNavigationRefreshResult
 );
 protocol_method!(
-    TaskNavigationLoadMore,
-    TASK_NAVIGATION_LOAD_MORE,
-    TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult
+    TaskNavigationSearch,
+    TASK_NAVIGATION_SEARCH,
+    TaskNavigationSearchParams,
+    TaskNavigationSearchResult
 );
 protocol_method!(
     NativeSessionArchive,

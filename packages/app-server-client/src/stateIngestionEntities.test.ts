@@ -7,7 +7,7 @@ import type {
   SubagentHistorySnapshot,
   TaskId,
 } from "./generated/protocol.js";
-import { updateSubagentHistorySnapshot } from "./stateIngestionSubagentHistory.js";
+import { updateSubagentHistorySnapshot } from "./stateIngestionEntities.js";
 
 const taskId = "task_1" as TaskId;
 const subagentId = "subagent_1" as SubagentId;
@@ -85,7 +85,7 @@ describe("Subagent history revisions", () => {
       replica(2, [item("reply", "Done")]),
       changed(4, { chat: [{ kind: "append", item: item("next", "Hi") }] }),
     );
-    expect(update).toEqual({ kind: "resyncRequired", reason: "subagentHistoryRevisionGap" });
+    expect(update).toEqual({ kind: "resyncRequired", reason: "subagentHistoryRevisionGap", detail: { eventRevision: 4, heldRevision: 2 } });
   });
 
   it("re-reads the history when a held page lacks the changed message", () => {
@@ -93,7 +93,7 @@ describe("Subagent history revisions", () => {
       replica(1, [item("reply", "Done")]),
       changed(2, { chat: [{ kind: "appendText", messageId: "missing" as MessageId, text: "!" }] }),
     );
-    expect(update).toEqual({ kind: "resyncRequired", reason: "missingChatItem" });
+    expect(update).toEqual({ kind: "resyncRequired", reason: "missingChatItem", detail: { eventRevision: 2, heldRevision: 1 } });
   });
 
   it("skips a change to a message in an unloaded older page", () => {

@@ -4,15 +4,13 @@ import {
   type AppServerSession,
   type ClientSnapshot,
   type ProjectSummary,
-  type SubscriptionIngestionContext,
   type SubscriptionScope,
   type ReplicaSnapshot,
-  type TaskNavigationSnapshot,
+  type NavigationReplica,
+  type NavigationViewParams,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
-import { agentSettingsStatusFromProtocol, agentSignInFlowFromProtocol } from "../intents/agentSettingsRecords";
-import { applyProtocolAgents } from "../state/appServerAgents";
 import {
   createProtocolTaskSnapshotMapper,
   mapProtocolTaskNavigation,
@@ -23,18 +21,16 @@ import type { AgentOption } from "../state/composerOptions";
 
 type StateSubscriptionConnection = Pick<AppServerSession, "subscribeState">;
 
-export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
+export type StateSubscriptionMappingContext = {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
-  taskNavigations?: Partial<Record<"tasks" | "archive", TaskNavigationSnapshot>>;
+  taskNavigations?: Partial<Record<"tasks" | "archive", NavigationReplica>>;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
   return {
-    stateRootId: snapshot.stateRoot.stateRootId,
-    clientInstanceId: snapshot.client.clientInstanceId,
-    agents: snapshot.agents?.agents,
-    projects: snapshot.projects?.projects,
+    agents: snapshot.global.agents.agents,
+    projects: snapshot.global.projects.projects,
   };
 }
 
@@ -50,6 +46,7 @@ export function startAppServerStateSubscription({
   onTaskRemoved,
   setAgents,
   scope,
+  view,
 }: {
   backendConnection: StateSubscriptionConnection;
   context: StateSubscriptionMappingContext;
@@ -61,9 +58,11 @@ export function startAppServerStateSubscription({
   onTaskRemoved?: (taskId: string) => void;
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
+  /** The parameters of a Navigation view; required when `scope` is a `taskNavigation` scope. */
+  view?: NavigationViewParams;
 }) {
   const mapTaskSnapshot = createProtocolTaskSnapshotMapper();
-  return backendConnection.subscribeState(scope, {
+  const observer: Parameters<StateSubscriptionConnection["subscribeState"]>[1] = {
     onBaselineError,
     onBaselineLost,
     onBaselineReady,
@@ -97,7 +96,7 @@ export function startAppServerStateSubscription({
             liveText: {
               messageId: liveText.messageId,
               channel: liveText.channel,
-              eventCursor: liveText.eventCursor,
+              eventToken: liveText.eventToken,
             },
           });
         } else {
@@ -105,7 +104,10 @@ export function startAppServerStateSubscription({
         }
       }
     },
-  });
+  };
+  return view
+    ? backendConnection.subscribeState(scope, observer, view)
+    : backendConnection.subscribeState(scope, observer);
 }
 
 function liveTextPresentationAction(
@@ -130,7 +132,8 @@ function liveTextPresentationAction(
     taskId: payload.taskId,
     messageId,
     channel,
-    eventCursor: event.cursor,
+    // The Task revision is unique per event, so it tells a fresh live-text event from a replay.
+    eventToken: String(payload.revision),
   };
 }
 
@@ -152,35 +155,6 @@ function actionsFromSubscriptionSnapshot(
   mapTaskSnapshot = createProtocolTaskSnapshotMapper(),
 ): AppAction[] {
   switch (snapshot.kind) {
-    case "projects":
-      context.projects = snapshot.projects.projects;
-      return [{
-        type: "projects",
-        projects: snapshot.projects.projects.map((project) => ({
-          projectId: project.projectId,
-          label: project.label,
-          workspaceRoot: project.workspaceRoot,
-          available: project.available,
-          worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
-          projectWorktreeId: project.projectWorktreeId ?? undefined,
-          worktreeError: project.worktreeError ?? undefined,
-        })),
-      }, ...remappedTaskNavigationActions(context)];
-    case "agents":
-      context.agents = snapshot.agents.agents;
-      if (agents.setAgents) {
-        applyProtocolAgents(snapshot.agents, agents.currentAgentId?.() ?? "", agents.setAgents, agents.dispatch);
-      }
-      agents.dispatch({
-        type: "settings:agentCollection",
-        agents: snapshot.agents.agents.map((agent) => ({
-          agentId: agent.agentId,
-          status: agentSettingsStatusFromProtocol(agent.status),
-          setupReason: agent.setupReason ?? undefined,
-          signIn: agentSignInFlowFromProtocol(agent.signIn),
-        })),
-      });
-      return remappedTaskNavigationActions(context);
     case "taskNavigation":
       context.taskNavigations = {
         ...context.taskNavigations,
@@ -191,12 +165,6 @@ function actionsFromSubscriptionSnapshot(
       const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];
     }
-    case "settings":
-      return [];
-    case "devices":
-      return [{ type: "settings:devices", devices: snapshot.devices }];
-    case "terminals":
-      return [{ type: "terminals", terminals: snapshot.terminals }];
     case "toolDetail":
       return [{
         type: "toolDetail:result",
@@ -208,12 +176,10 @@ function actionsFromSubscriptionSnapshot(
     case "subagentHistory":
       // Focused Task inspection owns these independently ordered replicas.
       return [];
-    case "worktreeRepository":
-      return [{ type: "worktreeRepository", repository: snapshot.repository }];
   }
 }
 
-function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
+export function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
   return (["tasks", "archive"] as const).flatMap((section): AppAction[] => {
     const navigation = context.taskNavigations?.[section];
     if (!navigation) return [];
@@ -228,8 +194,7 @@ function remappedTaskNavigationActions(context: StateSubscriptionMappingContext)
       archived: section === "archive",
       tasks: mapped.tasks,
       sessions: mapped.sessions,
-      hasMoreProjectIds: mapped.hasMoreProjectIds,
-      loadingProjectIds: mapped.loadingProjectIds,
+      groups: mapped.groups,
       refreshing: mapped.refreshing,
       refreshError: mapped.refreshError,
       recoveryKind: mapped.recoveryKind,

@@ -48,6 +48,8 @@ type TaskChatTimelineProps = {
   chat: ReturnType<typeof renderedChat>;
   chatScroll: ReturnType<typeof useTaskChatScroll>;
   headerActionsTarget?: HTMLElement | null;
+  /** The message a search hit just revealed; marked briefly. */
+  revealedMessageId?: string;
   commandCatalog: TaskSnapshot["agent_commands"];
   items: ChatMessage[];
   liveTextPresentation?: TaskLiveTextPresentation;
@@ -80,6 +82,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   chat,
   chatScroll,
   headerActionsTarget,
+  revealedMessageId,
   commandCatalog,
   items,
   liveTextPresentation,
@@ -171,6 +174,13 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                   followsAgentAnswer(previousRow, row) ? "true" : undefined
                 }
                 data-index={virtualRow.index}
+                data-reveal-target={
+                  revealedMessageId !== undefined
+                  && row.kind === "message"
+                  && row.message.message_id === revealedMessageId
+                    ? "true"
+                    : undefined
+                }
                 data-row-key={row.key}
                 data-row-kind={row.kind}
                 data-user-message-navigation-target={
@@ -216,7 +226,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                       isLiveCompaction(row.message, taskStatus) ? workingStartedAt : undefined
                     }
                     hurryLiveText={awaitsUserAnswer}
-                    liveTextEventCursor={liveTextCursorForMessage(
+                    liveTextEventToken={liveTextTokenForMessage(
                       liveTextPresentation,
                       latestTextMessageIds,
                       row.message,
@@ -355,7 +365,7 @@ export function chatRowKey(message: ChatMessage) {
   return message.message_id;
 }
 
-function liveTextCursorForMessage(
+function liveTextTokenForMessage(
   presentation: TaskLiveTextPresentation | undefined,
   latestMessageIds: Partial<Record<"agent" | "thought", string>>,
   message: ChatMessage,
@@ -363,7 +373,7 @@ function liveTextCursorForMessage(
   if (message.message.kind !== "agent_message") return undefined;
   if (latestMessageIds[message.message.role] !== message.message_id) return undefined;
   const signal = presentation?.[message.message.role];
-  return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
+  return signal?.messageId === message.message_id ? signal.eventToken : undefined;
 }
 
 /**

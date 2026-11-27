@@ -1,10 +1,12 @@
 # Task State Publication and Replica Recovery
 
-Status: accepted
+Status: accepted; scope-local publication, cursor-gap recovery, and Native Session Catalog depth are superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md)
 
 This ADR defines the ordered publication, history-synchronization, and connection-recovery architecture that supports the accepted [Task Lifecycle and Chat Specification](../task-chat-flow.md).
 
 ## Scope-Local Publication
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): messages reach the wire in publish order, so scopes have no revisions or gap recovery; a Task resumes from a content version; Navigation is a server-computed view and Task transactions no longer patch its rows. Complete history replacement and per-client Tool-detail subscriptions stand._
 
 - `state/subscribe` returns one complete authoritative baseline and its scope-local revision. Baselines are used for initial subscription, stream replacement, revision-gap recovery, and explicit complete history replacement. A Task subscription that offers a known revision may instead be told its copy is current or receive only the missed changes, as amended by [ADR-0073](0073-task-subscription-resumes-from-a-known-revision.md).
 - Each subscribed scope has an independent ordered stream. A Task scope does not advance through unrelated Project, Agent, Navigation, or other Task events.
@@ -25,6 +27,8 @@ User option changes are serialized per Task. The complete catalog returned by `s
 Command normalization preserves all supported command-input information rather than reducing commands to only name, description, and an unstructured hint.
 
 ## Native Session Catalog
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): discovery depth is a count target derived from the current Navigation views, `taskNavigation/loadMore` and depth high-water marks are removed, and the trusted-descending cutoff below, which was never implemented, no longer applies. Catalog pages only mark their Project changed._
 
 `NativeSessionCatalog` is the only owner of ACP `session/list`. It durably stores successful observations by Agent identity and Native Session identity, with Project and canonical Task Workspace context. The Task Navigation snapshot merges those observations with durable Tasks into one activity-sorted list and excludes sessions already bound to a Task.
 
@@ -58,6 +62,8 @@ An explicit `task/reloadNativeSession` mutation is the only way to load an alrea
 If a Task is opened while it has a deferred requirement, App Server loads before exposing editable controls. It never resumes before that load, so every attachment recovery selects exactly one restore operation. Failed or unsupported load preserves the requirement and never falls through to resume. Send never checks or initiates synchronization. Live updates for App Server-owned Native Sessions continue through their Native Session update consumers.
 
 ## Connection Authority
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): `AppServerSession` keeps no cursors and does no cursor-gap recovery; a lost session re-initializes and re-subscribes. The single recovery barrier stands._
 
 The resumable RPC session defined by [ADR 0026](0026-resumable-http-rpc-session.md) is connection authority. Frontend uses one logical `AppServerSession`; that module owns initialization, active scope replicas, cursor-gap recovery, subscription retry, and one request-readiness state across replaceable physical transports. Product consumers only map authoritative snapshots and events into render state. A completed empty poll and a retried upload are healthy transport behavior and do not invalidate Frontend state or show an App Server reconnect warning.
 

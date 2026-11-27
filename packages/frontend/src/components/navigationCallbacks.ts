@@ -1,4 +1,6 @@
 import { requestSessionDeletion } from "../intents/sessionDeletionIntent";
+import { requestNavigationSearch } from "../intents/navigationSearchIntent";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import {
   openNewTaskSurface,
   openNativeSessionSurface,
@@ -12,7 +14,6 @@ import {
   NATIVE_SESSION_RESTORE,
   NATIVE_SESSION_SET_PINNED,
   NATIVE_SESSION_SET_TITLE,
-  TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
   TASK_ARCHIVE_OLDER,
   TASK_SET_PINNED,
@@ -121,19 +122,21 @@ export function createNavigationCallbacks({
       });
     },
     changeSearch: (query) => dispatch({ type: "search:set", query }),
-    loadNativeSessions: (cursor, projectId, targetRowCount) => {
-      if (backendConnection?.request && projectId && targetRowCount !== undefined) {
-        void backendConnection.request(TASK_NAVIGATION_LOAD_MORE, {
-          projectId: projectId as ProjectId,
-          targetRowCount,
-        });
-        return;
-      }
+    setProjectHistoryLimit: (projectId, historyLimit) => {
+      dispatch({ type: "navigation:historyLimit", projectId, historyLimit });
+    },
+    refreshNavigation: () => {
       if (backendConnection?.request) {
         void backendConnection.request(TASK_NAVIGATION_REFRESH, {});
         return;
       }
       dispatch({ type: "tasks:error", message: "App Server connection unavailable." });
+    },
+    searchNavigation: (text) => {
+      if (!backendConnection?.request) return Promise.reject(new Error("App Server connection unavailable."));
+      const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
+      return requestNavigationSearch(connection, text, (event, fields) =>
+        recordFrontendLifecycleEvent(connection, event, fields));
     },
     openNativeSession: (session) => {
       // A pending adoption blocks only its own row; navigating elsewhere supersedes its surface.

@@ -71,10 +71,6 @@ id_type!(
     "string & { readonly __openaideBrand: \"ClientRequestId\" }"
 );
 id_type!(
-    EventCursor,
-    "string & { readonly __openaideBrand: \"EventCursor\" }"
-);
-id_type!(
     FileBrowserEntryId,
     "string & { readonly __openaideBrand: \"FileBrowserEntryId\" }"
 );

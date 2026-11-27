@@ -22,6 +22,7 @@ use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, Rp
 
 mod archive_older;
 mod chat_image;
+mod navigation_search;
 pub(super) mod publication;
 
 impl RpcGateway {
@@ -708,11 +709,6 @@ impl RpcGateway {
             task_id: task_id.clone(),
         };
         self.state_stream.unsubscribe(&client, scope, now);
-        self.server_requests.observe_subscription_removed(
-            &client.client_instance_id,
-            &task_id,
-            now,
-        );
         self.result::<TaskReleaseResult>(connection_id, id, meta, TaskReleaseResult { task_id })
     }
 

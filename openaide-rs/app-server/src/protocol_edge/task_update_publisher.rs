@@ -1,22 +1,18 @@
 //! Single consumer of committed Task updates for the Local HTTP App Server.
 //!
-//! Every publication takes the protocol lock that client requests also need. Navigation
-//! updates are invalidations: their publication re-reads authoritative state, ahead of that
-//! lock, so when the queue backs up only the latest invalidation per target needs to run. Other updates carry
-//! captured values or ordered deltas and are always published, in order. The publisher
-//! coalesces only what is already queued and never waits for more, so an idle queue
-//! publishes immediately and a saturated one sheds redundant navigation projections.
+//! Every publication takes the protocol lock that client requests also need. A navigation
+//! update is only a wake: the commit already marked its Project dirty, and releasing the lock
+//! flushes every mark into frames. So when the queue backs up one wake covers them all. Other
+//! updates carry captured values or ordered deltas and are always published, in order. The
+//! publisher coalesces only what is already queued and never waits for more, so an idle queue
+//! publishes immediately and a saturated one sheds redundant wakes.
 
-use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use openaide_app_server_protocol::ids::ProjectId;
 use serde_json::json;
 
 use crate::client_lifecycle::AppServerTime;
-use crate::task_events::{
-    CommittedNavigationChange, TaskUpdate, TaskUpdateKind, TaskUpdateReceiver,
-};
+use crate::task_events::{TaskUpdate, TaskUpdateKind, TaskUpdateReceiver};
 
 use super::SharedRpcGateway;
 
@@ -31,11 +27,9 @@ pub struct TaskUpdatePublication {
     pub lock_wait: Duration,
     /// Time the publication held the lock while queueing events.
     pub lock_held: Duration,
-    /// Time spent reading navigation entries before taking the lock.
-    pub projection: Duration,
 }
 
-/// Bounds how far a queued navigation invalidation can move behind later updates.
+/// Bounds how many queued updates one batch takes.
 const MAX_BATCH: usize = 1024;
 
 /// A batch that took this long explains request latency even without coalescing.
@@ -90,7 +84,6 @@ pub(super) fn publish_task_updates(
                     "published_count": batch.len(),
                     "coalesced_count": coalesced,
                     "wait_ms": stats.lock_wait.as_millis(),
-                    "projection_ms": stats.projection.as_millis(),
                     "max_hold_ms": stats.max_held.as_millis(),
                     "update_kind": stats.max_held_kind,
                     "duration_ms": duration.as_millis(),
@@ -114,7 +107,6 @@ pub(super) fn publish_task_updates(
 #[derive(Default)]
 struct BatchStats {
     lock_wait: Duration,
-    projection: Duration,
     max_held: Duration,
     max_held_kind: Option<&'static str>,
 }
@@ -122,7 +114,6 @@ struct BatchStats {
 impl BatchStats {
     fn record(&mut self, kind: &'static str, publication: TaskUpdatePublication) {
         self.lock_wait += publication.lock_wait;
-        self.projection += publication.projection;
         if self.max_held_kind.is_none() || publication.lock_held > self.max_held {
             self.max_held = publication.lock_held;
             self.max_held_kind = Some(kind);
@@ -130,34 +121,15 @@ impl BatchStats {
     }
 }
 
-/// Keeps the last navigation invalidation per target at its own queue position, so the
-/// projection it triggers is read after every update that preceded it in the batch.
+/// Keeps the first navigation wake of a batch: every mark its siblings stand for was set before
+/// the batch was read, so the flush the first one triggers covers them.
 fn coalesce(batch: Vec<TaskUpdate>) -> Vec<TaskUpdate> {
-    let mut later_projects: HashSet<ProjectId> = HashSet::new();
-    let mut later_refresh_state = false;
-    let mut kept: Vec<TaskUpdate> = batch
+    let mut woke = false;
+    batch
         .into_iter()
-        .rev()
-        .filter(|update| match &update.kind {
-            TaskUpdateKind::NavigationProjectEntriesChanged { project_id } => {
-                later_projects.insert(project_id.clone())
-            }
-            TaskUpdateKind::NavigationRefreshStateChanged { .. } => {
-                !std::mem::replace(&mut later_refresh_state, true)
-            }
-            TaskUpdateKind::Changed(change) => {
-                // A committed change that re-projects its Project also satisfies earlier
-                // invalidations of it; the change itself carries deltas and always stays.
-                if let Some(CommittedNavigationChange::ProjectEntriesChanged { project_id }) =
-                    &change.navigation
-                {
-                    later_projects.insert(project_id.clone());
-                }
-                true
-            }
+        .filter(|update| match update.kind {
+            TaskUpdateKind::NavigationDirty => !std::mem::replace(&mut woke, true),
             _ => true,
         })
-        .collect();
-    kept.reverse();
-    kept
+        .collect()
 }

@@ -55,8 +55,6 @@ struct StoreInner {
     #[cfg(test)]
     message_file_read_count: AtomicUsize,
     #[cfg(test)]
-    after_next_task_snapshot_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-    #[cfg(test)]
     after_next_task_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
@@ -141,7 +139,6 @@ impl Store {
                 #[cfg(test)]
                 message_file_read_count: AtomicUsize::new(0),
                 #[cfg(test)]
-                after_next_task_snapshot_read: Mutex::new(None),
                 #[cfg(test)]
                 after_next_task_read: Mutex::new(None),
             }),
@@ -255,31 +252,6 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn message_file_read_count_for_test(&self) -> usize {
         self.inner.message_file_read_count.load(Ordering::SeqCst)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn after_next_task_snapshot_read_for_test(
-        &self,
-        hook: impl FnOnce() + Send + 'static,
-    ) {
-        *self
-            .inner
-            .after_next_task_snapshot_read
-            .lock()
-            .expect("Task snapshot hook poisoned") = Some(Box::new(hook));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn run_after_task_snapshot_read_hook_for_test(&self) {
-        let hook = self
-            .inner
-            .after_next_task_snapshot_read
-            .lock()
-            .expect("Task snapshot hook poisoned")
-            .take();
-        if let Some(hook) = hook {
-            hook();
-        }
     }
 
     #[cfg(test)]

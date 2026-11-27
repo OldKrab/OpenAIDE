@@ -8,16 +8,18 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
-import { AppServerProtocolError, type AppServerSession } from "@openaide/app-server-client";
+import { AppServerProtocolError, NAVIGATION_UPDATE, type AppServerSession } from "@openaide/app-server-client";
 import { refreshAgentSettingsThroughBackend } from "../intents/agentSettingsIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
+import { startGlobalSyncSubscription } from "../services/appServerGlobalSync";
+import { startSecretKeyDeclaration } from "../services/secretKeyDeclaration";
 import {
   mappingContextFromClientSnapshot,
   startAppServerStateSubscription,
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
-import { initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "../services/backendInitialization";
+import { initializeParamsForBootstrap, taskNavigationScope as navigationScope } from "../services/backendInitialization";
 import {
   openNewTaskSurface,
   openSettingsSurface,
@@ -43,6 +45,7 @@ import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
 import { shouldLoadTaskNavigation } from "../state/surfaceRouting";
+import { navigationViewParams } from "../state/navigationViewParams";
 import {
   navigationTargetForBootstrap,
   type AsyncOperationOwner,
@@ -74,6 +77,7 @@ export type AppControllerBackendConnection = Pick<
   | "handleResponsiveness"
   | "subscribeState"
   | "handleRequest"
+  | "notify"
   | "close"
 >;
 
@@ -218,12 +222,21 @@ export function useAppControllerBackendLifecycle({
           postHostMessage,
         })
       : undefined;
+    const secretKeyDeclaration = backendConnection?.notify
+      ? startSecretKeyDeclaration({
+          backendConnection: { notify: backendConnection.notify.bind(backendConnection) },
+          log: (event, fields) => sendWebviewTelemetry(postHostMessage, event, fields),
+          postHostMessage,
+          subscribeHostMessages,
+        })
+      : undefined;
     const stopRecoveryBaselines = backendConnection?.handleRecoveryBaseline((baseline) => {
       if (!active) return;
       sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_received", {
         surface: initialBootstrap.surface,
         reason: baseline.reason,
       });
+      void secretKeyDeclaration?.declare();
       const recoveredSnapshot = baseline.result.snapshot;
       const recoveredReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(recoveredSnapshot));
       const recoveredDispatch = bindAppServerReplicaEpoch(dispatch, recoveredReplicaEpoch);
@@ -257,7 +270,7 @@ export function useAppControllerBackendLifecycle({
         if (action.type === "settings:preferences") setPreferences(action.preferences);
         recoveredDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
       }
-      if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
+      if (recoveredSnapshot.global.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.global.agents));
       setBackendStateGeneration((current) => current + 1);
       sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_applied", {
         surface: initialBootstrap.surface,
@@ -382,6 +395,7 @@ export function useAppControllerBackendLifecycle({
               const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
               const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
               initializedDispatch({ type: "appServer:ready" });
+              void secretKeyDeclaration?.declare();
               const currentBootstrap = bootstrapRef.current;
               const ingestion = actionsFromInitialSnapshot(result.snapshot, {
                 includeActiveTask: currentBootstrap.surface === "task" && Boolean(currentBootstrap.taskId),
@@ -400,57 +414,21 @@ export function useAppControllerBackendLifecycle({
                 }
                 initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
               }
-              if (result.snapshot.agents) {
-                setAgents(agentOptionsFromProtocol(result.snapshot.agents));
+              if (result.snapshot.global.agents) {
+                setAgents(agentOptionsFromProtocol(result.snapshot.global.agents));
               }
               if (backendConnection) {
-                const subscriptionConnection = { subscribeState: backendConnection.subscribeState };
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  onBaselineLost: () => markGlobalSubscriptionLost("projects"),
-                  onBaselineError: (error) => markSubscriptionError("projects", error),
-                  onBaselineReady: () => markSubscriptionReady("projects"),
-                  scope: { kind: "projects" },
-                }));
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
+                // One `sync` stream carries projects, worktrees, Agents, devices and Terminals;
+                // none of them gates readiness, because the initialize reply holds the state.
+                stopSubscriptions.push(startGlobalSyncSubscription({
+                  backendConnection: { handleNotification: backendConnection.handleNotification },
                   context: subscriptionContext,
                   currentAgentId: () => currentAgentId.current,
                   dispatch: dispatchForCurrentReplica,
-                  onBaselineLost: () => markGlobalSubscriptionLost("agents"),
-                  onBaselineError: (error) => markSubscriptionError("agents", error),
-                  onBaselineReady: () => markSubscriptionReady("agents"),
-                  scope: { kind: "agents" },
+                  liveNewTaskContext: () => currentNewTaskContext.current,
                   setAgents,
+                  setPreferences,
                 }));
-                // Devices never gates readiness: the list only feeds Settings and the new-device notice.
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  scope: { kind: "devices" },
-                }));
-                // Terminals never gate readiness either: only the Terminal page and quit warnings read them.
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  scope: { kind: "terminals" },
-                }));
-                for (const project of result.snapshot.projects?.projects ?? []) {
-                  if (!project.worktreeRepositoryId) continue;
-                  stopSubscriptions.push(startAppServerStateSubscription({
-                    backendConnection: subscriptionConnection,
-                    context: subscriptionContext,
-                    dispatch: dispatchForCurrentReplica,
-                    scope: {
-                      kind: "worktreeRepository",
-                      repositoryId: project.worktreeRepositoryId,
-                    },
-                  }));
-                }
               }
               if (initialBootstrap.surface === "settings") {
                 if (initialBootstrap.settingsTab) {
@@ -603,6 +581,7 @@ export function useAppControllerBackendLifecycle({
       stopSessionStatus?.();
       stopResponsiveness?.();
       serverRequestBridge?.dispose();
+      secretKeyDeclaration?.dispose();
       stopSession();
       backendConnection?.close();
     };
@@ -610,16 +589,24 @@ export function useAppControllerBackendLifecycle({
 
   const taskNavigationEnabled = shouldLoadTaskNavigation(bootstrap);
   const taskNavigationSection = state.showArchived ? "archive" : "tasks";
-  const taskNavigationScope = taskNavigationScopeForBootstrap(bootstrap, taskNavigationSection);
-  // A route change need not change this scope. Re-subscribing asks App Server for
-  // another catalog refresh, so compare the generated scope by value, not route identity.
-  const taskNavigationScopeKey = JSON.stringify(taskNavigationScope);
+  const taskNavigationScope = navigationScope(taskNavigationSection);
+  const viewParams = navigationViewParams(state, bootstrap, taskNavigationSection);
+  // The view's parameters are presentation intent that App Server applies to the view. The
+  // subscription starts with the latest ones; later changes go out as updates, not re-subscribes.
+  const viewParamsRef = useRef(viewParams);
+  viewParamsRef.current = viewParams;
+  const viewParamsKey = JSON.stringify(viewParams);
+  // The view the current subscription was opened with; an update is sent only when it differs.
+  const subscribedViewKeyRef = useRef<string | undefined>(undefined);
+  // A change of Projects or section is a different view, so it subscribes again.
+  const taskNavigationViewKey = JSON.stringify([viewParams.section, viewParams.projectIds]);
 
   useEffect(() => {
     if (!backendConnection || !backendInitializationReady || !taskNavigationEnabled) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
     const taskNavigationKey = "task-navigation";
+    subscribedViewKeyRef.current = JSON.stringify(viewParamsRef.current);
     return startAppServerStateSubscription({
       backendConnection: { subscribeState: backendConnection.subscribeState },
       context,
@@ -637,14 +624,26 @@ export function useAppControllerBackendLifecycle({
       },
       onBaselineReady: () => markSubscriptionReady(taskNavigationKey),
       scope: taskNavigationScope,
+      view: viewParamsRef.current,
     });
   }, [
     backendConnection,
     backendInitializationReady,
     taskNavigationEnabled,
-    taskNavigationScopeKey,
+    taskNavigationViewKey,
     dispatchForCurrentReplica,
   ]);
+
+  // Declared after the subscription effect so the view exists before its first update. The
+  // session remembers the latest parameters for recovery and skips an update App Server holds.
+  useEffect(() => {
+    if (!backendConnection || !backendInitializationReady || !taskNavigationEnabled) return;
+    if (subscribedViewKeyRef.current === viewParamsKey) return;
+    subscribedViewKeyRef.current = viewParamsKey;
+    void backendConnection.request(NAVIGATION_UPDATE, viewParamsRef.current).catch(() => {
+      // The session logs the failure and recovers the view with a fresh baseline.
+    });
+  }, [backendConnection, backendInitializationReady, taskNavigationEnabled, viewParamsKey]);
 
   useNewTaskSubscription({
     backendConnection,

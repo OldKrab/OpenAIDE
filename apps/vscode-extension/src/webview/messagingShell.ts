@@ -22,7 +22,7 @@ import { sanitizeDiagnosticText } from "../logging/logger";
 import { workspaceRoots } from "../workspace/roots";
 import type { MessageContext } from "./messagingContext";
 import { isObject } from "./messagingFields";
-import { handleAgentSecretTransaction } from "./messagingSecrets";
+import { handleAgentSecretKeys, handleAgentSecretTransaction } from "./messagingSecrets";
 
 export async function routeSurfaceCommand(message: WebviewToHostMessage, context: MessageContext) {
   if (message.type === "surface.retainNewTaskProject") {
@@ -165,6 +165,10 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     message.type === "secret.transaction.rollback"
   ) {
     await context.post(await handleAgentSecretTransaction(message, context.agentSecretStore));
+    return true;
+  }
+  if (message.type === "secret.keys.request") {
+    await context.post(await handleAgentSecretKeys(message, context.agentSecretStore));
     return true;
   }
   if (message.type === "appServer.serverRequest") {

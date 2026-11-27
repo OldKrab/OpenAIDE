@@ -11,22 +11,25 @@ import type {
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
   BackendRequestContext,
+  BackendSyncListener,
   BackendUnsubscribe,
   ReplicaSnapshot,
 } from "./backendConnection.js";
 import type {
   AppServerEvent,
   ErrorEnvelope,
+  GlobalStateChanges,
   InitializeParams,
   RequestMeta,
   ServerRequestMethod,
   SubscriptionScope,
+  NavigationViewParams,
 } from "./generated/protocol.js";
 
 export type AppServerSessionViewMessage =
   | { type: "appServer.session.initialize"; requestId: string; params?: InitializeParams; meta?: RequestMeta }
   | { type: "appServer.session.request"; requestId: string; method: string; params: unknown; meta?: RequestMeta }
-  | { type: "appServer.session.subscribe"; subscriptionId: string; scope: SubscriptionScope }
+  | { type: "appServer.session.subscribe"; subscriptionId: string; scope: SubscriptionScope; view?: NavigationViewParams }
   | { type: "appServer.session.unsubscribe"; subscriptionId: string }
   | { type: "appServer.session.registerRequestHandler"; method: ServerRequestMethod }
   | { type: "appServer.session.unregisterRequestHandler"; method: ServerRequestMethod }
@@ -40,6 +43,7 @@ export type AppServerSessionHostMessage =
   | { type: "appServer.session.baselineReady"; subscriptionId: string }
   | { type: "appServer.session.baselineError"; subscriptionId: string; error: SerializedBridgeError }
   | { type: "appServer.session.notification"; event: AppServerEvent }
+  | { type: "appServer.session.sync"; changes: GlobalStateChanges }
   | { type: "appServer.session.generationInvalidated"; event: BackendGenerationInvalidation }
   | { type: "appServer.session.recoveryBaseline"; event: BackendRecoveryBaseline }
   | { type: "appServer.session.recoveryFailed"; event: Omit<BackendRecoveryFailure, "error"> & { error: SerializedBridgeError } }
@@ -74,6 +78,7 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
     context: BackendRequestContext,
   ) => Promise<unknown> | unknown>();
   const notificationListeners = new Set<BackendEventListener>();
+  const syncListeners = new Set<BackendSyncListener>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
   const recoveryFailureListeners = new Set<(event: BackendRecoveryFailure) => void>();
@@ -100,9 +105,10 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
         port.post({ type: "appServer.session.unregisterRequestHandler", method });
       };
     },
-    handleNotification(_method, handler) {
-      notificationListeners.add(handler);
-      return () => notificationListeners.delete(handler);
+    handleNotification(method: "app/event" | "sync", handler: BackendEventListener | BackendSyncListener) {
+      const listeners = (method === "sync" ? syncListeners : notificationListeners) as Set<typeof handler>;
+      listeners.add(handler);
+      return () => listeners.delete(handler);
     },
     handleGenerationInvalidated(handler) {
       invalidationListeners.add(handler);
@@ -116,10 +122,10 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
-    subscribeState(scope, observer) {
+    subscribeState(scope, observer, view) {
       const subscriptionId = `subscription-${nextSubscriptionId++}`;
       observers.set(subscriptionId, observer);
-      port.post({ type: "appServer.session.subscribe", subscriptionId, scope });
+      port.post({ type: "appServer.session.subscribe", subscriptionId, scope, ...(view ? { view } : {}) });
       return () => {
         if (observers.get(subscriptionId) !== observer) return;
         observers.delete(subscriptionId);
@@ -140,6 +146,7 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
       observers.clear();
       requestHandlers.clear();
       notificationListeners.clear();
+      syncListeners.clear();
       invalidationListeners.clear();
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();
@@ -190,6 +197,10 @@ export function createBridgedAppServerSession(port: AppServerSessionBridgePort):
     }
     if (message.type === "appServer.session.notification") {
       for (const listener of notificationListeners) listener(message.event);
+      return;
+    }
+    if (message.type === "appServer.session.sync") {
+      for (const listener of syncListeners) listener(message.changes);
       return;
     }
     if (message.type === "appServer.session.generationInvalidated") {

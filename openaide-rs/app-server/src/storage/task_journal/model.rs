@@ -16,6 +16,12 @@ pub struct TaskProjection {
     /// Highest artifact operation made visible by a durable Task commit.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub artifact_heads: HashMap<String, u64>,
+    /// The Chat version (last `chat.log` frame number) this projection reflects. The store sets
+    /// it when it hydrates a Task and when it publishes a commit, so a reader that clones or
+    /// inspects the projection gets its fields, Chat and Chat version from one committed state.
+    /// A caller that builds a projection leaves it zero; it is never serialized.
+    #[serde(skip)]
+    pub chat_version: u64,
 }
 
 /// One admitted semantic write. Constructors preserve the ordering boundary at
@@ -502,6 +508,9 @@ pub struct CommittedTaskBatch {
     /// Present for a batch of Subagent writes, whose Task fields are unchanged.
     pub subagent: Option<CommittedSubagentBatch>,
     pub journal_sequence: u64,
+    /// The Chat version (last `chat.log` frame number) after this batch, or
+    /// `None` when the batch wrote no Chat frame.
+    pub chat_version: Option<u64>,
     /// Revision after this physical batch. Stream text advances it once per
     /// coalesced batch instead of once per ACP chunk.
     pub task_revision: u64,

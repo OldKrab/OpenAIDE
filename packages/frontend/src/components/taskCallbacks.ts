@@ -234,10 +234,7 @@ export function createTaskCallbacks({
         backendConnection: {
           subscribeState: backendConnection.subscribeState,
         },
-        context: {
-          stateRootId: state.appServerStateRootId as StateRootId,
-          clientInstanceId: clientInstanceId as ClientInstanceId,
-        },
+        context: {},
         dispatch,
         onBaselineError: (error) => dispatch({
           type: "toolDetail:error",

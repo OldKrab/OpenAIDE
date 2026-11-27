@@ -3,11 +3,24 @@ use std::fs;
 
 use tempfile::Builder;
 
-use super::{artifact_path, load, prepare, prepare_with_faults, reconcile};
+use super::{artifact_path, load as load_since, prepare, prepare_with_faults, reconcile};
 use crate::protocol::model::ActivityToolDetails;
 use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, JournalKind};
 use crate::storage::task_journal::model::ArtifactOperation;
 use crate::storage::task_journal::store::RecoveredTask;
+
+/// The artifact as committed through `head`, without a known sequence.
+fn load(
+    root: &std::path::Path,
+    task_id: &str,
+    artifact_id: &str,
+    head: u64,
+) -> Result<
+    crate::storage::task_journal::ToolArtifactProjection,
+    crate::protocol::errors::RuntimeError,
+> {
+    load_since(root, task_id, artifact_id, head, head).map(|(artifact, _)| artifact)
+}
 
 const SENTINEL_ROOT: &str = "SENSITIVE_ABSOLUTE_ARTIFACT_ROOT";
 
@@ -193,4 +206,47 @@ fn terminal_append(data: &str) -> ArtifactOperation {
         terminal_id: "terminal_1".to_string(),
         data: data.to_string(),
     }
+}
+
+#[test]
+fn load_returns_the_appends_after_a_known_sequence_in_order() {
+    let root = Builder::new()
+        .prefix("artifact-appends-since")
+        .tempdir()
+        .expect("create state root");
+    let append = |terminal: &str, data: &str| ArtifactOperation::AppendTerminal {
+        terminal_id: terminal.to_string(),
+        data: data.to_string(),
+    };
+    for (head, operations) in [
+        (0, vec![append("terminal_a", "one")]),
+        (
+            1,
+            vec![append("terminal_a", "two"), append("terminal_b", "x")],
+        ),
+        (2, vec![append("terminal_a", "three")]),
+    ] {
+        prepare(root.path(), "task_1", "artifact_1", head, operations)
+            .expect("prepare artifact frame");
+    }
+
+    let (artifact, appends) =
+        load_since(root.path(), "task_1", "artifact_1", 3, 1).expect("load after sequence 1");
+
+    assert_eq!(artifact.revision, 3);
+    assert_eq!(artifact.terminal_outputs["terminal_a"], "onetwothree");
+    let appended: Vec<_> = appends
+        .iter()
+        .map(|append| (append.terminal_id.as_str(), append.data.as_str()))
+        .collect();
+    assert_eq!(
+        appended,
+        vec![
+            ("terminal_a", "two"),
+            ("terminal_b", "x"),
+            ("terminal_a", "three")
+        ]
+    );
+    let (_, none) = load_since(root.path(), "task_1", "artifact_1", 3, 3).expect("load at head");
+    assert!(none.is_empty());
 }

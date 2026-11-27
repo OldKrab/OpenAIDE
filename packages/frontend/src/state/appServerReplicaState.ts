@@ -39,6 +39,7 @@ export function applyAppServerReplica(
     taskLists: initial.taskLists,
     archivedNativeSessions: initial.archivedNativeSessions,
     nativeSessionMutations: initial.nativeSessionMutations,
+    navigationHistoryLimits: initial.navigationHistoryLimits,
     taskListError: undefined,
     activeTaskId: undefined,
     snapshot: undefined,
@@ -107,6 +108,7 @@ function invalidateProcessOwnedState(state: AppState): AppState {
       selection: state.newTask.selection,
       nativeSessions: {
         items: [],
+        groups: [],
         loading: false,
         loaded: false,
       },

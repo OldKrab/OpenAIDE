@@ -216,6 +216,17 @@ impl ConfiguredProjectRoots {
         before != visible_projects(&projects)
     }
 
+    /// The Projects a client's workspace roots resolved to (what a VS Code client works in).
+    pub fn client_project_ids(&self, client_instance_id: &ClientInstanceId) -> Vec<ProjectId> {
+        self.state
+            .read()
+            .expect("Project Context registry lock poisoned")
+            .client_projects
+            .get(client_instance_id)
+            .map(|projects| projects.iter().map(|p| p.project_id.clone()).collect())
+            .unwrap_or_default()
+    }
+
     /// Removes shell context only after the client's reconnect grace has expired.
     pub fn remove_client_workspace_roots(&self, client_instance_id: &ClientInstanceId) -> bool {
         let mut projects = self

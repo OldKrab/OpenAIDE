@@ -53,7 +53,7 @@ fn delivery_pump_reports_slow_protocol_lock_wait() {
     let connection_id = ConnectionId::new("conn-lock-wait-delivery");
     let gateway = SharedRpcGateway::new(gateway()).with_slow_lock_wait(ALWAYS_SLOW);
 
-    gateway.observe_connection_activity(&connection_id, AppServerTime(1));
+    gateway.observe_link_activity(&connection_id, AppServerTime(1));
 
     let waits = lock_waits_for(&logs.snapshot(), &connection_id);
     let [fields] = waits.as_slice() else {

@@ -4,9 +4,9 @@ use serde::de::Error as _;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::client_lifecycle::ConnectionId;
-use crate::protocol_edge::{GatewayEventDelivery, GatewayResponse, InboundProtocolMessage};
-use crate::server_requests::{ServerRequestAnswer, ServerRequestDelivery};
+use crate::protocol_edge::outbox::OutboundMessage;
+use crate::protocol_edge::{GatewayResponse, InboundProtocolMessage};
+use crate::server_requests::ServerRequestAnswer;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct WireRequest {
@@ -63,67 +63,120 @@ pub(crate) struct WireServerRequest {
     params: Value,
 }
 
-pub(crate) fn wire_messages(
-    id: Value,
-    connection_id: ConnectionId,
-    response: GatewayResponse,
-    events: Vec<GatewayEventDelivery>,
-    server_requests: Vec<ServerRequestDelivery>,
-) -> Vec<WireMessage> {
-    let mut messages = vec![WireMessage::Response(wire_response(id, response))];
-    messages.extend(event_wire_messages(connection_id.clone(), events));
-    messages.extend(server_request_wire_messages(connection_id, server_requests));
-    messages
-}
-
-pub(crate) fn event_wire_messages(
-    connection_id: ConnectionId,
-    events: Vec<GatewayEventDelivery>,
-) -> Vec<WireMessage> {
-    events
-        .into_iter()
-        .filter(|event| event.delivery.connection_id == connection_id)
-        .map(|event| {
-            WireMessage::Notification(WireNotification {
+impl From<OutboundMessage> for WireMessage {
+    fn from(message: OutboundMessage) -> Self {
+        match message {
+            OutboundMessage::Reply { id, response } => Self::Response(wire_response(id, response)),
+            OutboundMessage::Event(event) => Self::Notification(WireNotification {
                 jsonrpc: "2.0",
                 method: "app/event",
-                params: serde_json::to_value(event.event).expect("event serializes"),
-            })
-        })
-        .collect()
-}
-
-pub(crate) fn server_request_wire_messages(
-    connection_id: ConnectionId,
-    requests: Vec<ServerRequestDelivery>,
-) -> Vec<WireMessage> {
-    requests
-        .into_iter()
-        .filter(|request| request.delivery.connection_id == connection_id)
-        .map(|request| {
-            WireMessage::Request(WireServerRequest {
+                params: serde_json::to_value(event).expect("event serializes"),
+            }),
+            OutboundMessage::Sync(sync) => Self::Notification(WireNotification {
                 jsonrpc: "2.0",
-                id: request.envelope.request_id.into_string(),
-                scope: request.envelope.scope,
-                method: request.envelope.method,
-                params: request.envelope.params,
-            })
-        })
-        .collect()
+                method: openaide_app_server_protocol::global_state::SYNC_NOTIFICATION,
+                params: serde_json::to_value(sync).expect("sync notification serializes"),
+            }),
+            OutboundMessage::ServerRequest(envelope) => Self::Request(WireServerRequest {
+                jsonrpc: "2.0",
+                id: envelope.request_id.into_string(),
+                scope: envelope.scope,
+                method: envelope.method,
+                params: envelope.params,
+            }),
+        }
+    }
 }
 
-pub(crate) fn parse_error(error: serde_json::Error) -> WireMessage {
-    WireMessage::Response(error_response(Value::Null, format!("Parse error: {error}")))
+/// An inbound message refused before dispatch. `reason_code` is a stable, non-sensitive label
+/// for diagnostics; the reply answers `id` with an invalid-request error.
+#[derive(Debug)]
+pub(crate) struct InboundRejection {
+    pub reason_code: &'static str,
+    id: Value,
+    message: String,
 }
 
-pub(crate) fn invalid_request(id: Option<Value>, message: String) -> WireMessage {
-    WireMessage::Response(error_response(
-        id.unwrap_or(Value::Null),
-        format!("Invalid request: {message}"),
-    ))
+impl InboundRejection {
+    fn new(reason_code: &'static str, id: Option<Value>, message: String) -> Self {
+        Self {
+            reason_code,
+            id: id.unwrap_or(Value::Null),
+            message,
+        }
+    }
+
+    pub(crate) fn invalid_request(
+        reason_code: &'static str,
+        id: Option<Value>,
+        detail: impl std::fmt::Display,
+    ) -> Self {
+        Self::new(reason_code, id, format!("Invalid request: {detail}"))
+    }
+
+    pub(crate) fn into_wire(self) -> WireMessage {
+        WireMessage::from(self.into_outbound())
+    }
+
+    pub(crate) fn into_outbound(self) -> OutboundMessage {
+        OutboundMessage::Reply {
+            id: self.id,
+            response: GatewayResponse::Error(Box::new(invalid_request_envelope(self.message))),
+        }
+    }
 }
 
-pub(crate) fn id_to_gateway_id(id: &Value) -> String {
+pub(crate) fn parse_rejection(error: serde_json::Error) -> InboundRejection {
+    InboundRejection::new("malformed_json", None, format!("Parse error: {error}"))
+}
+
+/// Reads one JSON-RPC message from a client: a response to a server request, a request, or a
+/// notification.
+pub(crate) fn parse_inbound(value: Value) -> Result<InboundProtocolMessage, InboundRejection> {
+    if let Some(response) = client_response(&value) {
+        return Ok(response);
+    }
+    let request = serde_json::from_value::<WireRequest>(value).map_err(|error| {
+        InboundRejection::invalid_request("invalid_request_envelope", None, error)
+    })?;
+    let invalid = |reason_code, id: Option<&Value>, detail: &str| {
+        InboundRejection::invalid_request(reason_code, id.cloned(), detail)
+    };
+    let id = match request.id {
+        WireRequestId::Notification => None,
+        WireRequestId::Invalid => {
+            return Err(invalid(
+                "invalid_request_id",
+                Some(&Value::Null),
+                "invalid JSON-RPC id",
+            ))
+        }
+        WireRequestId::Request(id) => Some(id),
+    };
+    if request.jsonrpc != "2.0" {
+        return Err(invalid(
+            "invalid_jsonrpc_version",
+            id.as_ref(),
+            "jsonrpc must be 2.0",
+        ));
+    }
+    let Some(method) = request.method else {
+        return Err(invalid("missing_method", id.as_ref(), "method is required"));
+    };
+    let params = request.params.unwrap_or_else(|| serde_json::json!({}));
+    Ok(match id {
+        Some(wire_id) => InboundProtocolMessage::ClientRequest {
+            id: id_to_gateway_id(&wire_id),
+            wire_id,
+            method,
+            params,
+            meta: request.meta,
+        },
+        None => InboundProtocolMessage::ClientNotification { method, params },
+    })
+}
+
+fn id_to_gateway_id(id: &Value) -> String {
     match id {
         Value::String(value) => value.clone(),
         other => other.to_string(),
@@ -199,25 +252,20 @@ fn wire_response(id: Value, response: GatewayResponse) -> WireResponse {
     }
 }
 
-fn error_response(id: Value, message: String) -> WireResponse {
-    WireResponse {
-        jsonrpc: "2.0",
-        id,
-        result: None,
-        error: Some(ErrorEnvelope::new(
-            ProtocolError {
-                code: ProtocolErrorCode::InvalidRequest,
-                message,
-                recoverable: false,
-                target: Some(ErrorTarget {
-                    method: None,
-                    field: None,
-                    current_task: None,
-                }),
-            },
-            ResponseMeta::default(),
-        )),
-    }
+fn invalid_request_envelope(message: String) -> ErrorEnvelope {
+    ErrorEnvelope::new(
+        ProtocolError {
+            code: ProtocolErrorCode::InvalidRequest,
+            message,
+            recoverable: false,
+            target: Some(ErrorTarget {
+                method: None,
+                field: None,
+                current_task: None,
+            }),
+        },
+        ResponseMeta::default(),
+    )
 }
 
 fn json_rpc_error_message(error: &Value) -> String {

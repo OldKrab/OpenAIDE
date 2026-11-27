@@ -95,13 +95,13 @@ describe("useSubagentSessions", () => {
     act(() => {
       history.observer.onSnapshot(
         historySnapshot(2, "Forecast updated"),
-        subagentHistoryEvent("event-child-text", historySnapshot(2, "Forecast updated")),
+        subagentHistoryEvent(historySnapshot(2, "Forecast updated")),
       );
       catalog.observer.onSnapshot(catalogSnapshot(2, 2, "completed"));
     });
-    expect((latest as unknown as { liveTextPresentation?: { agent?: { eventCursor: string } } })
-      .liveTextPresentation?.agent?.eventCursor).toBe(
-        "event-child-text",
+    expect((latest as unknown as { liveTextPresentation?: { agent?: { eventToken: string } } })
+      .liveTextPresentation?.agent?.eventToken).toBe(
+        "2",
       );
   });
 });
@@ -129,10 +129,9 @@ function catalogSnapshot(
   } as unknown as SubscriptionSnapshot;
 }
 
-function subagentHistoryEvent(cursor: string, snapshot: SubscriptionSnapshot): AppServerEvent {
+function subagentHistoryEvent(snapshot: SubscriptionSnapshot): AppServerEvent {
   if (snapshot.kind !== "subagentHistory") throw new Error("expected subagent history");
   return {
-    cursor,
     payload: {
       kind: "subagentHistoryChanged",
       taskId: snapshot.history.taskId,

@@ -8,7 +8,10 @@ use crate::server_requests::{ServerRequestAnswer, ServerRequestDelivery};
 #[derive(Debug, Clone, PartialEq)]
 pub enum InboundProtocolMessage {
     ClientRequest {
+        /// The id handlers see and echo in diagnostics.
         id: String,
+        /// The id exactly as it arrived, so a reply keeps a number a number.
+        wire_id: Value,
         method: String,
         params: Value,
         meta: RequestMeta,

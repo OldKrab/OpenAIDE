@@ -3,7 +3,7 @@ use openaide_app_server_protocol::task::{NativeSessionDeleteParams, NativeSessio
 use serde_json::Value;
 
 use super::{responses, GatewayOutcome, RpcGateway};
-use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::client_lifecycle::ConnectionId;
 
 impl RpcGateway {
     pub(super) fn handle_native_session_delete(
@@ -12,7 +12,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<NativeSessionDeleteParams>(params) {
             Ok(params) => params,
@@ -37,12 +36,9 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = match &result {
-            NativeSessionDeleteResult::Deleted { project_id, .. } => {
-                self.publish_project_entries_replaced(project_id, now)
-            }
-            NativeSessionDeleteResult::ConfirmationRequired { .. } => Vec::new(),
-        };
-        self.result_with_events(connection_id, id, meta, result, events)
+        if let NativeSessionDeleteResult::Deleted { project_id, .. } = &result {
+            self.navigation.mark_project(project_id.clone());
+        }
+        self.result(connection_id, id, meta, result)
     }
 }

@@ -6,7 +6,8 @@ use openaide_app_server_protocol::project::{
 };
 use serde_json::Value;
 
-use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::client_lifecycle::ConnectionId;
+use crate::global_state::GlobalAreas;
 
 use super::{responses, GatewayOutcome, RpcGateway};
 
@@ -17,7 +18,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<ProjectAddParams>(params) {
             Ok(params) => params,
@@ -50,9 +50,7 @@ impl RpcGateway {
                 },
             );
         };
-        let events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
+        self.publish_global_state(GlobalAreas::PROJECTS);
         crate::logging::info(
             "project_added",
             serde_json::json!({
@@ -60,13 +58,7 @@ impl RpcGateway {
                 "workspace_root": project.workspace_root,
             }),
         );
-        responses::result_with_events(
-            connection_id,
-            id,
-            meta,
-            ProjectAddResult { project },
-            events,
-        )
+        responses::result(connection_id, id, meta, ProjectAddResult { project })
     }
 
     pub(super) fn handle_project_rename(
@@ -75,7 +67,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<ProjectRenameParams>(params) {
             Ok(params) => params,
@@ -94,9 +85,7 @@ impl RpcGateway {
             Ok(project) => project,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
+        self.publish_global_state(GlobalAreas::PROJECTS);
         crate::logging::info(
             "project_renamed",
             serde_json::json!({
@@ -104,13 +93,7 @@ impl RpcGateway {
                 "label": project.label,
             }),
         );
-        responses::result_with_events(
-            connection_id,
-            id,
-            meta,
-            ProjectRenameResult { project },
-            events,
-        )
+        responses::result(connection_id, id, meta, ProjectRenameResult { project })
     }
 
     pub(super) fn handle_project_remove(
@@ -119,7 +102,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<ProjectRemoveParams>(params) {
             Ok(params) => params,
@@ -134,9 +116,7 @@ impl RpcGateway {
             Ok(count) => count,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
+        self.publish_global_state(GlobalAreas::PROJECTS);
         crate::logging::info(
             "project_removed",
             serde_json::json!({
@@ -144,12 +124,11 @@ impl RpcGateway {
                 "removed_task_count": removed_task_count,
             }),
         );
-        responses::result_with_events(
+        responses::result(
             connection_id,
             id,
             meta,
             ProjectRemoveResult { removed_task_count },
-            events,
         )
     }
 
@@ -159,7 +138,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<ProjectRefreshParams>(params) {
             Ok(params) => params,
@@ -171,16 +149,8 @@ impl RpcGateway {
             Ok(project) => project,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
-        responses::result_with_events(
-            connection_id,
-            id,
-            meta,
-            ProjectRefreshResult { project },
-            events,
-        )
+        self.publish_global_state(GlobalAreas::PROJECTS);
+        responses::result(connection_id, id, meta, ProjectRefreshResult { project })
     }
 
     fn project_context_from_snapshot(

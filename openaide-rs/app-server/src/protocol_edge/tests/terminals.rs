@@ -1,7 +1,6 @@
 use openaide_app_server_protocol::client::{
     ClientReplacementImpactParams, UpdateShutdownPrepareParams,
 };
-use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::methods::{
     CLIENT_REPLACEMENT_IMPACT, TERMINALS_CLOSE, TERMINALS_OPEN,
 };
@@ -12,24 +11,9 @@ use serde_json::json;
 
 use super::*;
 
-fn subscribe_to_terminals(gateway: &mut RpcGateway, connection_id: &ConnectionId) -> Value {
-    response_value(gateway.handle_inbound(
-        connection_id.clone(),
-        request(
-            "subscribe",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Terminals,
-                known_revision: None,
-            },
-        ),
-        AppServerTime(2),
-    ))
-}
-
 #[cfg(unix)]
 #[test]
-fn a_terminal_opens_in_its_project_and_every_subscriber_sees_it_close() {
+fn a_terminal_opens_in_its_project_and_every_connected_client_sees_it_close() {
     let mut gateway = gateway_with_project_context();
     let folder = tempfile::tempdir().unwrap();
     let project = gateway
@@ -38,11 +22,8 @@ fn a_terminal_opens_in_its_project_and_every_subscriber_sees_it_close() {
         .unwrap();
     let connection_id = ConnectionId::new("conn-1");
     initialize_client(&mut gateway, connection_id.clone());
-    let empty = subscribe_to_terminals(&mut gateway, &connection_id);
-    assert_eq!(
-        empty["result"]["snapshot"],
-        json!({ "kind": "terminals", "terminals": { "terminals": [] } })
-    );
+    assert!(gateway.terminals.snapshot().terminals.is_empty());
+    gateway.drain_sync_for_connection(&connection_id);
 
     let outcome = gateway.handle_inbound(
         connection_id.clone(),
@@ -59,7 +40,6 @@ fn a_terminal_opens_in_its_project_and_every_subscriber_sees_it_close() {
         ),
         AppServerTime(3),
     );
-    let events = response_events(outcome.clone());
     let opened = response_value(outcome);
     let terminal_id = opened["result"]["terminal"]["terminalId"]
         .as_str()
@@ -70,17 +50,15 @@ fn a_terminal_opens_in_its_project_and_every_subscriber_sees_it_close() {
         json!(project.project_id)
     );
     assert_eq!(opened["result"]["attach"]["path"], json!("/terminal"));
-    let [delivery] = events.as_slice() else {
-        panic!("expected one terminal collection event, got {events:?}");
+    let opened_sync = gateway.drain_sync_for_connection(&connection_id);
+    let [changes] = opened_sync.as_slice() else {
+        panic!("expected one sync notification, got {opened_sync:?}");
     };
-    let AppServerEventPayload::TerminalCollectionUpdated { terminals } = &delivery.event.payload
-    else {
-        panic!("unexpected payload {:?}", delivery.event.payload);
-    };
+    let terminals = changes.terminals.as_ref().expect("terminals changed");
     assert_eq!(terminals.terminals[0].terminal_id, terminal_id);
 
-    let events = response_events(gateway.handle_inbound(
-        connection_id,
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
         request(
             "close",
             TERMINALS_CLOSE,
@@ -91,12 +69,13 @@ fn a_terminal_opens_in_its_project_and_every_subscriber_sees_it_close() {
         ),
         AppServerTime(4),
     ));
-    let [delivery] = events.as_slice() else {
-        panic!("expected one terminal collection event, got {events:?}");
+    let closed_sync = gateway.drain_sync_for_connection(&connection_id);
+    let [changes] = closed_sync.as_slice() else {
+        panic!("expected one sync notification, got {closed_sync:?}");
     };
     assert!(matches!(
-        &delivery.event.payload,
-        AppServerEventPayload::TerminalCollectionUpdated { terminals } if terminals.terminals.is_empty()
+        &changes.terminals,
+        Some(terminals) if terminals.terminals.is_empty()
     ));
 }
 

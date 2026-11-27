@@ -76,6 +76,8 @@ pub struct ClientExpiryBatch {
     /// Clients whose heartbeats stopped, with the end of their new reconnect grace.
     pub entered_reconnect_grace: Vec<(ClientInstanceId, AppServerTime)>,
     pub expired: Vec<ClientInstanceId>,
+    /// The last connection of each expired client; nothing queued for it can be read anymore.
+    pub expired_connections: Vec<ConnectionId>,
     pub last_client_expired: bool,
 }
 
@@ -98,13 +100,6 @@ pub enum DetachOutcome {
 pub struct Delivery {
     pub client_instance_id: ClientInstanceId,
     pub connection_id: ConnectionId,
-    pub request_capabilities: Vec<RequestCapability>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestCapability {
-    Permission,
-    Question,
 }
 
 impl Delivery {
@@ -112,26 +107,7 @@ impl Delivery {
         Self {
             client_instance_id,
             connection_id,
-            request_capabilities: Vec::new(),
         }
-    }
-
-    pub fn with_request_capabilities(mut self, capabilities: Vec<RequestCapability>) -> Self {
-        self.request_capabilities = capabilities;
-        self
-    }
-
-    pub fn supports_method(&self, method: &str) -> bool {
-        let required = match method {
-            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST => {
-                RequestCapability::Permission
-            }
-            openaide_app_server_protocol::server_requests::QUESTION_REQUEST => {
-                RequestCapability::Question
-            }
-            _ => return true,
-        };
-        self.request_capabilities.contains(&required)
     }
 }
 
@@ -319,8 +295,11 @@ impl ClientHub {
             })
             .collect::<Vec<_>>();
 
+        let mut expired_connections = Vec::new();
         for client_instance_id in &expired {
-            self.clients.remove(client_instance_id);
+            if let Some(record) = self.clients.remove(client_instance_id) {
+                expired_connections.push(record.context.connection_id);
+            }
             self.connections
                 .retain(|_, value| value != client_instance_id);
         }
@@ -332,6 +311,7 @@ impl ClientHub {
                 .collect(),
             last_client_expired: !expired.is_empty() && self.clients.is_empty(),
             expired,
+            expired_connections,
         }
     }
 
@@ -416,21 +396,20 @@ impl ClientHub {
             .map(|record| record.context.clone())
     }
 
-    pub fn delivery_for(&self, client_instance_id: &ClientInstanceId) -> Option<Delivery> {
-        let context = &self.clients.get(client_instance_id)?.context;
-        Some(
-            Delivery::new(client_instance_id.clone(), context.connection_id.clone())
-                .with_request_capabilities(request_capabilities(&context.capabilities)),
-        )
+    /// Every initialized client, in no particular order.
+    pub fn client_contexts(&self) -> Vec<ClientContext> {
+        self.clients
+            .values()
+            .map(|record| record.context.clone())
+            .collect()
     }
 
-    /// Returns connected clients that declared support for an App Server request method.
-    pub fn deliveries_supporting(&self, method: &str) -> Vec<Delivery> {
-        self.clients
-            .keys()
-            .filter_map(|client_instance_id| self.delivery_for(client_instance_id))
-            .filter(|delivery| delivery.supports_method(method))
-            .collect()
+    pub fn delivery_for(&self, client_instance_id: &ClientInstanceId) -> Option<Delivery> {
+        let context = &self.clients.get(client_instance_id)?.context;
+        Some(Delivery::new(
+            client_instance_id.clone(),
+            context.connection_id.clone(),
+        ))
     }
 
     /// Browser Frontends advertise `openExternal`. The Web Node shell client does not.
@@ -449,25 +428,6 @@ impl ClientHub {
             .filter_map(|record| self.delivery_for(&record.context.client_instance_id))
             .collect()
     }
-}
-
-fn request_capabilities(capabilities: &ClientCapabilities) -> Vec<RequestCapability> {
-    use openaide_app_server_protocol::client::ClientProtocolCapability;
-
-    let mut result = Vec::new();
-    if capabilities
-        .protocol
-        .contains(&ClientProtocolCapability::PermissionResponses)
-    {
-        result.push(RequestCapability::Permission);
-    }
-    if capabilities
-        .protocol
-        .contains(&ClientProtocolCapability::QuestionResponses)
-    {
-        result.push(RequestCapability::Question);
-    }
-    result
 }
 
 #[cfg(test)]

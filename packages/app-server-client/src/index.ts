@@ -1,4 +1,5 @@
 export * from "./backendConnection.js";
+export * from "./globalState.js";
 export * from "./diagnostics.js";
 export * from "./appServerSession.js";
 export * from "./appServerSessionBridge.js";
@@ -14,3 +15,4 @@ export * from "./reliableHttpChannel.js";
 export * from "./reliableBackendConnection.js";
 export * from "./subscriptionScope.js";
 export * from "./stateIngestion.js";
+export * from "./stateIngestionTaskNavigation.js";

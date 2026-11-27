@@ -19,8 +19,8 @@ use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, ActivityToolOutput, AgentMessagePart, AgentMessageRole,
     IsolationKind, NormalizedMessage, TaskStatus,
 };
+use crate::server_requests::ServerRequestAnswer;
 use crate::server_requests::ServerRequestRuntime;
-use crate::server_requests::{ResponderScope, ServerRequestAnswer};
 use crate::storage::records::{
     TaskAttentionReason, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
 };
@@ -764,19 +764,17 @@ fn question_waits_for_a_late_responder() {
         waiting.attention.as_ref().map(|event| event.reason),
         Some(TaskAttentionReason::NeedsAnswer)
     );
-    register_question_responder(&server_requests, "task_1");
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
     assert!(waiting.attention.as_ref().is_some_and(|event| event
         .event_id
         .starts_with(&format!("request:{}:", request.request_id.as_str()))));
     assert!(matches!(
-        server_requests.handle_response_from_scopes(
+        server_requests.handle_response(
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(
                 serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
             ),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -790,7 +788,6 @@ fn question_waits_for_a_late_responder() {
 #[test]
 fn resolving_one_of_two_questions_keeps_task_waiting_for_the_other() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_question_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let sink = Arc::new(TaskSessionEventSink::new(
         mutations,
@@ -851,7 +848,6 @@ fn resolving_one_of_two_questions_keeps_task_waiting_for_the_other() {
 #[test]
 fn session_question_round_trips_and_persists_submitted_history() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_question_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskSessionEventSink::new(
         mutations,
@@ -880,11 +876,10 @@ fn session_question_round_trips_and_persists_submitted_history() {
     })
     .unwrap();
     assert!(matches!(
-        server_requests.handle_response_from_scopes(
+        server_requests.handle_response(
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(result),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -903,7 +898,6 @@ fn session_question_round_trips_and_persists_submitted_history() {
 #[test]
 fn withdrawing_one_question_closes_only_its_own_waiter() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_question_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let cancellation = TurnCancellation::new();
     let sink = TaskSessionEventSink::new(
@@ -942,7 +936,6 @@ fn withdrawing_one_question_closes_only_its_own_waiter() {
 #[test]
 fn permission_is_transient_until_the_server_request_resolves() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_permission_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskEventSink::new(
         mutations,
@@ -977,11 +970,10 @@ fn permission_is_transient_until_the_server_request_resolves() {
 
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
     assert!(matches!(
-        server_requests.handle_response_from_scopes(
+        server_requests.handle_response(
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow" })),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -1061,7 +1053,6 @@ fn auto_approve_policy_resolves_an_allow_once_permission_without_waiting() {
 #[test]
 fn auto_approve_policy_leaves_requests_without_allow_once_for_manual_decision() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_permission_responder(&server_requests, "task_1");
     let mut task = running_task("task_1");
     task.permission_policy =
         openaide_app_server_protocol::snapshot::TaskPermissionPolicy::AutoApprove;
@@ -1102,7 +1093,6 @@ fn auto_approve_policy_leaves_requests_without_allow_once_for_manual_decision() 
 #[test]
 fn multiple_permission_decisions_remain_linked_after_later_tool_updates() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_permission_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let sink = Arc::new(TaskEventSink::new(
         mutations,
@@ -1151,7 +1141,6 @@ fn multiple_permission_decisions_remain_linked_after_later_tool_updates() {
 #[test]
 fn cancelling_a_waiting_permission_records_cancelled_outcome_on_the_tool() {
     let (_dir, store, mutations, server_requests) = test_runtime();
-    register_permission_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let cancellation = TurnCancellation::new();
     let sink = TaskEventSink::new(
@@ -1214,39 +1203,14 @@ fn question_form() -> QuestionRequestParams {
     }
 }
 
-fn register_question_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
-    server_requests.observe_subscription_added(
-        crate::client_lifecycle::Delivery::new(
-            ClientInstanceId::from("client-1"),
-            crate::client_lifecycle::ConnectionId::new("conn-1"),
-        )
-        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Question]),
-        TaskId::from(task_id),
-        AppServerTime(0),
-    );
-}
-
-fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
-    server_requests.observe_subscription_added(
-        crate::client_lifecycle::Delivery::new(
-            ClientInstanceId::from("client-1"),
-            crate::client_lifecycle::ConnectionId::new("conn-1"),
-        )
-        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Permission]),
-        TaskId::from(task_id),
-        AppServerTime(0),
-    );
-}
-
 fn answer_permission(server_requests: &ServerRequestRuntime, task_id: &str, option_id: &str) {
     let task_id = TaskId::from(task_id);
     let request = server_requests.pending_for_task(&task_id)[0].clone();
     assert!(matches!(
-        server_requests.handle_response_from_scopes(
+        server_requests.handle_response(
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(serde_json::json!({ "optionId": option_id })),
-            &[ResponderScope::Task(task_id)],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -1255,17 +1219,16 @@ fn answer_permission(server_requests: &ServerRequestRuntime, task_id: &str, opti
 
 fn answer_question(
     server_requests: &ServerRequestRuntime,
-    task_id: &TaskId,
+    _task_id: &TaskId,
     request_id: openaide_app_server_protocol::ids::RequestId,
 ) {
     assert!(matches!(
-        server_requests.handle_response_from_scopes(
+        server_requests.handle_response(
             ClientInstanceId::from("client-1"),
             request_id,
             ServerRequestAnswer::Result(
                 serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
             ),
-            &[ResponderScope::Task(task_id.clone())],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -1306,7 +1269,6 @@ fn permission_waits_for_a_late_responder() {
     assert!(waiting.attention.as_ref().is_some_and(|event| event
         .event_id
         .starts_with(&format!("request:{}:", request.request_id.as_str()))));
-    register_permission_responder(&server_requests, "task_1");
     answer_permission(&server_requests, "task_1", "allow");
     assert!(matches!(
         thread.join().unwrap().unwrap(),
@@ -1327,7 +1289,6 @@ fn permission_request_append_failure_does_not_open_broker_request() {
         notifier,
     );
     let server_requests = ServerRequestRuntime::new();
-    register_permission_responder(&server_requests, "missing_task");
     let sink = TaskEventSink::new(
         mutations,
         "missing_task".to_string(),
@@ -1784,8 +1745,7 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
                 TaskUpdateKind::HistorySync(_)
                 | TaskUpdateKind::SubagentCatalogChanged { .. }
                 | TaskUpdateKind::SubagentHistoryChanged { .. }
-                | TaskUpdateKind::NavigationProjectEntriesChanged { .. }
-                | TaskUpdateKind::NavigationRefreshStateChanged { .. } => None,
+                | TaskUpdateKind::NavigationDirty => None,
             }
         })
         .expect("Task change publication");
@@ -1993,10 +1953,14 @@ fn cancellation_failure_returns_task_to_idle_and_closes_transient_requests() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     server_requests
-        .open_task_secret_read_request(
-            openaide_app_server_protocol::ids::TaskId::from("task_1"),
-            "agent.secret".to_string(),
-            Some("Agent secret".to_string()),
+        .open_waitable_request(
+            openaide_app_server_protocol::snapshot::PendingRequestScope::Task {
+                task_id: openaide_app_server_protocol::ids::TaskId::from("task_1"),
+            },
+            Vec::new(),
+            "permission/request",
+            "Permission needed",
+            serde_json::json!({}),
             crate::client_lifecycle::AppServerTime(1),
         )
         .unwrap();
@@ -2620,7 +2584,6 @@ fn prompt_completion_does_not_change_session_owned_text() {
 fn permission_request_splits_active_agent_text_run() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
-    register_permission_responder(&server_requests, "task_1");
     let sink = Arc::new(TaskEventSink::new(
         mutations,
         "task_1".to_string(),
@@ -2658,7 +2621,6 @@ fn permission_request_splits_active_agent_text_run() {
 fn permission_wait_does_not_block_concurrent_agent_events() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
-    register_permission_responder(&server_requests, "task_1");
     let sink = Arc::new(TaskEventSink::new(
         mutations,
         "task_1".to_string(),

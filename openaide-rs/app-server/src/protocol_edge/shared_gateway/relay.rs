@@ -7,8 +7,8 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::logging;
 
 use super::super::device_handlers::relay_request;
-use super::super::{responses, GatewayOutcome, InboundProtocolMessage};
-use super::SharedRpcGateway;
+use super::super::{responses, InboundProtocolMessage};
+use super::{Handled, SharedRpcGateway};
 
 impl SharedRpcGateway {
     /// Checks the client under the lock, calls the relay without it, then answers
@@ -19,7 +19,7 @@ impl SharedRpcGateway {
         message: InboundProtocolMessage,
         now: AppServerTime,
         completion_clock: impl FnOnce() -> AppServerTime,
-    ) -> GatewayOutcome {
+    ) -> Handled<'_> {
         let (devices, owner) = {
             let mut gateway = self.lock();
             // Keep routing's initialization/shutdown rejection and lease activity semantics.
@@ -28,7 +28,8 @@ impl SharedRpcGateway {
                 .context_for_connection(&connection_id)
                 .map(|client| client.client_instance_id);
             let Some(owner) = owner.filter(|_| gateway.update_shutdown.is_none()) else {
-                return gateway.handle_inbound(connection_id, message, now);
+                let outcome = gateway.handle_inbound(connection_id, message, now);
+                return (gateway, outcome);
             };
             if let Some(client) = gateway
                 .client_hub
@@ -43,6 +44,7 @@ impl SharedRpcGateway {
             method,
             params,
             meta,
+            ..
         } = message
         else {
             unreachable!("the relay path only handles client requests")
@@ -66,11 +68,14 @@ impl SharedRpcGateway {
             .context_for_connection(&connection_id)
             .is_some_and(|client| client.client_instance_id == owner)
         {
-            return gateway.error(connection_id, id, meta, responses::not_initialized(method));
+            let outcome =
+                gateway.error(connection_id, id, meta, responses::not_initialized(method));
+            return (gateway, outcome);
         }
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
-        gateway.relay_answer(connection_id, id, &method, meta, answer, now)
+        let outcome = gateway.relay_answer(connection_id, id, &method, meta, answer);
+        (gateway, outcome)
     }
 }

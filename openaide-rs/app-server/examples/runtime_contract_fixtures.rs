@@ -28,6 +28,7 @@ fn main() {
     let tool_details = tool_details();
     let chat = MessagePage {
         task_id: task.task_id.clone(),
+        chat_version: 0,
         items: vec![
             chat_message(NormalizedMessage::User {
                 id: "msg_user".to_string(),

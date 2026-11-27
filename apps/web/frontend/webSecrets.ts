@@ -1,6 +1,7 @@
 import { SECRET_READ } from "@openaide/app-server-client";
 import {
   createSecretTransactionHandler,
+  secretKeysResult,
   type AppShellSecretStore,
   type HostToWebviewMessage,
   type WebviewToHostMessage,
@@ -8,7 +9,7 @@ import {
 
 type WebSecretMessage = Extract<
   WebviewToHostMessage,
-  { type: `secret.transaction.${string}` | "appServer.serverRequest" }
+  { type: `secret.transaction.${string}` | "secret.keys.request" | "appServer.serverRequest" }
 >;
 
 type SafeLog = (event: string, fields: Record<string, unknown>) => void;
@@ -22,6 +23,7 @@ export function createWebSecretMessageHandler(
   return async function handleWebSecretMessage(
     message: WebSecretMessage,
   ): Promise<HostToWebviewMessage | undefined> {
+    if (message.type === "secret.keys.request") return secretKeysResult(message, secretStore);
     const startedAt = performance.now();
     const operation = message.type === "appServer.serverRequest"
       ? "web_secret_read"

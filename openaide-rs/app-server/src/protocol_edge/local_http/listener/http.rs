@@ -24,7 +24,6 @@ pub(super) struct HttpRequest {
     pub session_id: Option<String>,
     pub after_header_present: bool,
     pub after_sequence: Option<u64>,
-    pub accepts_event_stream: bool,
     pub websocket_upgrade: bool,
     pub websocket_key: Option<String>,
     pub websocket_version: Option<String>,
@@ -60,11 +59,6 @@ pub(super) fn read_http_request(
     let after_header = header_value(&headers, "x-openaide-after");
     let after_header_present = after_header.is_some();
     let after_sequence = after_header.and_then(|value| value.parse::<u64>().ok());
-    let accepts_event_stream = header_value(&headers, "accept").is_some_and(|value| {
-        value
-            .split(',')
-            .any(|item| item.trim() == "text/event-stream")
-    });
     let websocket_upgrade = header_value(&headers, "upgrade")
         .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
     let websocket_key = header_value(&headers, "sec-websocket-key").map(str::to_string);
@@ -115,7 +109,6 @@ pub(super) fn read_http_request(
         session_id,
         after_header_present,
         after_sequence,
-        accepts_event_stream,
         websocket_upgrade,
         websocket_key,
         websocket_version,
@@ -123,33 +116,6 @@ pub(super) fn read_http_request(
         initial_body,
         body,
     })
-}
-
-pub(super) fn write_event_stream_headers(
-    stream: &mut TcpStream,
-) -> Result<(), LocalHttpProbeListenerError> {
-    stream.write_all(
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: keep-alive\r\n\r\n",
-    )?;
-    stream.flush()?;
-    Ok(())
-}
-
-pub(super) fn write_event_stream_data(
-    stream: &mut TcpStream,
-    data: &str,
-) -> Result<(), LocalHttpProbeListenerError> {
-    write!(stream, "data: {data}\n\n")?;
-    stream.flush()?;
-    Ok(())
-}
-
-pub(super) fn write_event_stream_heartbeat(
-    stream: &mut TcpStream,
-) -> Result<(), LocalHttpProbeListenerError> {
-    stream.write_all(b": heartbeat\n\n")?;
-    stream.flush()?;
-    Ok(())
 }
 
 pub(super) fn write_http_response(

@@ -51,7 +51,6 @@ pub(crate) enum NativeCatalogRefreshRequester {
     NavigationSubscribed,
     ClientRefresh,
     AgentsReady,
-    LoadMore,
 }
 
 impl NativeCatalogRefreshRequester {
@@ -61,7 +60,6 @@ impl NativeCatalogRefreshRequester {
             Self::NavigationSubscribed => "navigation_subscribed",
             Self::ClientRefresh => "client_refresh",
             Self::AgentsReady => "agents_ready",
-            Self::LoadMore => "load_more",
         }
     }
 }
@@ -80,13 +78,9 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         self.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::Periodic);
     }
 
-    fn request_native_session_catalog_load_more(
-        &self,
-        _project_id: &str,
-        _target_row_count: usize,
-    ) {
-        self.request_native_session_catalog_refresh(NativeCatalogRefreshRequester::LoadMore);
-    }
+    /// A Tasks view now wants more history rows of this Project than were discovered. The new
+    /// target is on the catalog's demand board.
+    fn request_native_session_discovery_deepening(&self, _project_id: &str) {}
 }
 
 pub(crate) trait TaskStorageMaintenanceWorkflow: Send + Sync {

@@ -17,7 +17,7 @@ use crate::logging;
 use crate::protocol::errors::RuntimeError;
 
 use super::{
-    OpenRequestOutcome, ResponderScope, ResponseOutcome, ServerRequestAnswer, ServerRequestBroker,
+    OpenRequestOutcome, ResponseOutcome, ServerRequestAnswer, ServerRequestBroker,
     ServerRequestDraft,
 };
 use permissions::{
@@ -68,7 +68,7 @@ impl ServerRequestRuntime {
             scope: PendingRequestScope::Task {
                 task_id: TaskId::from(task_id.to_string()),
             },
-            method: "permission/request".to_string(),
+            method: super::PERMISSION_REQUEST_TAG.to_string(),
             title: request.title.clone(),
             params: permission_params(request),
         };
@@ -201,27 +201,12 @@ impl ServerRequestRuntime {
         answer: ServerRequestAnswer,
         now: AppServerTime,
     ) -> ResponseOutcome {
-        self.handle_response_from_scopes(responder, request_id, answer, &[], now)
-    }
-
-    pub fn handle_response_from_scopes(
-        &self,
-        responder: ClientInstanceId,
-        request_id: RequestId,
-        answer: ServerRequestAnswer,
-        responder_scopes: &[ResponderScope],
-        now: AppServerTime,
-    ) -> ResponseOutcome {
         let mut inner = self.inner.lock().expect("server request runtime poisoned");
         let answer = normalized_answer_for_waiter(&inner, &request_id, answer);
         let answer = questions::normalize_question_answer(&inner, &request_id, answer);
-        let outcome = inner.broker.handle_response_from_scopes(
-            responder,
-            request_id.clone(),
-            answer,
-            responder_scopes,
-            now,
-        );
+        let outcome = inner
+            .broker
+            .handle_response(responder, request_id.clone(), answer, now);
         let terminal_exchange = inner.broker.is_auth_terminal_exchange(&request_id);
         if !terminal_exchange {
             logging::info(
@@ -229,7 +214,6 @@ impl ServerRequestRuntime {
                 json!({
                     "server_request_id": request_id.as_str(),
                     "outcome": response_outcome_name(&outcome),
-                    "responder_scope_count": responder_scopes.len(),
                 }),
             );
         }

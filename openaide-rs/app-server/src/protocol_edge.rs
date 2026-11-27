@@ -13,8 +13,12 @@ mod delivery_signal;
 mod device_handlers;
 mod diagnostics_handlers;
 mod file_viewer_handlers;
+mod global_state_publication;
 pub mod local_http;
 mod messages;
+mod navigation_handlers;
+mod notification_handlers;
+pub(crate) mod outbox;
 mod project_handlers;
 pub(crate) mod reliable_session;
 mod responses;
@@ -55,6 +59,7 @@ use crate::agent::product_api::{
 use crate::app_lifecycle::{AppLifecycle, InitializeAdmission, LifecycleState};
 use crate::client_lifecycle::{AppServerTime, ClientHub, ConnectionId};
 use crate::diagnostics::RuntimeDiagnosticsWorkflow;
+use crate::global_state::GlobalAreas;
 use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
@@ -79,8 +84,12 @@ pub struct RpcGateway {
     pub(crate) client_hub: ClientHub,
     pub(crate) lifecycle: AppLifecycle,
     pub(crate) state_stream: StateStream,
+    /// The one owner of the global state; every change to it is published through it.
+    pub(crate) global_state: crate::global_state::GlobalStateOwner,
     pub(crate) server_requests: ServerRequestRuntime,
-    pub(crate) pending_event_deliveries: Vec<GatewayEventDelivery>,
+    /// Every connection's outbound sequence. Publications append here under the protocol lock;
+    /// transports drain it through `SharedRpcGateway::transfer_outbound`.
+    pub(crate) outbox: outbox::Outbox,
     /// Tasks whose pending requests a client may still be showing. Request resolution is not
     /// itself a Task update, so the next Task update withdraws a set it no longer contains.
     pub(crate) tasks_with_visible_requests:
@@ -89,11 +98,12 @@ pub struct RpcGateway {
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
     pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
     pub(crate) chat_image_previews: crate::chat_image_previews::ChatImagePreviews,
+    pub(crate) navigation_search: Arc<dyn crate::navigation_search::NavigationSearchWorkflow>,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
-    /// Advances when a request publishes navigation entries under the protocol lock, so a
-    /// projection read ahead of that lock can tell it was overtaken.
-    project_entries_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// Serves every client's Navigation views. Only the protocol lock holder reaches it, so
+    /// its recompute never races a handler's mutation.
+    pub(crate) navigation: crate::navigation::NavigationOwner,
     project_roots: ConfiguredProjectRoots,
     probe_facts: AppServerProbeFacts,
     diagnostics: Arc<dyn RuntimeDiagnosticsWorkflow>,
@@ -215,16 +225,18 @@ impl RpcGateway {
             client_hub,
             lifecycle,
             state_stream,
+            global_state: Default::default(),
             server_requests,
-            pending_event_deliveries: Vec::new(),
+            outbox: outbox::Outbox::default(),
             tasks_with_visible_requests: Default::default(),
             ready_catalog_agents: Default::default(),
             shell_file_reveals,
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),
             chat_image_previews: Default::default(),
+            navigation_search: Arc::new(crate::navigation_search::NoNavigationSearch),
             snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
-            project_entries_generation: Arc::default(),
+            navigation: crate::navigation::NavigationOwner::empty(),
             project_roots,
             probe_facts,
             diagnostics,
@@ -261,6 +273,14 @@ impl RpcGateway {
         }
     }
 
+    pub(crate) fn with_navigation(
+        mut self,
+        navigation: crate::navigation::NavigationOwner,
+    ) -> Self {
+        self.navigation = navigation;
+        self
+    }
+
     /// The snapshot builder reads the same service, so a subscription and a
     /// pairing response can never disagree about who is trusted.
     pub(crate) fn with_remote_devices(
@@ -278,6 +298,14 @@ impl RpcGateway {
     /// The service the network edge attaches to, when this gateway has one.
     pub(crate) fn remote_device_service(&self) -> Option<crate::remote_devices::RemoteDevices> {
         self.remote_device_service.clone()
+    }
+
+    pub(crate) fn with_navigation_search(
+        mut self,
+        workflow: Arc<dyn crate::navigation_search::NavigationSearchWorkflow>,
+    ) -> Self {
+        self.navigation_search = workflow;
+        self
     }
 
     pub(crate) fn with_task_storage_maintenance(
@@ -375,9 +403,23 @@ impl RpcGateway {
             &params.client_instance_id,
             params.workspace_roots.iter().map(|root| root.path.clone()),
         );
+        if projects_changed {
+            // Published before this client is registered, so the other clients hear about its
+            // Projects and the client itself gets them in its baseline, not as a change.
+            self.publish_global_state(GlobalAreas::PROJECTS);
+        }
+        let previous_connection = self
+            .client_hub
+            .client_by_instance(&params.client_instance_id)
+            .map(|client| client.connection_id)
+            .filter(|previous| previous != &connection_id);
         let outcome = self
             .client_hub
             .initialize(connection_id.clone(), params, now);
+        if let Some(previous) = previous_connection {
+            // The client now reads only this connection; the old queue predates its new baseline.
+            self.outbox.discard(&previous, "client_reattached");
+        }
         let (context, reattached) = match outcome {
             crate::client_lifecycle::InitializeClientOutcome::NewClient { context } => {
                 (context, false)
@@ -399,35 +441,26 @@ impl RpcGateway {
                 self.client_hub
                     .delivery_for(&context.client_instance_id)
                     .expect("initialized client must have a delivery"),
-                &self.responder_scopes(&context),
                 now,
             );
-        let token = self
-            .state_stream
-            .read_token_for_client(&context.client_instance_id);
-        let mut snapshot = match self.snapshots.client_snapshot(
+        let global = match self.global_state_for(&context) {
+            Ok(global) => global,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let snapshot = match self.snapshots.client_snapshot(
             &context,
             context.requested_surface.clone(),
-            &token,
+            global,
         ) {
             Ok(snapshot) => snapshot,
             Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        snapshot.pending_requests = self
-            .server_requests
-            .pending_for_client(&context.client_instance_id);
-        let events = if projects_changed {
-            self.publish_project_collection_update(now)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
         };
         responses::result_with_events_and_server_requests(
             connection_id,
             id,
             meta,
             InitializeResult { snapshot },
-            events,
+            Vec::new(),
             server_requests,
         )
     }
@@ -454,10 +487,10 @@ impl RpcGateway {
                 responses::not_initialized(STATE_SUBSCRIBE.to_string()),
             );
         };
-        let (mut result, subscription_added) = match self.state_stream.subscribe_with_membership(
+        let (mut result, _) = match self.state_stream.subscribe_with_membership(
             &ctx,
             params.scope,
-            params.known_revision,
+            params.known_version,
             &self.snapshots,
             now,
         ) {
@@ -465,37 +498,7 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.add_pending_to_subscription_snapshot(&mut result.snapshot);
-        if subscription_added
-            && matches!(
-                &result.scope,
-                openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
-            )
-        {
-            // The baseline is durable and immediate; discovery then refreshes it asynchronously.
-            self.agent_list_sessions
-                .request_native_session_catalog_refresh(
-                    crate::tasks::product_api::NativeCatalogRefreshRequester::NavigationSubscribed,
-                );
-        }
-        let server_requests = match &result.scope {
-            openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {
-                self.server_requests.observe_subscription_added(
-                    self.client_hub
-                        .delivery_for(&ctx.client_instance_id)
-                        .expect("subscribed client must have a delivery"),
-                    task_id.clone(),
-                    now,
-                )
-            }
-            _ => Vec::new(),
-        };
-        self.result_with_server_requests::<StateSubscribeResult>(
-            connection_id,
-            id,
-            meta,
-            result,
-            server_requests,
-        )
+        self.result::<StateSubscribeResult>(connection_id, id, meta, result)
     }
 
     fn handle_unsubscribe(
@@ -520,15 +523,7 @@ impl RpcGateway {
                 responses::not_initialized(STATE_UNSUBSCRIBE.to_string()),
             );
         };
-        let scope = params.scope.clone();
         let result = self.state_stream.unsubscribe(&ctx, params.scope, now);
-        if let openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } = &scope {
-            self.server_requests.observe_subscription_removed(
-                &ctx.client_instance_id,
-                task_id,
-                now,
-            );
-        }
         self.result::<StateUnsubscribeResult>(connection_id, id, meta, result)
     }
 

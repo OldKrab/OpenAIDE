@@ -82,6 +82,43 @@ describe("AppServerHostClient", () => {
       .toBe("vscode-connection-host-client-1");
   });
 
+  it("hands a later-attaching view the initial state with every sync change applied", async () => {
+    const withGlobal = {
+      snapshot: {
+        ...initializeResult().snapshot,
+        global: {
+          projects: { projects: [] },
+          worktrees: [],
+          agents: { agents: [] },
+          settings: { sections: [] },
+          newTaskDefaults: {},
+          devices: { remoteAccess: "off", serverName: "workstation" },
+          terminals: { terminals: [] },
+        },
+      },
+    };
+    const fetch = fetchSequence([[
+      response("rpc-1", { result: withGlobal }),
+      {
+        jsonrpc: "2.0",
+        method: "sync",
+        params: { changes: { devices: { remoteAccess: "on", serverName: "workstation" } } },
+      } as unknown as RpcMessage,
+    ]]);
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+    const messages: Array<{ type: string; result?: typeof withGlobal; changes?: unknown }> = [];
+    client.attachView("view-1", (message) => { messages.push(message as never); });
+
+    await client.handleViewMessage("view-1", {
+      type: "appServer.session.initialize",
+      requestId: "initialize-1",
+    });
+    await vi.waitFor(() => expect(
+      messages.find((message) => message.type === "appServer.session.response")?.result?.snapshot.global.devices.remoteAccess,
+    ).toBe("on"));
+  });
+
   it("resolves file handles with the host identity that owns them", async () => {
     const fetch = fetchSequence([
       [response("rpc-1", { result: initializeResult() })],
@@ -449,7 +486,6 @@ function fetchResponse(body: unknown, status = 200) {
 function initializeResult() {
   return {
     snapshot: {
-      cursor: "cursor-1",
       server: { serverId: "server-1", protocolVersion: { major: 1, minor: 0 } },
       stateRoot: { stateRootId: "root-1" },
       client: {

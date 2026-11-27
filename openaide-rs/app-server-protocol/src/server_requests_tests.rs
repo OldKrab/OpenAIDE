@@ -3,17 +3,6 @@ use serde_json::json;
 use super::*;
 
 #[test]
-fn permission_request_response_uses_protocol_camel_case() {
-    let response = PermissionRequestResponse {
-        option_id: "allow-once".to_string(),
-    };
-
-    let value = serde_json::to_value(response).unwrap();
-
-    assert_eq!(value, json!({ "optionId": "allow-once" }));
-}
-
-#[test]
 fn shell_and_secret_requests_use_protocol_safe_shapes() {
     let secret = SecretReadParams {
         key: "github.token".to_string(),

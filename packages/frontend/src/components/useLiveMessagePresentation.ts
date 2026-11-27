@@ -33,28 +33,28 @@ const WORD_BOUNDARY_REACH = 24;
  */
 export function useLiveMessagePresentation({
   enabled,
-  eventCursor,
+  eventToken,
   parts,
   urgent = false,
 }: {
   enabled: boolean;
-  eventCursor?: string;
+  eventToken?: string;
   parts: AgentMessagePart[];
   urgent?: boolean;
 }) {
   const animationAllowed = useLiveTextAnimationAllowed();
   const shouldAnimate = enabled && animationAllowed;
   const authoritativeText = textOf(parts);
-  const consumedCursor = useRef<string | undefined>(undefined);
+  const consumedToken = useRef<string | undefined>(undefined);
   // A stream signal can arrive before the durable row is mounted. In that case
   // the row has no earlier text baseline, so reveal the new text from its start.
-  const previousText = useRef(shouldAnimate && eventCursor ? "" : authoritativeText);
+  const previousText = useRef(shouldAnimate && eventToken ? "" : authoritativeText);
   const [reveal, setReveal] = useState<Reveal | undefined>();
   const revealRef = useRef<Reveal | undefined>(undefined);
   const arrivals = useRef<{ lastAt?: number; expectedGapMs: number }>({ expectedGapMs: 0 });
   const pendingReveal = shouldAnimate
-    && eventCursor
-    && consumedCursor.current !== eventCursor
+    && eventToken
+    && consumedToken.current !== eventToken
     && authoritativeText.startsWith(previousText.current)
     && authoritativeText.length > previousText.current.length
       ? {
@@ -74,14 +74,14 @@ export function useLiveMessagePresentation({
       : undefined;
 
   useLayoutEffect(() => {
-    if (!shouldAnimate || !eventCursor) {
-      consumedCursor.current = eventCursor;
+    if (!shouldAnimate || !eventToken) {
+      consumedToken.current = eventToken;
       previousText.current = authoritativeText;
       revealRef.current = undefined;
       setReveal(undefined);
       return;
     }
-    if (consumedCursor.current === eventCursor) {
+    if (consumedToken.current === eventToken) {
       previousText.current = authoritativeText;
       return;
     }
@@ -90,7 +90,7 @@ export function useLiveMessagePresentation({
       previousText.current = authoritativeText;
       return;
     }
-    consumedCursor.current = eventCursor;
+    consumedToken.current = eventToken;
     const arrivedAt = Date.now();
     arrivals.current = observeArrival(arrivals.current, arrivedAt);
     const visibleLength = Math.min(revealRef.current?.visibleLength ?? priorText.length, authoritativeText.length);
@@ -108,7 +108,7 @@ export function useLiveMessagePresentation({
     revealRef.current = next;
     setReveal(next);
     previousText.current = authoritativeText;
-  }, [authoritativeText, eventCursor, shouldAnimate, urgent]);
+  }, [authoritativeText, eventToken, shouldAnimate, urgent]);
 
   useLayoutEffect(() => {
     const current = revealRef.current;

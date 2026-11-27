@@ -1,6 +1,7 @@
 import { SECRET_READ } from "@openaide/app-server-client";
 import {
   createSecretTransactionHandler,
+  secretKeysResult,
   type AppShellSecretStore,
   type HostToWebviewMessage,
   type WebviewToHostMessage,
@@ -9,7 +10,7 @@ import {
 type Invoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 type DesktopSecretMessage = Extract<
   WebviewToHostMessage,
-  { type: `secret.transaction.${string}` | "appServer.serverRequest" }
+  { type: `secret.transaction.${string}` | "secret.keys.request" | "appServer.serverRequest" }
 >;
 
 export function createDesktopSecretMessageHandler(invoke: Invoke) {
@@ -26,6 +27,7 @@ export function createDesktopSecretMessageHandler(invoke: Invoke) {
   return async function handleDesktopSecretMessage(
     message: DesktopSecretMessage,
   ): Promise<HostToWebviewMessage | undefined> {
+    if (message.type === "secret.keys.request") return secretKeysResult(message, store);
     if (message.type !== "appServer.serverRequest") {
       return handleTransaction(message, store);
     }

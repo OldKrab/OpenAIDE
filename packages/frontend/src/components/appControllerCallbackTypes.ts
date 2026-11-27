@@ -56,7 +56,10 @@ export type NavigationCallbacks = {
   forkNativeSession: (session: AgentListedSession) => void;
   forkTask: (taskId: string) => void;
   changeSearch: (query: string) => void;
-  loadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
+  refreshNavigation: () => void;
+  /** Sets a Project's Navigation history limit, or clears it with `undefined`. */
+  setProjectHistoryLimit: (projectId: string, historyLimit: number | undefined) => void;
+  searchNavigation: (text: string) => Promise<import("@openaide/app-server-client").TaskNavigationSearchResult>;
   openNativeSession: (session: AgentListedSession) => void;
   openNewTask: (projectId?: string) => void;
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string, settingsTab?: SettingsTabId, settingsIntent?: import("@openaide/app-shell-contracts").SettingsIntent) => void;

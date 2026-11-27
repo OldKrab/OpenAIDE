@@ -1,35 +1,9 @@
-import type {
-  AppServerEvent,
-  AppServerEventPayload,
-  ClientInstanceId,
-  EventScope,
-  StateRootId,
-  SubscriptionScope,
-} from "./generated/protocol.js";
-
-export type SubscriptionIngestionContext = {
-  stateRootId: StateRootId;
-  clientInstanceId?: ClientInstanceId;
-};
-
-export type SubscriptionEventMatch =
-  | { kind: "match" }
-  | { kind: "subscriptionMismatch" }
-  | { kind: "streamScopeMismatch" };
+import type { SubscriptionScope } from "./generated/protocol.js";
 
 export function subscriptionScopesEqual(left: SubscriptionScope, right: SubscriptionScope): boolean {
   switch (left.kind) {
-    case "projects":
-    case "agents":
-    case "devices":
-    case "terminals":
-      return right.kind === left.kind;
-    case "settings":
-      return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
     case "taskNavigation":
-      return right.kind === "taskNavigation"
-        && left.section === right.section
-        && normalizedProjectIds(left.projectIds) === normalizedProjectIds(right.projectIds);
+      return right.kind === "taskNavigation" && left.section === right.section;
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
     case "subagentCatalog":
@@ -42,118 +16,5 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
       return right.kind === "toolDetail"
         && left.taskId === right.taskId
         && left.artifactId === right.artifactId;
-    case "worktreeRepository":
-      return right.kind === "worktreeRepository" && left.repositoryId === right.repositoryId;
   }
-}
-
-export function matchSubscriptionEvent(
-  scope: SubscriptionScope,
-  context: SubscriptionIngestionContext,
-  event: AppServerEvent,
-): SubscriptionEventMatch {
-  if (!subscriptionScopesEqual(scope, event.subscription)) return { kind: "subscriptionMismatch" };
-  if (eventScopeStateRootId(event.scope) !== context.stateRootId) return { kind: "streamScopeMismatch" };
-
-  const scopeMatch = eventScopeMatchesSubscriptionScope(scope, event.scope, context);
-  if (scopeMatch.kind !== "match") return scopeMatch;
-
-  return payloadMatchesSubscriptionScope(scope, event.payload) ? { kind: "match" } : { kind: "subscriptionMismatch" };
-}
-
-function eventScopeStateRootId(scope: EventScope): StateRootId {
-  return scope.stateRootId;
-}
-
-function eventScopeMatchesSubscriptionScope(
-  scope: SubscriptionScope,
-  eventScope: EventScope,
-  context: SubscriptionIngestionContext,
-): SubscriptionEventMatch {
-  if (
-    scope.kind === "task"
-    || scope.kind === "subagentCatalog"
-    || scope.kind === "subagentHistory"
-    || scope.kind === "toolDetail"
-  ) {
-    return eventScope.kind === "task" && eventScope.taskId === scope.taskId
-      ? { kind: "match" }
-      : { kind: "subscriptionMismatch" };
-  }
-
-  if (eventScope.kind === "stateRoot") return { kind: "match" };
-  if (eventScope.kind !== "client") return { kind: "subscriptionMismatch" };
-
-  if (context.clientInstanceId === undefined) return { kind: "streamScopeMismatch" };
-
-  if (eventScope.clientInstanceId === context.clientInstanceId) {
-    return { kind: "match" };
-  }
-
-  return { kind: "streamScopeMismatch" };
-}
-
-function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppServerEventPayload): boolean {
-  switch (scope.kind) {
-    case "projects":
-      return payload.kind === "snapshotReplaced" || payload.kind === "projectCollectionUpdated";
-    case "agents":
-      return payload.kind === "snapshotReplaced" || payload.kind === "agentCollectionUpdated";
-    case "devices":
-      return payload.kind === "snapshotReplaced" || payload.kind === "deviceCollectionUpdated";
-    case "terminals":
-      return payload.kind === "snapshotReplaced" || payload.kind === "terminalCollectionUpdated";
-    case "settings":
-      return payload.kind === "snapshotReplaced";
-    case "taskNavigation":
-      if (payload.kind === "snapshotReplaced") return true;
-      if (payload.kind === "refreshStateChanged") return scope.section === "tasks";
-      if (payload.kind === "navigationReplaced") return payload.navigation.section === scope.section;
-      if (payload.kind === "projectEntriesReplaced") {
-        return payload.section === scope.section && projectSelected(scope.projectIds, payload.projectId);
-      }
-      return payload.kind === "taskUpdated"
-        && projectSelected(scope.projectIds, payload.projectId)
-        && (
-          (scope.section === "tasks" && payload.task.lifecycle === "open")
-          || (scope.section === "archive" && payload.task.lifecycle === "archived")
-        );
-    case "task":
-      return (
-        payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskChanged" ||
-        payload.kind === "taskHistorySyncUpdated" ||
-        payload.kind === "taskRequestsUpdated" ||
-        payload.kind === "requestUpdated"
-      );
-    case "subagentCatalog":
-      return payload.kind === "subagentCatalogUpdated"
-        && payload.catalog.taskId === scope.taskId;
-    case "subagentHistory":
-      return payload.kind === "subagentHistoryChanged"
-        && payload.taskId === scope.taskId
-        && payload.subagentId === scope.subagentId;
-    case "toolDetail":
-      return (payload.kind === "toolDetailUpdated" || payload.kind === "toolDetailChanged")
-        && payload.taskId === scope.taskId
-        && payload.artifactId === scope.artifactId;
-    case "worktreeRepository":
-      return payload.kind === "worktreeRepositoryUpdated"
-        && payload.repositoryId === scope.repositoryId;
-  }
-}
-
-function normalizeOptional(value: string | null | undefined): string | undefined {
-  return value ?? undefined;
-}
-
-function normalizedProjectIds(value: string[] | null | undefined): string {
-  return value?.join("\u0000") ?? "*";
-}
-
-function projectSelected(
-  selected: string[] | null | undefined,
-  projectId: string,
-): boolean {
-  return selected === null || selected === undefined || selected.includes(projectId);
 }

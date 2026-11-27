@@ -5,9 +5,9 @@ use openaide_app_server_protocol::client::{
 };
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::events::AppServerEventPayload;
 use openaide_app_server_protocol::ids::{
-    AgentId, ClientInstanceId, ClientRequestId, ProjectId, StateRootId, TaskId,
+    AgentId, ClientInstanceId, ClientRequestId, ProjectId, TaskId,
 };
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_LOGOUT,
@@ -15,11 +15,11 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_REVEAL_SENT, CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT,
     CLIENT_INITIALIZE, CLIENT_UPDATE_SHUTDOWN_ABORT, CLIENT_UPDATE_SHUTDOWN_COMMIT,
     CLIENT_UPDATE_SHUTDOWN_PREPARE, DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER,
-    MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS,
-    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
-    SETTINGS_UPDATE_NEW_TASK_DEFAULTS, SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME,
-    SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
-    TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
+    MCP_GET_SERVER_DETAILS, MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, NAVIGATION_SUBSCRIBE,
+    NAVIGATION_UNSUBSCRIBE, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
+    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_NEW_TASK_DEFAULTS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -27,9 +27,7 @@ use openaide_app_server_protocol::settings::{
     RuntimeSettingsUpdateParams,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
-use openaide_app_server_protocol::state::{
-    StateSubscribeParams, StateUnsubscribeParams, SubscriptionScope,
-};
+use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -54,9 +52,9 @@ use crate::settings::{
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
     AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
-    TaskListSnapshot, TaskNavigationStore, TaskSnapshotSource, TaskSnapshotStore,
+    TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore,
 };
-use crate::state_sync::StateStream;
+use crate::state_sync::{EventAddress, StateStream};
 use crate::storage::Store;
 use crate::task_events::{
     CommittedChatChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind, ToolDetailUpdate,
@@ -72,10 +70,14 @@ use super::*;
 
 mod client_probe;
 mod devices;
+mod entity_subscription;
 mod gateway_lock_wait;
+mod global_state;
 mod navigation_publication;
+mod navigation_search;
+mod outbound_order;
 mod replacement_impact;
-mod task_resume;
+mod task_subscription;
 mod terminals;
 
 #[test]
@@ -88,8 +90,10 @@ fn rejects_product_request_before_initialize() {
             "1",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
+                known_version: None,
             },
         ),
         AppServerTime(1),
@@ -109,7 +113,7 @@ fn rejects_product_request_before_initialize() {
 }
 
 #[test]
-fn initialize_records_client_and_returns_snapshot_cursor() {
+fn initialize_records_client_and_returns_snapshot() {
     let mut gateway = gateway();
 
     let outcome = gateway.handle_inbound(
@@ -119,7 +123,6 @@ fn initialize_records_client_and_returns_snapshot_cursor() {
     );
 
     let value = response_value(outcome);
-    assert_eq!(value["result"]["snapshot"]["cursor"], json!("cursor-0"));
     assert_eq!(
         value["result"]["snapshot"]["client"]["clientInstanceId"],
         json!("client-1")
@@ -277,8 +280,10 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
             "4",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
+                known_version: None,
             },
         ),
         AppServerTime(4),
@@ -298,14 +303,7 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
     ));
     response_value(gateway.handle_inbound(
         ConnectionId::new("conn-1"),
-        request(
-            "6",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
+        request("6", CLIENT_HEARTBEAT, json!({})),
         AppServerTime(6),
     ));
 }
@@ -366,14 +364,7 @@ fn update_shutdown_barrier_is_recovered_by_the_same_desktop_client() {
     ));
     response_value(gateway.handle_inbound(
         ConnectionId::new("conn-reloaded"),
-        request(
-            "4",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
+        request("4", CLIENT_HEARTBEAT, json!({})),
         AppServerTime(4),
     ));
 }
@@ -406,21 +397,12 @@ fn initialize_unknown_task_route_keeps_the_client_usable() {
         connection_id,
         request(
             "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
+            NAVIGATION_SUBSCRIBE,
+            navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks),
         ),
         AppServerTime(2),
     ));
-    assert_eq!(
-        subscribed["result"]["snapshot"]["kind"],
-        json!("taskNavigation")
-    );
+    assert_eq!(subscribed["result"]["frame"]["section"], json!("tasks"));
 }
 
 #[test]
@@ -485,19 +467,12 @@ fn project_add_publishes_project_without_task_history() {
     assert_eq!(added["result"]["project"]["available"], json!(true));
 
     let subscribed = response_value(gateway.handle_inbound(
-        connection_id,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("3", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(3),
     ));
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"][0]["label"],
         json!("app")
     );
 }
@@ -555,30 +530,6 @@ fn updating_new_task_agent_default_persists_across_snapshot_reads() {
 }
 
 #[test]
-fn task_navigation_load_more_requests_bounded_discovery_for_one_project() {
-    let root = tempfile::tempdir().unwrap().keep();
-    let store = Store::open(root).unwrap();
-    let listing = Arc::new(RecordingCatalogRefresh::default());
-    let mut gateway = gateway_with_project_store_and_listing(store.clone(), listing.clone());
-    let connection_id = ConnectionId::new("conn-1");
-    initialize(&mut gateway, connection_id.clone());
-    response_value(gateway.handle_inbound(
-        connection_id,
-        request(
-            "2",
-            "taskNavigation/loadMore",
-            json!({ "projectId": "project-added", "targetRowCount": 7 }),
-        ),
-        AppServerTime(2),
-    ));
-
-    assert_eq!(
-        listing.project_requests.lock().unwrap().as_slice(),
-        [("project-added".to_string(), 7)]
-    );
-}
-
-#[test]
 fn project_add_survives_gateway_restart() {
     let (mut gateway, store) = gateway_with_project_context_and_store();
     let connection_id = ConnectionId::new("conn-1");
@@ -600,20 +551,13 @@ fn project_add_survives_gateway_restart() {
     let restarted_connection = ConnectionId::new("conn-2");
     initialize(&mut restarted, restarted_connection.clone());
     let subscribed = response_value(restarted.handle_inbound(
-        restarted_connection,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("3", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(3),
     ));
 
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"][0]["label"],
         json!("persistent-app")
     );
 }
@@ -683,19 +627,12 @@ fn project_remove_hides_a_project_without_deleting_its_folder() {
     assert!(workspace_root.is_dir());
 
     let subscribed = response_value(gateway.handle_inbound(
-        connection_id,
-        request(
-            "4",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("4", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(4),
     ));
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"],
         json!([])
     );
 }
@@ -785,7 +722,7 @@ fn project_refresh_rechecks_folder_availability() {
 }
 
 #[test]
-fn workspace_root_change_replaces_both_navigation_sections() {
+fn workspace_root_change_marks_navigation_dirty_for_every_section() {
     let mut gateway = gateway_with_project_context();
     let connection_id = ConnectionId::new("conn-1");
     let mut params = init_params("client-1");
@@ -809,22 +746,13 @@ fn workspace_root_change_replaces_both_navigation_sections() {
     ] {
         response_value(gateway.handle_inbound(
             connection_id.clone(),
-            request(
-                id,
-                STATE_SUBSCRIBE,
-                StateSubscribeParams {
-                    scope: SubscriptionScope::TaskNavigation {
-                        section,
-                        project_ids: None,
-                    },
-                    known_revision: None,
-                },
-            ),
+            request(id, NAVIGATION_SUBSCRIBE, navigation_view(section)),
             AppServerTime(2),
         ));
     }
+    assert!(!gateway.navigation.is_dirty());
 
-    let events = response_events(gateway.handle_inbound(
+    response_value(gateway.handle_inbound(
         connection_id,
         request(
             "4",
@@ -839,20 +767,8 @@ fn workspace_root_change_replaces_both_navigation_sections() {
         AppServerTime(3),
     ));
 
-    let sections = events
-        .iter()
-        .filter_map(|delivery| match &delivery.event.payload {
-            AppServerEventPayload::NavigationReplaced { navigation } => Some(navigation.section),
-            _ => None,
-        })
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(
-        sections,
-        std::collections::HashSet::from([
-            openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-            openaide_app_server_protocol::task::TaskNavigationSection::Archive,
-        ])
-    );
+    // Both sections' views recompute from the one dirty mark; no handler publishes rows.
+    assert!(gateway.navigation.is_dirty());
 }
 
 #[test]
@@ -953,7 +869,7 @@ fn expired_client_workspace_roots_leave_the_project_collection() {
 }
 
 #[test]
-fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
+fn expired_client_workspace_roots_publish_projects_to_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let host_connection = ConnectionId::new("conn-host");
     let webview_connection = ConnectionId::new("conn-webview");
@@ -971,18 +887,7 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
         request("2", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(2),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection.clone(),
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
-        AppServerTime(3),
-    ));
+    gateway.drain_sync_for_connection(&webview_connection);
     gateway.handle_transport_closed(&host_connection, AppServerTime(4));
 
     assert!(matches!(
@@ -992,24 +897,16 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
         ),
         ClientExpiryOutcome::Expired { .. }
     ));
-    let events = response_events(gateway.handle_inbound(
-        webview_connection,
-        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(15),
-    ));
+    let changes = gateway.drain_sync_for_connection(&webview_connection);
 
-    assert!(events.iter().any(|delivery| {
-        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-            && matches!(
-                &delivery.event.payload,
-                AppServerEventPayload::ProjectCollectionUpdated { projects }
-                    if projects.projects.is_empty()
-            )
-    }));
+    assert!(changes.iter().any(|changes| matches!(
+        &changes.projects,
+        Some(projects) if projects.projects.is_empty()
+    )));
 }
 
 #[test]
-fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
+fn workspace_root_changes_publish_projects_to_other_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let host_connection = ConnectionId::new("conn-host");
     let webview_connection = ConnectionId::new("conn-webview");
@@ -1027,20 +924,8 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
         request("2", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(2),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
-        AppServerTime(3),
-    ));
 
-    let events = response_events(gateway.handle_inbound(
+    response_value(gateway.handle_inbound(
         host_connection,
         request(
             "4",
@@ -1055,26 +940,17 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
         AppServerTime(4),
     ));
 
-    let project_update = events
+    let projects = gateway
+        .drain_sync_for_connection(&webview_connection)
         .into_iter()
-        .find(|delivery| {
-            delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-                && matches!(
-                    delivery.event.payload,
-                    AppServerEventPayload::ProjectCollectionUpdated { .. }
-                )
-        })
-        .expect("subscribed webview receives Project collection update");
-    let AppServerEventPayload::ProjectCollectionUpdated { projects } = project_update.event.payload
-    else {
-        unreachable!("filtered to Project collection update")
-    };
+        .find_map(|changes| changes.projects)
+        .expect("connected webview receives the Project collection");
     assert_eq!(projects.projects.len(), 1);
     assert_eq!(projects.projects[0].label, "beta");
 }
 
 #[test]
-fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
+fn initialize_workspace_roots_publish_projects_to_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let webview_connection = ConnectionId::new("conn-webview");
     response_value(gateway.handle_inbound(
@@ -1082,37 +958,22 @@ fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
         request("1", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(1),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection,
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_revision: None,
-            },
-        ),
-        AppServerTime(2),
-    ));
     let mut host = init_params("client-host");
     host.workspace_roots = vec![ClientWorkspaceRoot {
         path: "/workspace/alpha".to_string(),
     }];
 
-    let events = response_events(gateway.handle_inbound(
+    response_value(gateway.handle_inbound(
         ConnectionId::new("conn-host"),
         request("3", CLIENT_INITIALIZE, host),
         AppServerTime(3),
     ));
 
-    assert!(events.iter().any(|delivery| {
-        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-            && matches!(
-                &delivery.event.payload,
-                AppServerEventPayload::ProjectCollectionUpdated { projects }
-                    if projects.projects.iter().any(|project| project.label == "alpha")
-            )
-    }));
+    let changes = gateway.drain_sync_for_connection(&webview_connection);
+    assert!(changes.iter().any(|changes| matches!(
+        &changes.projects,
+        Some(projects) if projects.projects.iter().any(|project| project.label == "alpha")
+    )));
 }
 
 #[test]
@@ -1183,25 +1044,24 @@ fn background_agent_readiness_reconciles_once_without_retrying_setup_failures() 
             )),
             Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
             Arc::new(SettingsCatalog::default()),
-            Arc::new(TaskNavigationStore::new(store.clone())),
             Arc::new(TaskSnapshotStore::new(store)),
         ),
     );
     statuses.begin_installation("codex");
-    gateway.publish_background_agent_status_update(AppServerTime(1));
+    gateway.publish_background_agent_status_update();
     statuses.record_probe_error(
         "codex",
         &RuntimeError::NodeJsRequired("npm unavailable".into()),
     );
-    gateway.publish_background_agent_status_update(AppServerTime(2));
+    gateway.publish_background_agent_status_update();
     assert_eq!(
         workflow.requests.load(Ordering::SeqCst),
         0,
         "setup failures must not request another installation through discovery"
     );
     statuses.record_launching("codex");
-    gateway.publish_background_agent_status_update(AppServerTime(3));
-    gateway.publish_background_agent_status_update(AppServerTime(4));
+    gateway.publish_background_agent_status_update();
+    gateway.publish_background_agent_status_update();
     assert_eq!(
         workflow.requests.load(Ordering::SeqCst),
         1,
@@ -1210,29 +1070,48 @@ fn background_agent_readiness_reconciles_once_without_retrying_setup_failures() 
 }
 
 #[test]
-fn background_agent_status_update_is_queued_for_local_http_subscribers() {
-    let workflow = Arc::new(RecordingCatalogRefresh::default());
-    let mut gateway = gateway_with_agent_session_listing(workflow);
+fn background_agent_status_change_is_queued_once_and_a_repeat_publishes_nothing() {
+    use crate::agent::registry_handle::AgentRegistryHandle;
+    use crate::agent::status_cache::AgentStatusCache;
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().to_path_buf()).unwrap();
+    let statuses = AgentStatusCache::default();
+    let mut gateway = gateway_with_project_store_and_listing(
+        store.clone(),
+        Arc::new(RecordingCatalogRefresh::default()),
+    );
+    gateway.snapshots = SnapshotBuilder::with_sources(
+        "server-1".into(),
+        "root-1".into(),
+        SnapshotSources::new(
+            Arc::new(store.clone()),
+            Arc::new(AgentRegistrySnapshotSource::with_status_cache(
+                AgentRegistryHandle::new(crate::agent::registry::AgentRegistry::default_built_ins()),
+                statuses.clone(),
+            )),
+            Arc::new(ProjectCollectionStore::new_with_configured_roots(
+                store.clone(),
+                crate::projects::ConfiguredProjectRoots::default(),
+            )),
+            Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
+            Arc::new(SettingsCatalog::default()),
+            Arc::new(TaskSnapshotStore::new(store)),
+        ),
+    );
     let connection_id = ConnectionId::new("conn-1");
     initialize(&mut gateway, connection_id.clone());
-    response_value(gateway.handle_inbound(
-        connection_id.clone(),
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_revision: None,
-            },
-        ),
-        AppServerTime(2),
-    ));
+    gateway.drain_sync_for_connection(&connection_id);
 
-    let published = gateway.publish_background_agent_status_update(AppServerTime(3));
-    assert!(!published.is_empty());
-    let queued = gateway.drain_event_deliveries_for_connection(&connection_id);
+    statuses.begin_installation("codex");
+    gateway.publish_background_agent_status_update();
+    gateway.publish_background_agent_status_update();
+    let queued = gateway.drain_sync_for_connection(&connection_id);
 
-    assert_eq!(queued, published);
+    let [changes] = queued.as_slice() else {
+        panic!("expected exactly one sync for one status change, got {queued:?}");
+    };
+    assert!(changes.agents.is_some());
+    assert!(changes.projects.is_none() && changes.settings.is_none());
 }
 
 #[test]
@@ -1241,22 +1120,16 @@ fn repeated_task_navigation_subscription_does_not_restart_catalog_discovery() {
     let mut gateway = gateway_with_agent_session_listing(workflow.clone());
     let connection_id = ConnectionId::new("conn-1");
     initialize(&mut gateway, connection_id.clone());
-    let params = StateSubscribeParams {
-        scope: SubscriptionScope::TaskNavigation {
-            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-            project_ids: None,
-        },
-        known_revision: None,
-    };
+    let params = navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks);
 
     response_value(gateway.handle_inbound(
         connection_id.clone(),
-        request("2", STATE_SUBSCRIBE, params.clone()),
+        request("2", NAVIGATION_SUBSCRIBE, params.clone()),
         AppServerTime(2),
     ));
     response_value(gateway.handle_inbound(
         connection_id,
-        request("3", STATE_SUBSCRIBE, params),
+        request("3", NAVIGATION_SUBSCRIBE, params),
         AppServerTime(3),
     ));
 
@@ -1414,15 +1287,15 @@ fn local_http_authentication_reads_secrets_from_the_initiating_client() {
         std::thread::yield_now();
     };
     assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.method, "secret/read");
+    assert_eq!(deliveries[0].method, "secret/read");
     assert_eq!(
-        deliveries[0].envelope.params["key"],
+        deliveries[0].params["key"],
         "openaide.agent.codex.auth.api-key.env.OPENAI_API_KEY"
     );
     gateway.handle_inbound(
         connection_id,
         InboundProtocolMessage::ClientResponse {
-            request_id: deliveries[0].envelope.request_id.as_str().to_string(),
+            request_id: deliveries[0].request_id.as_str().to_string(),
             answer: ServerRequestAnswer::Result(json!({ "value": "secure-token" })),
         },
         AppServerTime(4),
@@ -1979,6 +1852,7 @@ fn error_envelope_preserves_client_request_meta_and_invalid_params_details() {
         ConnectionId::new("conn-1"),
         InboundProtocolMessage::ClientRequest {
             id: "1".to_string(),
+            wire_id: json!("1"),
             method: CLIENT_INITIALIZE.to_string(),
             params: json!({ "clientInstanceId": 7 }),
             meta: RequestMeta {
@@ -2003,30 +1877,6 @@ fn error_envelope_preserves_client_request_meta_and_invalid_params_details() {
 }
 
 #[test]
-fn initialize_after_event_uses_state_stream_cursor() {
-    let mut gateway = gateway();
-    gateway.state_stream.publish_committed(
-        EventScope::StateRoot {
-            state_root_id: StateRootId::from("root-1"),
-        },
-        AppServerEventPayload::RefreshStateChanged {
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
-        },
-        |_| None,
-        AppServerTime(1),
-    );
-
-    let outcome = gateway.handle_inbound(
-        ConnectionId::new("conn-1"),
-        request("1", CLIENT_INITIALIZE, init_params("client-1")),
-        AppServerTime(2),
-    );
-
-    let value = response_value(outcome);
-    assert_eq!(value["result"]["snapshot"]["cursor"], json!("cursor-1"));
-}
-
-#[test]
 fn initialize_during_stopping_returns_server_stopping() {
     let mut gateway = gateway();
     gateway.lifecycle.begin_stopping();
@@ -2042,28 +1892,21 @@ fn initialize_during_stopping_returns_server_stopping() {
 }
 
 #[test]
-fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
+fn navigation_subscribe_after_initialize_returns_baseline_and_stores_subscription() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("conn-1"),
         request(
             "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
+            NAVIGATION_SUBSCRIBE,
+            navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks),
         ),
         AppServerTime(2),
     );
 
     let value = response_value(outcome);
-    assert_eq!(value["result"]["cursor"], json!("cursor-0"));
-    assert_eq!(value["result"]["snapshot"]["kind"], json!("taskNavigation"));
+    assert_eq!(value["result"]["frame"]["section"], json!("tasks"));
     assert_eq!(gateway.state_stream.subscription_count(), 1);
 }
 
@@ -2095,7 +1938,7 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
                     task_id: TaskId::from("task-1"),
                     artifact_id: "artifact-2".to_string(),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(3),
@@ -2110,7 +1953,7 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
                     task_id: TaskId::from("task-1"),
                     artifact_id: "artifact-1".to_string(),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(4),
@@ -2182,16 +2025,9 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
 }
 
 #[test]
-fn task_subscription_delivers_pending_server_request() {
+fn task_subscription_lists_pending_request_without_resending_it() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
-    let opened = gateway.open_server_request(task_secret_request("task-1"), AppServerTime(2));
-    assert!(matches!(
-        opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.is_empty()
-    ));
+    gateway.open_server_request(task_server_request("task-1"), AppServerTime(2));
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("conn-1"),
@@ -2202,7 +2038,7 @@ fn task_subscription_delivers_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(3),
@@ -2213,8 +2049,7 @@ fn task_subscription_delivers_pending_server_request() {
         value["result"]["snapshot"]["task"]["pendingRequests"][0]["requestId"],
         "server-request-1"
     );
-    assert_eq!(server_requests.len(), 1);
-    assert_eq!(server_requests[0].envelope.method, "secret/read");
+    assert!(server_requests.is_empty());
 }
 
 #[test]
@@ -2238,7 +2073,7 @@ fn task_request_waits_when_subscribed_client_lacks_response_capability() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2251,50 +2086,14 @@ fn task_request_waits_when_subscribed_client_lacks_response_capability() {
 }
 
 #[test]
-fn task_request_opened_after_subscription_is_delivered_immediately() {
-    let mut gateway = initialized_gateway("client-1", "conn-1");
-    gateway.handle_inbound(
-        ConnectionId::new("conn-1"),
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Task {
-                    task_id: TaskId::from("task-1"),
-                },
-                known_revision: None,
-            },
-        ),
-        AppServerTime(2),
-    );
-
-    let opened = gateway
-        .server_requests
-        .open_task_secret_read_request(
-            TaskId::from("task-1"),
-            "agent.secret".to_string(),
-            Some("Agent secret".to_string()),
-            AppServerTime(3),
-        )
-        .expect("open task secret request");
-    assert_eq!(opened.deliveries.len(), 1);
-    assert_eq!(opened.deliveries[0].envelope.request_id, opened.request_id);
-    assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
-
-    let server_requests = gateway
-        .drain_server_requests_for_connection(&ConnectionId::new("conn-1"), AppServerTime(4));
-
-    assert!(server_requests.is_empty());
-}
-
-#[test]
-fn task_permission_routes_to_all_connected_capable_clients_without_subscription_authority() {
+fn secret_read_goes_to_the_client_that_declared_the_key_not_to_a_subscriber() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(
         ConnectionId::new("conn-2"),
         request("2", CLIENT_INITIALIZE, init_params("client-2")),
         AppServerTime(2),
     );
+    // client-1 has the Task open; client-2 holds the key and has nothing open.
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
         request(
@@ -2304,23 +2103,98 @@ fn task_permission_routes_to_all_connected_capable_clients_without_subscription_
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(3),
     );
+    let declared = gateway.handle_client_notification(
+        ConnectionId::new("conn-2"),
+        openaide_app_server_protocol::methods::CLIENT_SECRET_KEYS_CHANGED.to_string(),
+        json!({ "keyIds": ["agent.secret"] }),
+        AppServerTime(4),
+    );
+    assert_eq!(declared, GatewayOutcome::Noop);
+
+    let opened = gateway
+        .server_requests
+        .open_task_secret_read_request(
+            TaskId::from("task-1"),
+            "agent.secret".to_string(),
+            Some("Agent secret".to_string()),
+            AppServerTime(5),
+        )
+        .expect("a connected client holds the key");
+
+    assert_eq!(opened.deliveries.len(), 1);
+    assert_eq!(
+        opened.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("client-2")
+    );
+    assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
+}
+
+#[test]
+fn any_client_may_answer_a_pending_permission_without_the_task_open() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.open_server_request(task_server_request("task-1"), AppServerTime(2));
+
+    let outcome = gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            openaide_app_server_protocol::methods::PENDING_REQUEST_RESOLVE,
+            json!({
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }),
+        ),
+        AppServerTime(3),
+    );
+
+    let (value, _) = response_value_and_server_requests(outcome);
+    assert!(value.get("error").is_none(), "{value}");
+    assert!(gateway
+        .server_requests
+        .pending_for_task(&TaskId::from("task-1"))
+        .is_empty());
+}
+
+#[test]
+fn task_permission_is_never_sent_as_a_server_request() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    );
 
     let opened = gateway.open_server_request(task_server_request("task-1"), AppServerTime(4));
 
+    // Task state is the only channel: even clients that declare the legacy capabilities get no copy.
     let OpenRequestOutcome::Opened { deliveries, .. } = opened else {
-        panic!("connected capable clients must make the permission answerable");
+        panic!("a Task-scoped permission opens without a responder");
     };
-    let mut client_ids = deliveries
-        .iter()
-        .map(|delivery| delivery.delivery.client_instance_id.as_str())
-        .collect::<Vec<_>>();
-    client_ids.sort_unstable();
-    assert_eq!(client_ids, vec!["client-1", "client-2"]);
+    assert!(deliveries.is_empty());
+    assert_eq!(
+        gateway
+            .server_requests
+            .pending_for_task(&TaskId::from("task-1"))
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn task_question_is_never_sent_as_a_server_request() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+
+    let opened = gateway.open_server_request(task_question_request("task-1"), AppServerTime(4));
+
+    let OpenRequestOutcome::Opened { deliveries, .. } = opened else {
+        panic!("a Task-scoped question opens without a responder");
+    };
+    assert!(deliveries.is_empty());
 }
 
 #[test]
@@ -2335,7 +2209,7 @@ fn opening_task_permission_publishes_pending_request_in_task_state_stream() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2374,7 +2248,7 @@ fn stopping_task_publishes_empty_request_set_after_pending_question_is_interrupt
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2534,7 +2408,7 @@ fn subscribe_to_task(gateway: &mut RpcGateway, task_id: &str) {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from(task_id),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2592,7 +2466,7 @@ fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2646,7 +2520,7 @@ fn task_config_mutation_returns_only_agent_config() {
 }
 
 #[test]
-fn client_response_resolves_pending_server_request() {
+fn pending_request_resolve_resolves_a_task_permission() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
@@ -2657,7 +2531,7 @@ fn client_response_resolves_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2665,18 +2539,22 @@ fn client_response_resolves_pending_server_request() {
     let opened = gateway.open_server_request(task_server_request("task-1"), AppServerTime(3));
     assert!(matches!(
         opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.len() == 1
+        OpenRequestOutcome::Opened { deliveries, .. } if deliveries.is_empty()
     ));
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("conn-1"),
-        InboundProtocolMessage::ClientResponse {
-            request_id: "server-request-1".to_string(),
-            answer: ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-        },
+        request(
+            "resolve",
+            openaide_app_server_protocol::methods::PENDING_REQUEST_RESOLVE,
+            openaide_app_server_protocol::server_requests::PendingRequestResolveParams {
+                request_id: openaide_app_server_protocol::ids::RequestId::from("server-request-1"),
+                resolution:
+                    openaide_app_server_protocol::server_requests::PendingRequestResolution::Permission {
+                        option_id: "allow".to_string(),
+                    },
+            },
+        ),
         AppServerTime(4),
     );
 
@@ -2713,24 +2591,20 @@ fn unknown_client_response_returns_permission_error() {
 }
 
 #[test]
-fn heartbeat_delivers_a_queued_navigation_change_once() {
+fn a_committed_navigation_change_publishes_no_row_events_itself() {
     let mut gateway = initialized_gateway("client-1", "local-http:client-1");
     gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
         request(
             "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
+            NAVIGATION_SUBSCRIBE,
+            navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks),
         ),
         AppServerTime(2),
     );
 
+    // The commit marked the Project dirty; the Navigation owner, not the publisher, computes
+    // and publishes frames.
     let published = gateway.publish_task_update(
         &committed_task_update(
             "task-1",
@@ -2742,65 +2616,7 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
         AppServerTime(3),
     );
 
-    assert_eq!(published.len(), 1);
-
-    let outcome = gateway.handle_inbound(
-        ConnectionId::new("local-http:client-1"),
-        request("3", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(4),
-    );
-
-    let events = response_events(outcome);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        &events[0].event.payload,
-        AppServerEventPayload::TaskUpdated { .. }
-    ));
-
-    let second = gateway.handle_inbound(
-        ConnectionId::new("local-http:client-1"),
-        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
-        AppServerTime(5),
-    );
-    assert!(response_events(second).is_empty());
-}
-
-#[test]
-fn committed_task_summary_change_publishes_task_updated_to_navigation() {
-    let mut gateway = initialized_gateway("client-1", "local-http:client-1");
-    gateway.handle_inbound(
-        ConnectionId::new("local-http:client-1"),
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
-        ),
-        AppServerTime(2),
-    );
-
-    let published = gateway.publish_task_update(
-        &committed_task_update(
-            "task-1",
-            2,
-            Vec::new(),
-            Vec::new(),
-            TestNavigationChange::Upsert,
-        ),
-        AppServerTime(3),
-    );
-
-    assert_eq!(published.len(), 1);
-    assert!(matches!(
-        &published[0].event.payload,
-        AppServerEventPayload::TaskUpdated { task, .. }
-            if task.task_id == TaskId::from("task-1")
-    ));
+    assert!(published.is_empty());
 }
 
 #[test]
@@ -2828,7 +2644,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-new"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(3),
@@ -2837,14 +2653,8 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
         ConnectionId::new("conn-2"),
         request(
             "4",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
+            NAVIGATION_SUBSCRIBE,
+            navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks),
         ),
         AppServerTime(4),
     ));
@@ -2869,7 +2679,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
 }
 
 #[test]
-fn shared_gateway_distinguishes_initialized_event_stream_connections() {
+fn shared_gateway_distinguishes_initialized_connections() {
     let gateway = SharedRpcGateway::new(initialized_gateway("client-1", "local-http:client-1"));
 
     assert!(gateway.connection_is_initialized(&ConnectionId::new("local-http:client-1")));
@@ -2891,7 +2701,7 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2963,7 +2773,7 @@ fn client_response_error_keeps_pending_server_request() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-1"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -2994,26 +2804,20 @@ fn client_response_error_keeps_pending_server_request() {
 #[test]
 fn unsubscribe_after_initialize_removes_subscription() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
-    let scope = SubscriptionScope::TaskNavigation {
-        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-        project_ids: None,
-    };
+    let section = openaide_app_server_protocol::task::TaskNavigationSection::Tasks;
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: scope.clone(),
-                known_revision: None,
-            },
-        ),
+        request("2", NAVIGATION_SUBSCRIBE, navigation_view(section)),
         AppServerTime(2),
     );
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("conn-1"),
-        request("3", STATE_UNSUBSCRIBE, StateUnsubscribeParams { scope }),
+        request(
+            "3",
+            NAVIGATION_UNSUBSCRIBE,
+            openaide_app_server_protocol::navigation::NavigationUnsubscribeParams { section },
+        ),
         AppServerTime(3),
     );
 
@@ -3028,14 +2832,8 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
         ConnectionId::new("conn-1"),
         request(
             "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation {
-                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-                    project_ids: None,
-                },
-                known_revision: None,
-            },
+            NAVIGATION_SUBSCRIBE,
+            navigation_view(openaide_app_server_protocol::task::TaskNavigationSection::Tasks),
         ),
         AppServerTime(2),
     );
@@ -3046,13 +2844,14 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
         AppServerTime(4),
     );
 
-    let publish = gateway.state_stream.publish_committed(
-        EventScope::StateRoot {
-            state_root_id: StateRootId::from("root-1"),
+    let publish = gateway.state_stream.publish(
+        EventAddress::Client {
+            client: ClientInstanceId::from("client-1"),
+            scope: openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation {
+                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            },
         },
-        AppServerEventPayload::RefreshStateChanged {
-            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
-        },
+        empty_navigation_frame(),
         |client_id| gateway.client_hub.delivery_for(client_id),
         AppServerTime(5),
     );
@@ -3471,14 +3270,13 @@ fn gateway_with_project_store_and_listing(
             )),
             Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
             Arc::new(SettingsCatalog::default()),
-            Arc::new(TaskNavigationStore::new(store.clone())),
             task_snapshots.clone(),
         ),
     );
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         snapshots,
@@ -3518,7 +3316,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3560,7 +3358,7 @@ fn gateway_with_agent_mutations_and_task_release(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3658,7 +3456,7 @@ fn gateway_with_agent_session_listing(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3699,7 +3497,7 @@ pub(super) fn gateway_with_agent_authenticate(
     RpcGateway::new(
         ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
+        StateStream::new(),
         ServerRequestRuntime::new(),
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
@@ -3900,7 +3698,7 @@ impl AgentListSessionsWorkflow for ListingAgentSessions {
 #[derive(Default)]
 struct RecordingCatalogRefresh {
     requests: AtomicUsize,
-    project_requests: Mutex<Vec<(String, usize)>>,
+    deepening: Mutex<Vec<String>>,
 }
 
 impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
@@ -3921,11 +3719,8 @@ impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
         self.requests.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {
-        self.project_requests
-            .lock()
-            .unwrap()
-            .push((project_id.to_string(), target_row_count));
+    fn request_native_session_discovery_deepening(&self, project_id: &str) {
+        self.deepening.lock().unwrap().push(project_id.to_string());
     }
 }
 
@@ -4568,11 +4363,15 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         _client_instance_id: &ClientInstanceId,
         _task_id: &TaskId,
         _artifact_id: &str,
+        _known_version: Option<u64>,
     ) -> Result<
-        openaide_app_server_protocol::task::ToolDetailSnapshot,
+        crate::snapshots::ToolDetailSubscription,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
-        Ok(fixed_tool_detail())
+        Ok(crate::snapshots::ToolDetailSubscription {
+            details: fixed_tool_detail(),
+            terminal_sync: openaide_app_server_protocol::state::ToolTerminalSync::Full,
+        })
     }
 }
 
@@ -5212,6 +5011,7 @@ fn request_with_meta<T: serde::Serialize>(
 ) -> InboundProtocolMessage {
     InboundProtocolMessage::ClientRequest {
         id: id.to_string(),
+        wire_id: json!(id),
         method: method.to_string(),
         params: serde_json::to_value(params).unwrap(),
         meta,
@@ -5290,6 +5090,30 @@ fn response_error(outcome: GatewayOutcome) -> ErrorEnvelope {
     }
 }
 
+fn empty_navigation_frame() -> AppServerEventPayload {
+    AppServerEventPayload::NavigationFrame {
+        frame: openaide_app_server_protocol::navigation::NavigationFrame {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            revision: 1,
+            group_order: None,
+            removed_groups: Vec::new(),
+            groups: Vec::new(),
+        },
+    }
+}
+
+fn navigation_view(
+    section: openaide_app_server_protocol::task::TaskNavigationSection,
+) -> openaide_app_server_protocol::navigation::NavigationViewParams {
+    openaide_app_server_protocol::navigation::NavigationViewParams {
+        section,
+        project_ids: None,
+        history_limit: 20,
+        history_limits: Vec::new(),
+        open_row: None,
+    }
+}
+
 fn committed_task_update(
     task_id: &str,
     revision: u64,
@@ -5298,7 +5122,7 @@ fn committed_task_update(
     navigation: TestNavigationChange,
 ) -> TaskUpdate {
     use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange};
-    use openaide_app_server_protocol::snapshot::{ChatSnapshot, TaskStatus, TaskSummary};
+    use openaide_app_server_protocol::snapshot::ChatSnapshot;
 
     let chat = chat
         .into_iter()
@@ -5321,24 +5145,7 @@ fn committed_task_update(
         .collect();
     let navigation = match navigation {
         TestNavigationChange::None => None,
-        TestNavigationChange::Upsert => Some(
-            crate::task_events::CommittedNavigationChange::TaskUpdated(Box::new(TaskSummary {
-                task_id: task_id.into(),
-                project_id: "project-1".into(),
-                agent_id: "codex".into(),
-                lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
-                title: None,
-                status: TaskStatus::Idle,
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-                last_activity: "2026-01-01T00:00:00Z".to_string(),
-                unread: false,
-                pinned: false,
-                attention: None,
-                has_messages: true,
-                worktree_id: None,
-                workspace_available: true,
-            })),
-        ),
+        TestNavigationChange::Upsert => Some("project-1".into()),
     };
     TaskUpdate {
         task_id: task_id.to_string(),
@@ -5412,20 +5219,9 @@ fn task_question_request(task_id: &str) -> ServerRequestDraft {
         scope: PendingRequestScope::Task {
             task_id: TaskId::from(task_id),
         },
-        method: openaide_app_server_protocol::server_requests::QUESTION_REQUEST.to_string(),
+        method: crate::server_requests::QUESTION_REQUEST_TAG.to_string(),
         title: "Question".to_string(),
         params: json!({ "message": "Choose a test seam.", "fields": [] }),
-    }
-}
-
-fn task_secret_request(task_id: &str) -> ServerRequestDraft {
-    ServerRequestDraft {
-        scope: PendingRequestScope::Task {
-            task_id: TaskId::from(task_id),
-        },
-        method: "secret/read".to_string(),
-        title: "Secret needed".to_string(),
-        params: json!({ "key": "agent.secret" }),
     }
 }
 

@@ -375,7 +375,7 @@ describe("ReliableBackendConnection over WebSocket", () => {
             id: message.id,
             result: {
               result: message.method === CLIENT_INITIALIZE
-                ? { snapshot: { server: { serverId: "server-1" } } }
+                ? { snapshot: { server: { serverId: "server-1" }, stateRoot: { stateRootId: "root-1" } } }
                 : { sessionId },
             },
           },

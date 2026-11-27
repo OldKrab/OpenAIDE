@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type {
   AgentId,
+  NavigationGroupReplica,
+  NavigationReplica,
+  NavigationRow,
   ClientInstanceId,
   MessageId,
   ProjectId,
@@ -31,14 +34,10 @@ describe("App Server Protocol state mapping", () => {
   });
 
   it("maps task navigation summaries into current frontend task summaries", () => {
-    expect(mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{ projectId: "project-1" as ProjectId, projectLabel: "Project", taskCount: 2, entries: [
-        { kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId, status: "running" }) },
-        { kind: "task", task: protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }) },
-      ] }],
-    }, mappingContext())).toMatchObject({
+    expect(mapProtocolTaskNavigation(replica([group("project-1", [
+      taskRow(protocolSummary({ taskId: "task-1" as TaskId, status: "running" })),
+      taskRow(protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true })),
+    ])]), mappingContext())).toMatchObject({
       tasks: [
         { task_id: "task-1", status: "active", agent_id: "codex", agent_name: "Codex", workspace_root: "" },
         { task_id: "task-2", status: "waiting", unread: true },
@@ -48,34 +47,56 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("maps Navigation refresh failure without discarding saved rows", () => {
-    const mapping = mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "failed", message: "Codex history unavailable" },
-      groups: [{
-        projectId: "project-1" as ProjectId,
-        projectLabel: "Project",
-        taskCount: 1,
-        entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
-      }],
-    }, mappingContext());
+  it("keeps the server's group order, row order, counts and live flags without sorting", () => {
+    const mapping = mapProtocolTaskNavigation(replica([
+      group("project-b", [
+        taskRow(protocolSummary({ taskId: "task-old" as TaskId, lastActivity: "1" })),
+        taskRow(protocolSummary({ taskId: "task-new" as TaskId, lastActivity: "9" }), true),
+      ], { total: 12, hidden: 10, undiscovered: true }),
+      group("project-a", []),
+    ]), mappingContext());
+
+    expect(mapping.groups.map((entry) => entry.projectId)).toEqual(["project-b", "project-a"]);
+    expect(mapping.groups[0]).toMatchObject({ total: 12, hidden: 10, undiscovered: true });
+    expect(mapping.groups[0]?.rows.map((row) => row.kind === "task" && row.task.task_id))
+      .toEqual(["task-old", "task-new"]);
+    expect(mapping.groups[0]?.rows.map((row) => row.live)).toEqual([false, true]);
+  });
+
+  it("maps Native Session rows beside Task rows in the same group", () => {
+    const mapping = mapProtocolTaskNavigation(replica([group("project-1", [
+      {
+        live: false,
+        entry: {
+          kind: "nativeSession",
+          session: {
+            reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
+            projectId: "project-1" as ProjectId,
+            workspaceRoot: "/workspace/Project",
+            title: "Cached",
+            pinned: false,
+          },
+        },
+      },
+    ])]), mappingContext());
+
+    expect(mapping.sessions).toMatchObject([{ agent_id: "codex", agent_name: "Codex", session_id: "native-1" }]);
+    expect(mapping.groups[0]?.rows[0]).toMatchObject({ kind: "session", live: false });
+  });
+
+  it("maps a failed Project discovery without discarding saved rows", () => {
+    const mapping = mapProtocolTaskNavigation(replica([group("project-1", [
+      taskRow(protocolSummary({ taskId: "task-1" as TaskId })),
+    ], { discovery: "failed" })]), mappingContext());
 
     expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-1"]);
-    expect(mapping.refreshError).toBe("Codex history unavailable");
+    expect(mapping.refreshError).toBe("Agent history unavailable");
+    expect(mapping.recoveryKind).toBe("launchFailed");
     expect(mapping.refreshing).toBe(false);
   });
 
   it("names the Agent that needs sign-in and offers recovery on Task Navigation", () => {
-    const mapping = mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{
-        projectId: "project-1" as ProjectId,
-        projectLabel: "Project",
-        taskCount: 0,
-        entries: [],
-      }],
-    }, {
+    const mapping = mapProtocolTaskNavigation(replica([group("project-1", [])]), {
       ...mappingContext(),
       agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "authRequired" as const }],
     });
@@ -86,15 +107,14 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.recoveryAgentLabel).toBe("Codex");
   });
 
-  it("names the Agent that needs setup instead of its raw launch error", () => {
-    const navigation = (agent: { status: "setupRequired" | "failed"; setupReason?: "nodeJsRequired" }) => mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "failed", message: "Agent command not found: npx" },
-      groups: [],
-    }, {
-      ...mappingContext(),
-      agents: [{ agentId: "opencode" as AgentId, label: "OpenCode", icon: "opencode", ...agent }],
-    });
+  it("names the Agent that needs setup instead of a raw launch error", () => {
+    const navigation = (agent: { status: "setupRequired" | "failed"; setupReason?: "nodeJsRequired" }) => mapProtocolTaskNavigation(
+      replica([group("project-1", [], { discovery: "failed" })]),
+      {
+        ...mappingContext(),
+        agents: [{ agentId: "opencode" as AgentId, label: "OpenCode", icon: "opencode", ...agent }],
+      },
+    );
 
     const nodeJs = navigation({ status: "setupRequired", setupReason: "nodeJsRequired" });
     expect(nodeJs.refreshError).toBe("OpenCode needs Node.js. Its sessions show here once it is set up.");
@@ -102,25 +122,16 @@ describe("App Server Protocol state mapping", () => {
     expect(nodeJs.recoveryAgentLabel).toBe("OpenCode");
     expect(navigation({ status: "setupRequired" }).refreshError)
       .toBe("OpenCode needs setup. Its sessions show here once it is set up.");
-    expect(navigation({ status: "failed" }).refreshError)
-      .toBe("OpenCode history unavailable: Agent command not found: npx");
+    expect(navigation({ status: "failed" }).refreshError).toBe("OpenCode history unavailable");
   });
 
-  it("maps Project-scoped discovery independently from the global refresh", () => {
-    const mapping = mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{
-        projectId: "project-loading" as ProjectId,
-        projectLabel: "Loading Project",
-        taskCount: 0,
-        entries: [],
-        loading: true,
-      }],
-    }, mappingContext());
+  it("maps Project-scoped discovery as the loading state of that group", () => {
+    const mapping = mapProtocolTaskNavigation(replica([
+      group("project-loading", [], { discovery: "loading" }),
+    ]), mappingContext());
 
-    expect(mapping.loadingProjectIds).toEqual(["project-loading"]);
-    expect(mapping.refreshing).toBe(false);
+    expect(mapping.groups[0]?.discovery).toBe("loading");
+    expect(mapping.refreshing).toBe(true);
   });
 
   it("keeps background work distinct from running", () => {
@@ -212,28 +223,23 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("keeps visible adopted Tasks even when their loaded history is empty", () => {
-    const mapping = mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{ projectId: "project-1" as ProjectId, projectLabel: "Project", taskCount: 2, entries: [
-        { kind: "task", task: protocolSummary({
-          taskId: "task-empty" as TaskId,
-          title: { value: "New task", source: "user" },
-          status: "idle",
-          hasMessages: false,
-        }) },
-        { kind: "task", task: protocolSummary({
-          taskId: "task-sent" as TaskId,
-          title: { value: "Implement feature", source: "user" },
-          status: "running",
-          hasMessages: true,
-        }) },
-      ] }],
-    }, mappingContext());
+  it("keeps Tasks whose loaded history is empty: membership is App Server's decision", () => {
+    const mapping = mapProtocolTaskNavigation(replica([group("project-1", [
+      taskRow(protocolSummary({
+        taskId: "task-empty" as TaskId,
+        title: { value: "New task", source: "user" },
+        status: "idle",
+        hasMessages: false,
+      })),
+      taskRow(protocolSummary({
+        taskId: "task-sent" as TaskId,
+        title: { value: "Implement feature", source: "user" },
+        status: "running",
+        hasMessages: true,
+      })),
+    ])]), mappingContext());
 
     expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-empty", "task-sent"]);
-    expect(mapping.activeTaskId).toBeUndefined();
   });
 
   it("uses lifecycle-specific presentation titles when App Server has no title", () => {
@@ -550,16 +556,9 @@ describe("App Server Protocol state mapping", () => {
   });
 
   it("warns when a task references a project missing from the project collection", () => {
-    const mapping = mapProtocolTaskNavigation({
-      section: "tasks",
-      refresh: { state: "idle" },
-      groups: [{
-        projectId: "project-1" as ProjectId,
-        projectLabel: "Project",
-        taskCount: 1,
-        entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
-      }],
-    }, { agents: mappingContext().agents, projects: [] });
+    const mapping = mapProtocolTaskNavigation(replica([group("project-1", [
+      taskRow(protocolSummary({ taskId: "task-1" as TaskId })),
+    ])]), { agents: mappingContext().agents, projects: [] });
 
     expect(mapping.warnings).toEqual([{ kind: "projectDisplayNotMapped", projectId: "project-1" }]);
   });
@@ -1429,5 +1428,32 @@ function mappingContext() {
   return {
     agents: [{ agentId: "codex" as AgentId, label: "Codex", icon: "openai", status: "connected" as const }],
     projects: [{ projectId: "project-1" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true }],
+  };
+}
+
+function replica(groups: NavigationGroupReplica[]): NavigationReplica {
+  return { section: "tasks", revision: 1, groups };
+}
+
+function taskRow(task: ProtocolTaskSummary, live = false): NavigationRow {
+  return { live, entry: { kind: "task", task } };
+}
+
+function group(
+  projectId: string,
+  rows: NavigationRow[],
+  overrides: Partial<NavigationGroupReplica> = {},
+): NavigationGroupReplica {
+  const ids = rows.map((_, index) => `row-${index}`);
+  return {
+    projectId: projectId as ProjectId,
+    projectLabel: "Project",
+    order: ids,
+    rowsById: Object.fromEntries(rows.map((row, index) => [ids[index]!, row])),
+    total: rows.length,
+    hidden: 0,
+    undiscovered: false,
+    discovery: "settled",
+    ...overrides,
   };
 }

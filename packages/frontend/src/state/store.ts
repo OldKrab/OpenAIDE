@@ -28,10 +28,29 @@ export type PendingComposerSend = {
   state: "sending";
 };
 
+/** One row of a Navigation group: App Server's window and order, exactly as sent. */
+export type NavigationRowState =
+  | { kind: "task"; task: TaskSummary; live: boolean }
+  | { kind: "session"; session: AgentListedSession; live: boolean };
+
+/** One Project's rows in a Navigation view, in the server's order, with the server's counts. */
+export type NavigationGroupState = {
+  projectId: string;
+  label: string;
+  rows: NavigationRowState[];
+  /** Rows the Project has in this section after the membership filters. */
+  total: number;
+  /** Rows the server's window leaves out. */
+  hidden: number;
+  /** The Project's Agent sessions have not been read yet. */
+  undiscovered: boolean;
+  discovery: "settled" | "loading" | "failed";
+};
+
 export type NativeSessionsState = {
   items: AgentListedSession[];
-  hasMoreProjectIds?: string[];
-  loadingProjectIds?: string[];
+  /** The view's groups in the server's order; the Sidebar renders these without sorting. */
+  groups: NavigationGroupState[];
   loading: boolean;
   loaded: boolean;
   nextCursor?: string;
@@ -122,7 +141,7 @@ export type TaskChatScrollState = {
 
 export type LiveTextPresentationSignal = {
   messageId: string;
-  eventCursor: string;
+  eventToken: string;
 };
 
 export type TaskLiveTextPresentation = {
@@ -195,6 +214,11 @@ export type AppState = {
   };
   archivedNativeSessions: NativeSessionsState;
   nativeSessionMutations: Record<string, NativeSessionMutationState>;
+  /**
+   * History limits the user changed per Project ("Show more" raises one, collapsing sets 0).
+   * Ephemeral presentation: App Server applies them to the Navigation view and reports the rows.
+   */
+  navigationHistoryLimits: Record<string, number>;
   taskListError?: string;
   activeTaskId?: string;
   snapshot?: TaskSnapshot;
@@ -235,10 +259,12 @@ export function createInitialState(): AppState {
     taskLists: {},
     archivedNativeSessions: {
       items: [],
+      groups: [],
       loading: false,
       loaded: false,
     },
     nativeSessionMutations: {},
+    navigationHistoryLimits: {},
     taskSnapshots: {},
     taskSnapshotReplicaEpochs: {},
     taskChatScrollStates: {},
@@ -266,6 +292,7 @@ export function createInitialState(): AppState {
       selection: defaultSelection(),
       nativeSessions: {
         items: [],
+        groups: [],
         loading: false,
         loaded: false,
       },

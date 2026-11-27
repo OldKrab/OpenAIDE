@@ -6,9 +6,7 @@ use crate::protocol::model::{
 };
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
-use crate::task_events::{
-    CommittedNavigationChange, TaskUpdateKind, TaskUpdateNotifier, TaskUpdateReceiver,
-};
+use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::mutation::{
     TaskCommitOptions, TaskCommitOutcome, TaskCommitRejection, TaskMutationResult, TaskMutations,
 };
@@ -45,7 +43,7 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
-fn navigation_event_kind_follows_row_vs_collection_ownership() {
+fn a_row_changing_commit_names_its_project_for_the_navigation_owner() {
     let (_dir, store, mutations, notifications) = test_mutations(0);
     store.write_task(&task_record("task_navigation")).unwrap();
 
@@ -58,12 +56,14 @@ fn navigation_event_kind_follows_row_vs_collection_ownership() {
     let row_update = notifications.try_recv().unwrap();
     assert!(matches!(
         row_update.kind,
-        TaskUpdateKind::Changed(change)
-            if matches!(
-                change.navigation,
-                Some(CommittedNavigationChange::TaskUpdated(_))
-            )
+        TaskUpdateKind::Changed(change) if change.navigation.is_some()
     ));
+}
+
+#[test]
+fn a_lifecycle_change_also_names_its_project_for_the_navigation_owner() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_navigation")).unwrap();
 
     mutations
         .commit_existing_task("task_navigation", TaskCommitOptions::metadata(), |ctx| {
@@ -71,14 +71,10 @@ fn navigation_event_kind_follows_row_vs_collection_ownership() {
             Ok(TaskMutationResult::Changed)
         })
         .unwrap();
-    let collection_update = notifications.try_recv().unwrap();
+    let update = notifications.try_recv().unwrap();
     assert!(matches!(
-        collection_update.kind,
-        TaskUpdateKind::Changed(change)
-            if matches!(
-                change.navigation,
-                Some(CommittedNavigationChange::ProjectEntriesChanged { .. })
-            )
+        update.kind,
+        TaskUpdateKind::Changed(change) if change.navigation.is_some()
     ));
 }
 
@@ -280,6 +276,133 @@ fn chat_commit_refreshes_message_history_before_task_write() {
     );
 }
 
+fn changed_chat(
+    notifications: &TaskUpdateReceiver,
+) -> openaide_app_server_protocol::events::TaskChanges {
+    let update = notifications.try_recv().unwrap();
+    let TaskUpdateKind::Changed(change) = update.kind else {
+        panic!("expected a Task change");
+    };
+    change.changes
+}
+
+#[test]
+fn a_chat_transaction_carries_its_chat_changes_and_new_chat_version_with_the_fields() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_atomic")).unwrap();
+    let before = store.task_journal().chat_version("task_atomic").unwrap();
+
+    mutations
+        .commit_existing_task("task_atomic", TaskCommitOptions::metadata(), |ctx| {
+            ctx.task_mut().status = TaskStatus::Waiting;
+            ctx.append_message(NormalizedMessage::User {
+                id: "message_1".to_string(),
+                text: "hello".to_string(),
+                created_at: "2".to_string(),
+                attachments: Vec::new(),
+            })
+            .unwrap();
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+
+    let changes = changed_chat(&notifications);
+    assert!(changes.task.is_some(), "the fields travel with the Chat");
+    assert_eq!(changes.chat.len(), 1);
+    assert_eq!(
+        changes.chat_version,
+        Some(store.task_journal().chat_version("task_atomic").unwrap())
+    );
+    assert!(changes.chat_version > Some(before));
+    assert!(
+        notifications.try_recv().is_err(),
+        "one notification per transaction"
+    );
+}
+
+#[test]
+fn a_commit_that_changes_no_chat_carries_no_chat_version() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_fields_only")).unwrap();
+
+    mutations
+        .commit_existing_task("task_fields_only", TaskCommitOptions::metadata(), |ctx| {
+            ctx.task_mut().status = TaskStatus::Waiting;
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+
+    let changes = changed_chat(&notifications);
+    assert!(changes.chat.is_empty());
+    assert_eq!(changes.chat_version, None);
+}
+
+#[test]
+fn only_a_native_reload_publishes_a_chat_replace() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_replace")).unwrap();
+
+    // Refreshing the history version is not a replacement.
+    mutations
+        .commit_existing_task(
+            "task_replace",
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                ctx.task_mut().status = TaskStatus::Waiting;
+                Ok(TaskMutationResult::Changed)
+            },
+        )
+        .unwrap();
+    assert!(changed_chat(&notifications).chat.is_empty());
+
+    mutations
+        .commit_existing_task("task_replace", TaskCommitOptions::metadata(), |ctx| {
+            ctx.replace_messages_from_native_session(
+                vec![NormalizedMessage::User {
+                    id: "message_1".to_string(),
+                    text: "reloaded".to_string(),
+                    created_at: "2".to_string(),
+                    attachments: Vec::new(),
+                }],
+                2,
+            )
+            .unwrap();
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+    let changes = changed_chat(&notifications);
+    assert!(matches!(
+        changes.chat.as_slice(),
+        [openaide_app_server_protocol::events::TaskChatChange::Replace { .. }]
+    ));
+    assert!(changes.chat_version.is_some());
+}
+
+#[test]
+fn creating_a_task_publishes_no_chat_replace() {
+    let (_dir, _store, mutations, notifications) = test_mutations(0);
+    let mut record = task_record("task_created");
+    record.task_version = 1;
+
+    mutations
+        .create_task(
+            record,
+            vec![NormalizedMessage::User {
+                id: "message_1".to_string(),
+                text: "hello".to_string(),
+                created_at: "2".to_string(),
+                attachments: Vec::new(),
+            }],
+            TaskCommitOptions::metadata(),
+        )
+        .unwrap();
+
+    assert!(changed_chat(&notifications).chat.is_empty());
+}
+
 #[test]
 fn commit_rejects_task_identity_mutation_without_advancing_global_revision() {
     let (_dir, store, mutations, notifications) = test_mutations(8);
@@ -439,7 +562,7 @@ fn streamed_agent_text_materializes_large_history_only_once() {
         .unwrap();
     let journal = dir
         .path()
-        .join("task-store-v1/tasks/task_stream_cache/chat.journal");
+        .join("task-store-v1/tasks/task_stream_cache/chat.log");
     let before_stream = journal.metadata().unwrap().len();
 
     for text in [" first", " second"] {
@@ -702,7 +825,7 @@ fn create_task_persists_initial_history_in_one_message_batch() {
         .exists());
     let task_dir = dir.path().join("task-store-v1/tasks/task_bulk_history");
     assert!(task_dir.join("task.json").exists());
-    assert!(task_dir.join("chat.snapshot").exists());
+    assert!(task_dir.join("chat.log").exists());
 }
 
 #[test]
