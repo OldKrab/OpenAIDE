@@ -13,6 +13,7 @@ mod delivery_signal;
 mod device_handlers;
 mod diagnostics_handlers;
 mod file_viewer_handlers;
+mod global_state_publication;
 pub mod local_http;
 mod messages;
 mod navigation_handlers;
@@ -58,6 +59,7 @@ use crate::agent::product_api::{
 use crate::app_lifecycle::{AppLifecycle, InitializeAdmission, LifecycleState};
 use crate::client_lifecycle::{AppServerTime, ClientHub, ConnectionId};
 use crate::diagnostics::RuntimeDiagnosticsWorkflow;
+use crate::global_state::GlobalAreas;
 use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
@@ -82,6 +84,8 @@ pub struct RpcGateway {
     pub(crate) client_hub: ClientHub,
     pub(crate) lifecycle: AppLifecycle,
     pub(crate) state_stream: StateStream,
+    /// The one owner of the global state; every change to it is published through it.
+    pub(crate) global_state: crate::global_state::GlobalStateOwner,
     pub(crate) server_requests: ServerRequestRuntime,
     /// Every connection's outbound sequence. Publications append here under the protocol lock;
     /// transports drain it through `SharedRpcGateway::transfer_outbound`.
@@ -221,6 +225,7 @@ impl RpcGateway {
             client_hub,
             lifecycle,
             state_stream,
+            global_state: Default::default(),
             server_requests,
             outbox: outbox::Outbox::default(),
             tasks_with_visible_requests: Default::default(),
@@ -398,6 +403,11 @@ impl RpcGateway {
             &params.client_instance_id,
             params.workspace_roots.iter().map(|root| root.path.clone()),
         );
+        if projects_changed {
+            // Published before this client is registered, so the other clients hear about its
+            // Projects and the client itself gets them in its baseline, not as a change.
+            self.publish_global_state(GlobalAreas::PROJECTS);
+        }
         let previous_connection = self
             .client_hub
             .client_by_instance(&params.client_instance_id)
@@ -436,29 +446,25 @@ impl RpcGateway {
         let token = self
             .state_stream
             .read_token_for_client(&context.client_instance_id);
-        let mut snapshot = match self.snapshots.client_snapshot(
+        let global = match self.global_state_for(&context) {
+            Ok(global) => global,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let snapshot = match self.snapshots.client_snapshot(
             &context,
             context.requested_surface.clone(),
+            global,
             &token,
         ) {
             Ok(snapshot) => snapshot,
             Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        snapshot.pending_requests = self
-            .server_requests
-            .pending_for_client(&context.client_instance_id);
-        let events = if projects_changed {
-            self.publish_project_collection_update(now)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
         };
         responses::result_with_events_and_server_requests(
             connection_id,
             id,
             meta,
             InitializeResult { snapshot },
-            events,
+            Vec::new(),
             server_requests,
         )
     }

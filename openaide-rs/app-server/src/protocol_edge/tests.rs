@@ -72,6 +72,7 @@ mod client_probe;
 mod devices;
 mod entity_subscription;
 mod gateway_lock_wait;
+mod global_state;
 mod navigation_publication;
 mod navigation_search;
 mod outbound_order;
@@ -89,7 +90,9 @@ fn rejects_product_request_before_initialize() {
             "1",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
                 known_version: None,
             },
         ),
@@ -278,7 +281,9 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
             "4",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
                 known_version: None,
             },
         ),
@@ -299,14 +304,7 @@ fn update_shutdown_requires_confirmation_then_quiesces_until_abort() {
     ));
     response_value(gateway.handle_inbound(
         ConnectionId::new("conn-1"),
-        request(
-            "6",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
+        request("6", CLIENT_HEARTBEAT, json!({})),
         AppServerTime(6),
     ));
 }
@@ -367,14 +365,7 @@ fn update_shutdown_barrier_is_recovered_by_the_same_desktop_client() {
     ));
     response_value(gateway.handle_inbound(
         ConnectionId::new("conn-reloaded"),
-        request(
-            "4",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
+        request("4", CLIENT_HEARTBEAT, json!({})),
         AppServerTime(4),
     ));
 }
@@ -477,19 +468,12 @@ fn project_add_publishes_project_without_task_history() {
     assert_eq!(added["result"]["project"]["available"], json!(true));
 
     let subscribed = response_value(gateway.handle_inbound(
-        connection_id,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("3", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(3),
     ));
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"][0]["label"],
         json!("app")
     );
 }
@@ -568,20 +552,13 @@ fn project_add_survives_gateway_restart() {
     let restarted_connection = ConnectionId::new("conn-2");
     initialize(&mut restarted, restarted_connection.clone());
     let subscribed = response_value(restarted.handle_inbound(
-        restarted_connection,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("3", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(3),
     ));
 
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"][0]["label"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"][0]["label"],
         json!("persistent-app")
     );
 }
@@ -651,19 +628,12 @@ fn project_remove_hides_a_project_without_deleting_its_folder() {
     assert!(workspace_root.is_dir());
 
     let subscribed = response_value(gateway.handle_inbound(
-        connection_id,
-        request(
-            "4",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
+        ConnectionId::new("conn-probe"),
+        request("4", CLIENT_INITIALIZE, init_params("client-probe")),
         AppServerTime(4),
     ));
     assert_eq!(
-        subscribed["result"]["snapshot"]["projects"]["projects"],
+        subscribed["result"]["snapshot"]["global"]["projects"]["projects"],
         json!([])
     );
 }
@@ -900,7 +870,7 @@ fn expired_client_workspace_roots_leave_the_project_collection() {
 }
 
 #[test]
-fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
+fn expired_client_workspace_roots_publish_projects_to_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let host_connection = ConnectionId::new("conn-host");
     let webview_connection = ConnectionId::new("conn-webview");
@@ -918,18 +888,7 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
         request("2", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(2),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection.clone(),
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
-        AppServerTime(3),
-    ));
+    gateway.drain_sync_for_connection(&webview_connection);
     gateway.handle_transport_closed(&host_connection, AppServerTime(4));
 
     assert!(matches!(
@@ -939,17 +898,16 @@ fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
         ),
         ClientExpiryOutcome::Expired { .. }
     ));
-    let events = gateway.drain_event_deliveries_for_connection(&webview_connection);
+    let changes = gateway.drain_sync_for_connection(&webview_connection);
 
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        AppServerEventPayload::ProjectCollectionUpdated { projects }
-            if projects.projects.is_empty()
+    assert!(changes.iter().any(|changes| matches!(
+        &changes.projects,
+        Some(projects) if projects.projects.is_empty()
     )));
 }
 
 #[test]
-fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
+fn workspace_root_changes_publish_projects_to_other_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let host_connection = ConnectionId::new("conn-host");
     let webview_connection = ConnectionId::new("conn-webview");
@@ -967,20 +925,8 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
         request("2", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(2),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection,
-        request(
-            "3",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
-        AppServerTime(3),
-    ));
 
-    let events = response_events(gateway.handle_inbound(
+    response_value(gateway.handle_inbound(
         host_connection,
         request(
             "4",
@@ -995,26 +941,17 @@ fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
         AppServerTime(4),
     ));
 
-    let project_update = events
+    let projects = gateway
+        .drain_sync_for_connection(&webview_connection)
         .into_iter()
-        .find(|delivery| {
-            delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-                && matches!(
-                    delivery.event.payload,
-                    AppServerEventPayload::ProjectCollectionUpdated { .. }
-                )
-        })
-        .expect("subscribed webview receives Project collection update");
-    let AppServerEventPayload::ProjectCollectionUpdated { projects } = project_update.event.payload
-    else {
-        unreachable!("filtered to Project collection update")
-    };
+        .find_map(|changes| changes.projects)
+        .expect("connected webview receives the Project collection");
     assert_eq!(projects.projects.len(), 1);
     assert_eq!(projects.projects[0].label, "beta");
 }
 
 #[test]
-fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
+fn initialize_workspace_roots_publish_projects_to_connected_clients() {
     let mut gateway = gateway_with_project_context();
     let webview_connection = ConnectionId::new("conn-webview");
     response_value(gateway.handle_inbound(
@@ -1022,37 +959,22 @@ fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
         request("1", CLIENT_INITIALIZE, init_params("client-webview")),
         AppServerTime(1),
     ));
-    response_value(gateway.handle_inbound(
-        webview_connection,
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
-                known_version: None,
-            },
-        ),
-        AppServerTime(2),
-    ));
     let mut host = init_params("client-host");
     host.workspace_roots = vec![ClientWorkspaceRoot {
         path: "/workspace/alpha".to_string(),
     }];
 
-    let events = response_events(gateway.handle_inbound(
+    response_value(gateway.handle_inbound(
         ConnectionId::new("conn-host"),
         request("3", CLIENT_INITIALIZE, host),
         AppServerTime(3),
     ));
 
-    assert!(events.iter().any(|delivery| {
-        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
-            && matches!(
-                &delivery.event.payload,
-                AppServerEventPayload::ProjectCollectionUpdated { projects }
-                    if projects.projects.iter().any(|project| project.label == "alpha")
-            )
-    }));
+    let changes = gateway.drain_sync_for_connection(&webview_connection);
+    assert!(changes.iter().any(|changes| matches!(
+        &changes.projects,
+        Some(projects) if projects.projects.iter().any(|project| project.label == "alpha")
+    )));
 }
 
 #[test]
@@ -1127,20 +1049,20 @@ fn background_agent_readiness_reconciles_once_without_retrying_setup_failures() 
         ),
     );
     statuses.begin_installation("codex");
-    gateway.publish_background_agent_status_update(AppServerTime(1));
+    gateway.publish_background_agent_status_update();
     statuses.record_probe_error(
         "codex",
         &RuntimeError::NodeJsRequired("npm unavailable".into()),
     );
-    gateway.publish_background_agent_status_update(AppServerTime(2));
+    gateway.publish_background_agent_status_update();
     assert_eq!(
         workflow.requests.load(Ordering::SeqCst),
         0,
         "setup failures must not request another installation through discovery"
     );
     statuses.record_launching("codex");
-    gateway.publish_background_agent_status_update(AppServerTime(3));
-    gateway.publish_background_agent_status_update(AppServerTime(4));
+    gateway.publish_background_agent_status_update();
+    gateway.publish_background_agent_status_update();
     assert_eq!(
         workflow.requests.load(Ordering::SeqCst),
         1,
@@ -1149,35 +1071,48 @@ fn background_agent_readiness_reconciles_once_without_retrying_setup_failures() 
 }
 
 #[test]
-fn background_agent_status_update_is_queued_for_local_http_subscribers() {
-    let workflow = Arc::new(RecordingCatalogRefresh::default());
-    let mut gateway = gateway_with_agent_session_listing(workflow);
+fn background_agent_status_change_is_queued_once_and_a_repeat_publishes_nothing() {
+    use crate::agent::registry_handle::AgentRegistryHandle;
+    use crate::agent::status_cache::AgentStatusCache;
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path().to_path_buf()).unwrap();
+    let statuses = AgentStatusCache::default();
+    let mut gateway = gateway_with_project_store_and_listing(
+        store.clone(),
+        Arc::new(RecordingCatalogRefresh::default()),
+    );
+    gateway.snapshots = SnapshotBuilder::with_sources(
+        "server-1".into(),
+        "root-1".into(),
+        SnapshotSources::new(
+            Arc::new(store.clone()),
+            Arc::new(AgentRegistrySnapshotSource::with_status_cache(
+                AgentRegistryHandle::new(crate::agent::registry::AgentRegistry::default_built_ins()),
+                statuses.clone(),
+            )),
+            Arc::new(ProjectCollectionStore::new_with_configured_roots(
+                store.clone(),
+                crate::projects::ConfiguredProjectRoots::default(),
+            )),
+            Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
+            Arc::new(SettingsCatalog::default()),
+            Arc::new(TaskSnapshotStore::new(store)),
+        ),
+    );
     let connection_id = ConnectionId::new("conn-1");
     initialize(&mut gateway, connection_id.clone());
-    response_value(gateway.handle_inbound(
-        connection_id.clone(),
-        request(
-            "2",
-            STATE_SUBSCRIBE,
-            StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_version: None,
-            },
-        ),
-        AppServerTime(2),
-    ));
+    gateway.drain_sync_for_connection(&connection_id);
 
-    let published = gateway.publish_background_agent_status_update(AppServerTime(3));
-    assert!(!published.is_empty());
-    let queued = gateway.drain_event_deliveries_for_connection(&connection_id);
+    statuses.begin_installation("codex");
+    gateway.publish_background_agent_status_update();
+    gateway.publish_background_agent_status_update();
+    let queued = gateway.drain_sync_for_connection(&connection_id);
 
-    assert_eq!(
-        queued,
-        published
-            .into_iter()
-            .map(|delivery| delivery.event)
-            .collect::<Vec<_>>()
-    );
+    let [changes] = queued.as_slice() else {
+        panic!("expected exactly one sync for one status change, got {queued:?}");
+    };
+    assert!(changes.agents.is_some());
+    assert!(changes.projects.is_none() && changes.settings.is_none());
 }
 
 #[test]
@@ -1946,8 +1881,9 @@ fn error_envelope_preserves_client_request_meta_and_invalid_params_details() {
 fn initialize_after_event_uses_state_stream_cursor() {
     let mut gateway = gateway();
     gateway.state_stream.publish_committed(
-        EventScope::StateRoot {
+        EventScope::Task {
             state_root_id: StateRootId::from("root-1"),
+            task_id: TaskId::from("task-1"),
         },
         empty_navigation_frame(),
         |_| None,

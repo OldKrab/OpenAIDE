@@ -1,6 +1,5 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ProjectId, WorktreeRepositoryId};
 use openaide_app_server_protocol::worktree::{
     WorktreeBaseSelection, WorktreeCreateParams, WorktreeCreateResult, WorktreeLinkedTasksParams,
@@ -13,11 +12,12 @@ use openaide_app_server_protocol::worktree::{
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::client_lifecycle::ConnectionId;
+use crate::global_state::GlobalAreas;
 use crate::protocol::errors::RuntimeError;
 use crate::worktrees::{CreateWorktree, RecreateWorktree, WorktreeBase};
 
-use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
+use super::{responses, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
     pub(super) fn handle_worktree_refresh(
@@ -26,7 +26,6 @@ impl RpcGateway {
         id: String,
         value: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match parse::<WorktreeRefreshParams>(value) {
             Ok(params) => params,
@@ -40,22 +39,20 @@ impl RpcGateway {
         };
         match self.worktrees.refresh_project(&root) {
             Ok(Some(result)) if result.repository.repository_id == params.repository_id => {
-                let mut events =
-                    self.publish_worktree_repository_update(result.repository.clone(), now);
                 // Refresh is also the recovery boundary for a configured Project whose linked
                 // root was removed or recreated, so its availability projection must move too.
-                events.extend(
-                    self.publish_project_collection_update(now)
-                        .unwrap_or_default(),
+                // One notification carries both, and none when neither changed.
+                self.publish_global_state_with(
+                    GlobalAreas::PROJECTS,
+                    Some(result.repository.clone()),
                 );
-                responses::result_with_events(
+                self.result(
                     connection_id,
                     id,
                     meta,
                     WorktreeRefreshResult {
                         repository: result.repository,
                     },
-                    events,
                 )
             }
             Ok(_) => self.error(
@@ -74,7 +71,6 @@ impl RpcGateway {
         id: String,
         value: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match parse::<WorktreeCreateParams>(value) {
             Ok(params) => params,
@@ -95,9 +91,8 @@ impl RpcGateway {
         };
         match self.worktrees.start_create(request) {
             Ok(started) => {
-                let events =
-                    self.publish_worktree_repository_update(started.repository.clone(), now);
-                responses::result_with_events(
+                self.publish_worktree_repository(started.repository.clone());
+                self.result(
                     connection_id,
                     id,
                     meta,
@@ -105,7 +100,6 @@ impl RpcGateway {
                         operation_id: started.operation_id,
                         repository: started.repository,
                     },
-                    events,
                 )
             }
             Err(error) => self.error(connection_id, id, meta, protocol_error(error)),
@@ -118,7 +112,6 @@ impl RpcGateway {
         id: String,
         value: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match parse::<WorktreeRecreateParams>(value) {
             Ok(params) => params,
@@ -139,9 +132,8 @@ impl RpcGateway {
         };
         match self.worktrees.start_recreate(request) {
             Ok(started) => {
-                let events =
-                    self.publish_worktree_repository_update(started.repository.clone(), now);
-                responses::result_with_events(
+                self.publish_worktree_repository(started.repository.clone());
+                self.result(
                     connection_id,
                     id,
                     meta,
@@ -149,7 +141,6 @@ impl RpcGateway {
                         operation_id: started.operation_id,
                         repository: started.repository,
                     },
-                    events,
                 )
             }
             Err(error) => self.error(connection_id, id, meta, protocol_error(error)),
@@ -187,7 +178,6 @@ impl RpcGateway {
         id: String,
         value: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match parse::<WorktreeRemoveParams>(value) {
             Ok(params) => params,
@@ -198,9 +188,8 @@ impl RpcGateway {
             .start_remove(params.repository_id, params.worktree_id)
         {
             Ok(started) => {
-                let events =
-                    self.publish_worktree_repository_update(started.repository.clone(), now);
-                responses::result_with_events(
+                self.publish_worktree_repository(started.repository.clone());
+                self.result(
                     connection_id,
                     id,
                     meta,
@@ -208,7 +197,6 @@ impl RpcGateway {
                         operation_id: started.operation_id,
                         repository: started.repository,
                     },
-                    events,
                 )
             }
             Err(error) => self.error(connection_id, id, meta, protocol_error(error)),
@@ -246,7 +234,6 @@ impl RpcGateway {
         id: String,
         value: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match parse::<WorktreeRenameParams>(value) {
             Ok(params) => params,
@@ -257,14 +244,8 @@ impl RpcGateway {
             .rename(&params.repository_id, &params.worktree_id, &params.name)
         {
             Ok(repository) => {
-                let events = self.publish_worktree_repository_update(repository.clone(), now);
-                responses::result_with_events(
-                    connection_id,
-                    id,
-                    meta,
-                    WorktreeRenameResult { repository },
-                    events,
-                )
+                self.publish_worktree_repository(repository.clone());
+                self.result(connection_id, id, meta, WorktreeRenameResult { repository })
             }
             Err(error) => self.error(connection_id, id, meta, protocol_error(error)),
         }
@@ -297,36 +278,11 @@ impl RpcGateway {
         }
     }
 
-    pub(crate) fn publish_worktree_repository_update(
-        &mut self,
-        repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let repository_id = repository.repository_id.clone();
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::StateRoot {
-                state_root_id: self.state_stream.state_root_id().clone(),
-            },
-            AppServerEventPayload::WorktreeRepositoryUpdated {
-                repository_id,
-                repository,
-            },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ))
-    }
-
     pub(crate) fn publish_background_worktree_repository_update(
         &mut self,
         repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let events = self.publish_worktree_repository_update(repository, now);
-        // No request carries a background publication, so it joins the outbox directly; the
-        // returned copy lets callers inspect what was published.
-        self.outbox.push_events(events.clone());
-        events
+    ) {
+        self.publish_worktree_repository(repository);
     }
 
     /// Resolves Current HEAD relative to the selected Project, which may itself be a linked

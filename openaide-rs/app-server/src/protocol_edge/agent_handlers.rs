@@ -9,8 +9,6 @@ use openaide_app_server_protocol::agent::{
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
 use openaide_app_server_protocol::envelopes::RequestMeta;
-use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::snapshot::AgentCollectionSnapshot;
 use openaide_app_server_protocol::task::{
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionForkParams,
     NativeSessionForkResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
@@ -22,11 +20,12 @@ use std::time::Instant;
 
 use crate::agent::product_api::AgentAuthenticateWorkflow;
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::global_state::GlobalAreas;
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, AGENT_LOGOUT};
 use std::sync::Arc;
 
-use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
+use super::{responses, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
     pub(super) fn handle_native_session_set_title(
@@ -208,7 +207,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentProbeParams>(params) {
             Ok(params) => params,
@@ -220,8 +218,8 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentProbeResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentProbeResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_list_sessions(
@@ -264,7 +262,6 @@ impl RpcGateway {
                 connection_id,
                 id,
                 meta,
-                now,
                 workflow.authenticate(params),
             ),
         }
@@ -326,15 +323,14 @@ impl RpcGateway {
         connection_id: ConnectionId,
         id: String,
         meta: RequestMeta,
-        now: AppServerTime,
         result: Result<AgentAuthenticateResult, ProtocolError>,
     ) -> GatewayOutcome {
         let result = match result {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentAuthenticateResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentAuthenticateResult>(connection_id, id, meta, result)
     }
 
     /// Admission and parse only. ACP logout may wait on the Agent process, so it runs without
@@ -384,15 +380,14 @@ impl RpcGateway {
         connection_id: ConnectionId,
         id: String,
         meta: RequestMeta,
-        now: AppServerTime,
         result: Result<AgentLogoutResult, ProtocolError>,
     ) -> GatewayOutcome {
         let result = match result {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentLogoutResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentLogoutResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_cancel_authenticate(
@@ -401,7 +396,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentCancelAuthenticateParams>(params) {
             Ok(params) => params,
@@ -413,14 +407,8 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentCancelAuthenticateResult>(
-            connection_id,
-            id,
-            meta,
-            result,
-            events,
-        )
+        self.publish_agent_collection_update();
+        self.result::<AgentCancelAuthenticateResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_refresh_account_limits(
@@ -450,7 +438,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentCreateCustomParams>(params) {
             Ok(params) => params,
@@ -462,8 +449,8 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentCreateCustomResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentCreateCustomResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_update_custom_metadata(
@@ -472,7 +459,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentUpdateCustomMetadataParams>(params) {
             Ok(params) => params,
@@ -491,14 +477,8 @@ impl RpcGateway {
                 "agent/updateCustomMetadata",
             );
         }
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentUpdateCustomMetadataResult>(
-            connection_id,
-            id,
-            meta,
-            result,
-            events,
-        )
+        self.publish_agent_collection_update();
+        self.result::<AgentUpdateCustomMetadataResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_replace_custom(
@@ -507,7 +487,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentReplaceCustomParams>(params) {
             Ok(params) => params,
@@ -524,8 +503,8 @@ impl RpcGateway {
             replaced_agent_id.as_str(),
             "agent/replaceCustom",
         );
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentReplaceCustomResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentReplaceCustomResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_delete_custom(
@@ -534,7 +513,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentDeleteCustomParams>(params) {
             Ok(params) => params,
@@ -551,8 +529,8 @@ impl RpcGateway {
             deleted_agent_id.as_str(),
             "agent/deleteCustom",
         );
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentDeleteCustomResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentDeleteCustomResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_set_enabled(
@@ -561,7 +539,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentSetEnabledParams>(params) {
             Ok(params) => params,
@@ -577,8 +554,8 @@ impl RpcGateway {
         if let Some(agent_id) = disabled_agent_id {
             self.dispose_prepared_tasks_after_agent_mutation(agent_id.as_str(), "agent/setEnabled");
         }
-        let events = self.publish_agent_collection_update(result.agents.clone(), now);
-        self.result_with_events::<AgentSetEnabledResult>(connection_id, id, meta, result, events)
+        self.publish_agent_collection_update();
+        self.result::<AgentSetEnabledResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_settings_get_agent_details(
@@ -601,83 +578,52 @@ impl RpcGateway {
         self.result::<AgentSettingsDetailsResult>(connection_id, id, meta, result)
     }
 
-    fn publish_agent_collection_update(
-        &mut self,
-        agents: AgentCollectionSnapshot,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let client_hub = self.client_hub.clone();
-        let events = event_deliveries(self.state_stream.publish_committed(
-            EventScope::StateRoot {
-                state_root_id: self.state_stream.state_root_id().clone(),
-            },
-            AppServerEventPayload::AgentCollectionUpdated { agents },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ));
-        // Agent changes alter membership (enabled Agents) and recovery state of every Project.
-        self.navigation.mark_all();
-        events
+    fn publish_agent_collection_update(&mut self) {
+        self.publish_global_state(GlobalAreas::AGENTS);
     }
 
-    pub(crate) fn publish_background_agent_status_update(
-        &mut self,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let events = match self.snapshots.agent_collection_snapshot() {
-            Ok(agents) => {
-                use openaide_app_server_protocol::snapshot::AgentStatus;
-                let ready_agents: std::collections::HashSet<_> = agents
-                    .agents
-                    .iter()
-                    .filter(|agent| {
-                        matches!(
-                            agent.status,
-                            AgentStatus::Launching | AgentStatus::Connected
-                        )
-                    })
-                    .map(|agent| agent.agent_id.clone())
-                    .collect();
-                // Only newly usable Agents need discovery. Installing/setup-failed
-                // notifications must not feed back into provisioning, and repeated
-                // Ready notifications must not restart the same catalog refresh.
-                if ready_agents
-                    .difference(&self.ready_catalog_agents)
-                    .next()
-                    .is_some()
-                {
-                    self.agent_list_sessions
-                        .request_native_session_catalog_refresh(
-                            crate::tasks::product_api::NativeCatalogRefreshRequester::AgentsReady,
-                        );
-                }
-                self.ready_catalog_agents = ready_agents;
-                let installing_agent_count = agents
-                    .agents
-                    .iter()
-                    .filter(|agent| {
-                        agent.status
-                            == openaide_app_server_protocol::snapshot::AgentStatus::Installing
-                    })
-                    .count();
-                let events = self.publish_agent_collection_update(agents, now);
-                if installing_agent_count > 0 {
-                    crate::logging::info(
-                        "agent_installation_status_published",
-                        serde_json::json!({
-                            "installing_agent_count": installing_agent_count,
-                            "event_count": events.len(),
-                        }),
-                    );
-                }
-                events
-            }
-            Err(_) => Vec::new(),
+    pub(crate) fn publish_background_agent_status_update(&mut self) {
+        let Ok(agents) = self.snapshots.agent_collection_snapshot() else {
+            return;
         };
-        // No request carries a background publication, so it joins the outbox directly; the
-        // returned copy lets callers inspect what was published.
-        self.outbox.push_events(events.clone());
-        events
+        use openaide_app_server_protocol::snapshot::AgentStatus;
+        let ready_agents: std::collections::HashSet<_> = agents
+            .agents
+            .iter()
+            .filter(|agent| {
+                matches!(
+                    agent.status,
+                    AgentStatus::Launching | AgentStatus::Connected
+                )
+            })
+            .map(|agent| agent.agent_id.clone())
+            .collect();
+        // Only newly usable Agents need discovery. Installing/setup-failed
+        // notifications must not feed back into provisioning, and repeated
+        // Ready notifications must not restart the same catalog refresh.
+        if ready_agents
+            .difference(&self.ready_catalog_agents)
+            .next()
+            .is_some()
+        {
+            self.agent_list_sessions
+                .request_native_session_catalog_refresh(
+                    crate::tasks::product_api::NativeCatalogRefreshRequester::AgentsReady,
+                );
+        }
+        self.ready_catalog_agents = ready_agents;
+        let installing_agent_count = agents
+            .agents
+            .iter()
+            .filter(|agent| agent.status == AgentStatus::Installing)
+            .count();
+        self.publish_agent_collection_update();
+        if installing_agent_count > 0 {
+            crate::logging::info(
+                "agent_installation_status_published",
+                serde_json::json!({ "installing_agent_count": installing_agent_count }),
+            );
+        }
     }
 
     fn dispose_prepared_tasks_after_agent_mutation(&self, agent_id: &str, operation: &str) {

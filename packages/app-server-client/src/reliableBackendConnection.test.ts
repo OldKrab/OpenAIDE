@@ -461,8 +461,8 @@ describe("ReliableBackendConnection", () => {
     });
     const projects = vi.fn();
     const agents = vi.fn();
-    connection.subscribeState({ kind: "projects" }, { onSnapshot: projects });
-    connection.subscribeState({ kind: "agents" }, { onSnapshot: agents });
+    connection.subscribeState({ kind: "subagentCatalog", taskId: "projects" as never }, { onSnapshot: projects });
+    connection.subscribeState({ kind: "subagentCatalog", taskId: "agents" as never }, { onSnapshot: agents });
     await vi.waitFor(() => expect(projects).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(agents).toHaveBeenCalledOnce());
     transport.holdNextSubscription("agents");
@@ -535,7 +535,7 @@ describe("ReliableBackendConnection", () => {
         requestedSurface: { kind: "home" },
         capabilities: { protocol: [], shell: [] },
       });
-      connection.subscribeState({ kind: "projects" }, { onSnapshot: snapshots });
+      connection.subscribeState({ kind: "subagentCatalog", taskId: "projects" as never }, { onSnapshot: snapshots });
       await vi.waitFor(() => expect(snapshots).toHaveBeenCalledOnce());
       transport.restartServer();
       transport.holdNextSubscription("projects");
@@ -708,7 +708,7 @@ describe("ReliableBackendConnection", () => {
       requestedSurface: { kind: "home" },
       capabilities: { protocol: [], shell: [] },
     });
-    connection.subscribeState({ kind: "projects" }, { onSnapshot: projectSnapshots });
+    connection.subscribeState({ kind: "subagentCatalog", taskId: "projects" as never }, { onSnapshot: projectSnapshots });
     await vi.waitFor(() => expect(projectSnapshots).toHaveBeenCalledOnce());
 
     replaceEndpoint?.({
@@ -977,9 +977,9 @@ function createExpiringSessionTransport(
         return response(204, "");
       }
       if (message.method === STATE_SUBSCRIBE) {
-        const scope = (message.params as { scope: { kind: "agents" | "projects" } }).scope;
-        subscriptions.push(`${sessionId}:${scope.kind}`);
-        if (sessionId === "session-2" && heldSubscriptionKind === scope.kind) {
+        const scope = (message.params as { scope: { kind: "subagentCatalog"; taskId: "agents" | "projects" } }).scope;
+        subscriptions.push(`${sessionId}:${scope.taskId}`);
+        if (sessionId === "session-2" && heldSubscriptionKind === scope.taskId) {
           heldSubscriptionKind = undefined;
           heldSubscription = { id: message.id, sessionId, scope };
           return response(204, "");
@@ -1069,15 +1069,13 @@ function createExpiringSessionTransport(
   function enqueueSubscription(
     sessionId: string,
     id: string | number,
-    scope: { kind: "agents" | "projects" },
+    scope: { kind: "subagentCatalog"; taskId: "agents" | "projects" },
   ) {
     enqueue(sessionId, {
       jsonrpc: "2.0",
       id,
       result: {
-        result: scope.kind === "projects"
-          ? { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "projects", projects: { projects: [] } } }
-          : { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "agents", agents: { agents: [] } } },
+        result: { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "subagentCatalog", catalog: {} } },
       },
     });
   }

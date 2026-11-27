@@ -263,6 +263,7 @@ fn assert_reply_precedes_events(
                 OutboundMessage::Reply { id, .. } => format!("reply:{}", id.as_str().unwrap()),
                 OutboundMessage::Event(_) => "event".to_string(),
                 OutboundMessage::ServerRequest(_) => "server-request".to_string(),
+                OutboundMessage::Sync(_) => "sync".to_string(),
             })
             .collect::<Vec<_>>()
     });

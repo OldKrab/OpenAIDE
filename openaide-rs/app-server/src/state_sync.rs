@@ -269,39 +269,15 @@ fn event_matches_subscription(
     subscription: &SubscriptionRecord,
     state_root_id: &StateRootId,
 ) -> bool {
-    if matches!(
-        payload,
-        AppServerEventPayload::ProjectCollectionUpdated { .. }
-    ) {
-        return event_scope_state_root_matches(event_scope, state_root_id)
-            && payload_matches_subscription(payload, &subscription.scope);
-    }
-
     let subscription_scope = &subscription.scope;
     let scope_matches = match event_scope {
-        EventScope::StateRoot {
-            state_root_id: event_state_root,
-        } => {
-            event_state_root == state_root_id
-                && !matches!(
-                    subscription_scope,
-                    SubscriptionScope::Task { .. }
-                        | SubscriptionScope::SubagentCatalog { .. }
-                        | SubscriptionScope::SubagentHistory { .. }
-                )
-        }
         EventScope::Client {
             state_root_id: event_state_root,
             client_instance_id,
         } => {
             event_state_root == state_root_id
                 && client_instance_id == &subscription.client_instance_id
-                && !matches!(
-                    subscription_scope,
-                    SubscriptionScope::Task { .. }
-                        | SubscriptionScope::SubagentCatalog { .. }
-                        | SubscriptionScope::SubagentHistory { .. }
-                )
+                && matches!(subscription_scope, SubscriptionScope::TaskNavigation { .. })
         }
         EventScope::Task {
             state_root_id: event_state_root,
@@ -321,60 +297,18 @@ fn event_matches_subscription(
     scope_matches && payload_matches_subscription(payload, subscription_scope)
 }
 
-fn event_scope_state_root_matches(event_scope: &EventScope, state_root_id: &StateRootId) -> bool {
-    match event_scope {
-        EventScope::StateRoot {
-            state_root_id: event_state_root,
-        }
-        | EventScope::Client {
-            state_root_id: event_state_root,
-            ..
-        }
-        | EventScope::Task {
-            state_root_id: event_state_root,
-            ..
-        } => event_state_root == state_root_id,
-    }
-}
-
 fn payload_matches_subscription(
     payload: &AppServerEventPayload,
     subscription_scope: &SubscriptionScope,
 ) -> bool {
     match subscription_scope {
-        SubscriptionScope::Projects => matches!(
-            payload,
-            AppServerEventPayload::SnapshotReplaced { .. }
-                | AppServerEventPayload::ProjectCollectionUpdated { .. }
-        ),
-        SubscriptionScope::Agents => {
-            matches!(
-                payload,
-                AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::AgentCollectionUpdated { .. }
-            )
-        }
-        SubscriptionScope::Settings { .. } => {
-            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
-        }
-        SubscriptionScope::Devices => matches!(
-            payload,
-            AppServerEventPayload::SnapshotReplaced { .. }
-                | AppServerEventPayload::DeviceCollectionUpdated { .. }
-        ),
-        SubscriptionScope::Terminals => matches!(
-            payload,
-            AppServerEventPayload::TerminalCollectionUpdated { .. }
-                | AppServerEventPayload::SnapshotReplaced { .. }
-        ),
         SubscriptionScope::TaskNavigation { section } => matches!(
             payload,
             AppServerEventPayload::NavigationFrame { frame } if frame.section == *section
         ),
         SubscriptionScope::Task { .. } => matches!(
             payload,
-            AppServerEventPayload::SnapshotReplaced { .. }
-                | AppServerEventPayload::TaskChanged { .. }
+            AppServerEventPayload::TaskChanged { .. }
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::TaskRequestsUpdated { .. }
         ),
@@ -411,16 +345,6 @@ fn payload_matches_subscription(
                     ..
                 } if updated_task_id == task_id && updated_artifact_id == artifact_id
             ) || task_content_removed(payload, task_id)
-        }
-        SubscriptionScope::WorktreeRepository { repository_id } => {
-            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
-                || matches!(
-                    payload,
-                    AppServerEventPayload::WorktreeRepositoryUpdated {
-                        repository_id: updated_repository_id,
-                        ..
-                    } if updated_repository_id == repository_id
-                )
         }
     }
 }

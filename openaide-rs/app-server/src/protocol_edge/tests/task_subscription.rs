@@ -88,6 +88,7 @@ fn a_task_subscribe_reply_reaches_the_wire_before_the_tasks_notifications() {
                 OutboundMessage::Reply { id, .. } => format!("reply:{}", id.as_str().unwrap()),
                 OutboundMessage::Event(_) => "event".to_string(),
                 OutboundMessage::ServerRequest(_) => "server-request".to_string(),
+                OutboundMessage::Sync(_) => "sync".to_string(),
             })
             .collect::<Vec<_>>()
     });

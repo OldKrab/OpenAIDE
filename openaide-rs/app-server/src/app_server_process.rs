@@ -196,7 +196,7 @@ fn start_local_http_listener(listener: LocalHttpProbeListener, handler: LocalHtt
 fn publish_terminal_changes(gateway: &SharedRpcGateway) {
     let publisher = gateway.clone();
     gateway.terminals().on_changed(move || {
-        publisher.publish_terminal_collection_update(AppServerTime::now());
+        publisher.publish_terminal_collection_update();
     });
 }
 
@@ -208,7 +208,7 @@ fn start_remote_device_edge(gateway: &SharedRpcGateway, address: SocketAddr, aut
     };
     let publisher = gateway.clone();
     devices.on_changed(move || {
-        publisher.publish_device_collection_update(AppServerTime::now());
+        publisher.publish_device_collection_update();
     });
     crate::remote_devices::edge::start(devices, address, auth_token);
 }

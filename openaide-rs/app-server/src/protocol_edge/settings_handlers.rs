@@ -13,6 +13,7 @@ use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use serde_json::Value;
 
 use crate::client_lifecycle::ConnectionId;
+use crate::global_state::GlobalAreas;
 
 use super::{responses, GatewayOutcome, RpcGateway};
 
@@ -256,6 +257,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::SETTINGS);
         self.result::<AppPreferencesResult>(connection_id, id, meta, result)
     }
 
@@ -276,6 +278,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::NEW_TASK_DEFAULTS);
         self.result::<NewTaskDefaultsSnapshot>(connection_id, id, meta, result)
     }
 
@@ -313,6 +316,7 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        self.publish_global_state(GlobalAreas::SETTINGS);
         self.result::<RuntimeSettingsResult>(connection_id, id, meta, result)
     }
 }

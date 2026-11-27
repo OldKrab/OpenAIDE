@@ -149,6 +149,7 @@ fn drain_order(setup: &Setup) -> Vec<String> {
                         _ => "event".to_string(),
                     },
                     OutboundMessage::ServerRequest(_) => "server-request".to_string(),
+                    OutboundMessage::Sync(_) => "sync".to_string(),
                 })
                 .collect()
         })

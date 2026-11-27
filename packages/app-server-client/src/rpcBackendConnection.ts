@@ -4,6 +4,7 @@ import type {
   BackendGenerationInvalidation,
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
+  BackendSyncListener,
   BackendUnsubscribe,
 } from "./backendConnection.js";
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
@@ -22,6 +23,7 @@ import {
   type ServerRequestMethod,
   type ServerRequestParamsByMethod,
   type ServerRequestResponseResultByMethod,
+  type SyncNotification,
 } from "./generated/protocol.js";
 import { AppServerProtocolError, errorEnvelopeFromUnknown } from "./protocolError.js";
 import {
@@ -49,6 +51,7 @@ type ServerRequests = RpcRequestMap & {
 
 type ServerNotifications = RpcNotificationMap & {
   "app/event": { params: AppServerEvent };
+  sync: { params: SyncNotification };
 };
 
 export type ReliableBackendConnectionOptions = {
@@ -92,6 +95,7 @@ export function createInternalReliableBackendConnection(
     ServerNotifications
   >(options.channel);
   const eventListeners = new Set<BackendEventListener>();
+  const syncListeners = new Set<BackendSyncListener>();
   const generationInvalidationListeners = new Set<
     (event: BackendGenerationInvalidation) => void
   >();
@@ -112,6 +116,9 @@ export function createInternalReliableBackendConnection(
   // projections of that notification stream and therefore need local multicast.
   peer.handleNotification("app/event", (event) => {
     notifyListeners(eventListeners, event, logger, "app_event");
+  });
+  peer.handleNotification("sync", (notification) => {
+    notifyListeners(syncListeners, notification.changes, logger, "sync");
   });
 
   const connection: BackendConnection = {
@@ -141,9 +148,10 @@ export function createInternalReliableBackendConnection(
         signal: context.signal,
       })) as BackendUnsubscribe;
     },
-    handleNotification(_method, handler) {
-      eventListeners.add(handler);
-      return () => eventListeners.delete(handler);
+    handleNotification(method: "app/event" | "sync", handler: BackendEventListener | BackendSyncListener) {
+      const listeners = (method === "sync" ? syncListeners : eventListeners) as Set<typeof handler>;
+      listeners.add(handler);
+      return () => listeners.delete(handler);
     },
     handleGenerationInvalidated(handler) {
       generationInvalidationListeners.add(handler);
@@ -165,6 +173,7 @@ export function createInternalReliableBackendConnection(
       peer.close();
       options.channel.close?.();
       eventListeners.clear();
+      syncListeners.clear();
       generationInvalidationListeners.clear();
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();

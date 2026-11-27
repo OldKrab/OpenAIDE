@@ -240,12 +240,12 @@ fn app_server_handoff_initializes_new_task_screen_with_renderable_project_and_ag
 
     assert_eq!(snapshot["client"]["surface"]["kind"], "newTask");
     assert_eq!(snapshot["client"]["surface"]["projectId"], project_id);
-    assert!(snapshot["projects"]["projects"]
+    assert!(snapshot["global"]["projects"]["projects"]
         .as_array()
         .expect("projects")
         .iter()
         .any(|project| project["projectId"] == project_id));
-    assert!(snapshot["agents"]["agents"]
+    assert!(snapshot["global"]["agents"]["agents"]
         .as_array()
         .expect("agents")
         .iter()
@@ -287,7 +287,7 @@ fn app_server_handoff_registers_vscode_workspace_project_without_task_history() 
     );
 
     let snapshot = &initialized[0]["result"]["result"]["snapshot"];
-    assert!(snapshot["projects"]["projects"]
+    assert!(snapshot["global"]["projects"]["projects"]
         .as_array()
         .expect("project collection")
         .iter()
@@ -687,7 +687,7 @@ fn ensure_process_test_agent(
     connection_id: &str,
     initialized: &Value,
 ) {
-    let agents = initialized[0]["result"]["result"]["snapshot"]["agents"]["agents"]
+    let agents = initialized[0]["result"]["result"]["snapshot"]["global"]["agents"]["agents"]
         .as_array()
         .expect("initialized Agent collection");
     if agents
@@ -723,7 +723,11 @@ fn ensure_process_test_agent(
         }),
     );
     assert!(
-        created[0]["result"]["result"].is_object(),
+        // The published Agent change precedes the reply on the wire.
+        created
+            .as_array()
+            .and_then(|messages| messages.iter().find(|message| message["id"] == "create-process-test-agent"))
+            .is_some_and(|reply| reply["result"]["result"].is_object()),
         "failed to create deterministic ACP process test Agent: {created:#?}"
     );
 }
@@ -760,7 +764,12 @@ fn post_local_http_json(
 ) -> Value {
     let request = request.to_string();
     let response = local_http_post(endpoint_url, auth_token, connection_id, &request);
-    serde_json::from_str(&response).expect("local http json response")
+    let mut messages: Value = serde_json::from_str(&response).expect("local http json response");
+    // `sync` notifications ride the same connection as replies; these tests read replies only.
+    if let Some(list) = messages.as_array_mut() {
+        list.retain(|message| message["method"] != "sync");
+    }
+    messages
 }
 
 fn open_task(endpoint_url: &str, auth_token: &str, connection_id: &str, task_id: &str) {
@@ -873,7 +882,7 @@ fn wait_until_task_send_ready(
 }
 
 fn first_project_id(initialize_response: &Value) -> String {
-    initialize_response[0]["result"]["result"]["snapshot"]["projects"]["projects"][0]["projectId"]
+    initialize_response[0]["result"]["result"]["snapshot"]["global"]["projects"]["projects"][0]["projectId"]
         .as_str()
         .expect("first project id")
         .to_string()

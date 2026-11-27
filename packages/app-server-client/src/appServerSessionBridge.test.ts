@@ -7,6 +7,18 @@ import {
 import { SECRET_READ, type ClientInstanceId } from "./generated/protocol";
 
 describe("bridged App Server session", () => {
+  it("delivers sync changes from the host to view listeners", () => {
+    const bridge = bridgePort();
+    const session = createBridgedAppServerSession(bridge.port);
+    const listener = vi.fn();
+    session.handleNotification("sync", listener);
+    const changes = { devices: { remoteAccess: "on" as const, serverName: "workstation" } };
+
+    bridge.receive({ type: "appServer.session.sync", changes });
+
+    expect(listener).toHaveBeenCalledWith(changes);
+  });
+
   it("preserves request, subscription, and reverse-request semantics across the shell bridge", async () => {
     const bridge = bridgePort();
     const session = createBridgedAppServerSession(bridge.port);

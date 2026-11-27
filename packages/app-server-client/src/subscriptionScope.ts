@@ -19,13 +19,6 @@ export type SubscriptionEventMatch =
 
 export function subscriptionScopesEqual(left: SubscriptionScope, right: SubscriptionScope): boolean {
   switch (left.kind) {
-    case "projects":
-    case "agents":
-    case "devices":
-    case "terminals":
-      return right.kind === left.kind;
-    case "settings":
-      return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
     case "taskNavigation":
       return right.kind === "taskNavigation" && left.section === right.section;
     case "task":
@@ -40,8 +33,6 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
       return right.kind === "toolDetail"
         && left.taskId === right.taskId
         && left.artifactId === right.artifactId;
-    case "worktreeRepository":
-      return right.kind === "worktreeRepository" && left.repositoryId === right.repositoryId;
   }
 }
 
@@ -79,7 +70,6 @@ function eventScopeMatchesSubscriptionScope(
       : { kind: "subscriptionMismatch" };
   }
 
-  if (eventScope.kind === "stateRoot") return { kind: "match" };
   if (eventScope.kind !== "client") return { kind: "subscriptionMismatch" };
 
   if (context.clientInstanceId === undefined) return { kind: "streamScopeMismatch" };
@@ -93,21 +83,10 @@ function eventScopeMatchesSubscriptionScope(
 
 function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppServerEventPayload): boolean {
   switch (scope.kind) {
-    case "projects":
-      return payload.kind === "snapshotReplaced" || payload.kind === "projectCollectionUpdated";
-    case "agents":
-      return payload.kind === "snapshotReplaced" || payload.kind === "agentCollectionUpdated";
-    case "devices":
-      return payload.kind === "snapshotReplaced" || payload.kind === "deviceCollectionUpdated";
-    case "terminals":
-      return payload.kind === "snapshotReplaced" || payload.kind === "terminalCollectionUpdated";
-    case "settings":
-      return payload.kind === "snapshotReplaced";
     case "taskNavigation":
       return payload.kind === "navigationFrame" && payload.frame.section === scope.section;
     case "task":
       return (
-        payload.kind === "snapshotReplaced" ||
         payload.kind === "taskChanged" ||
         payload.kind === "taskHistorySyncUpdated" ||
         payload.kind === "taskRequestsUpdated"
@@ -128,16 +107,9 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         && payload.taskId === scope.taskId
         && payload.artifactId === scope.artifactId
       ) || taskContentRemoved(payload, scope.taskId);
-    case "worktreeRepository":
-      return payload.kind === "worktreeRepositoryUpdated"
-        && payload.repositoryId === scope.repositoryId;
   }
 }
 
 function taskContentRemoved(payload: AppServerEventPayload, taskId: string): boolean {
   return payload.kind === "taskContentRemoved" && payload.taskId === taskId;
-}
-
-function normalizeOptional(value: string | null | undefined): string | undefined {
-  return value ?? undefined;
 }

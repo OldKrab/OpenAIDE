@@ -23,153 +23,64 @@ use crate::settings::SettingsCatalog;
 use crate::storage_runtime::CursorSequencer;
 
 #[test]
-fn client_snapshot_includes_backend_owned_agent_collection() {
-    let builder = builder();
+fn global_state_includes_backend_owned_agent_collection() {
+    let global = builder().read_global_state().unwrap();
 
-    let snapshot = builder
-        .client_snapshot(
-            &ctx(),
-            RequestedSurface::Home,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap();
-
-    let agents = snapshot.agents.unwrap();
     assert_eq!(
-        agents
+        global
+            .agents
             .agents
             .iter()
             .map(|agent| agent.agent_id.as_str())
             .collect::<Vec<_>>(),
         vec!["codex", "claude-code", "opencode"]
     );
-    assert!(agents
+    assert!(global
+        .agents
         .agents
         .iter()
         .all(|agent| agent.status == AgentStatus::Disconnected));
+    assert_eq!(
+        global.agents.agents[0].agent_id,
+        AgentId::from(CODEX_AGENT_ID)
+    );
 }
 
 #[test]
-fn client_snapshot_includes_backend_owned_project_collection() {
-    let snapshot = builder()
-        .client_snapshot(
-            &ctx(),
-            RequestedSurface::Home,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap();
+fn global_state_includes_backend_owned_project_collection() {
+    let global = builder().read_global_state().unwrap();
 
-    let projects = snapshot.projects.unwrap();
-    assert_eq!(projects.projects[0].project_id.as_str(), "project-1");
-    assert_eq!(projects.projects[0].label, "Project");
+    assert_eq!(global.projects.projects[0].project_id.as_str(), "project-1");
+    assert_eq!(global.projects.projects[0].label, "Project");
 }
 
 #[test]
-fn client_snapshot_keeps_new_task_defaults_separate_from_collections() {
-    let snapshot = builder()
-        .client_snapshot(
-            &ctx(),
-            RequestedSurface::Home,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap();
+fn global_state_keeps_new_task_defaults_separate_from_collections() {
+    let global = builder().read_global_state().unwrap();
 
     assert_eq!(
-        snapshot.new_task_defaults.project_id,
+        global.new_task_defaults.project_id,
         Some("project-1".into())
     );
-    assert_eq!(snapshot.new_task_defaults.agent_id, Some("codex".into()));
+    assert_eq!(global.new_task_defaults.agent_id, Some("codex".into()));
 }
 
 #[test]
-fn agent_subscription_uses_backend_owned_agent_collection() {
-    let SubscriptionSnapshot::Agents { agents } = builder()
-        .snapshot(
-            &ctx(),
-            &SubscriptionScope::Agents,
-            None,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap()
-    else {
-        panic!("expected agents snapshot");
-    };
-
-    assert_eq!(agents.agents[0].agent_id, AgentId::from(CODEX_AGENT_ID));
-}
-
-#[test]
-fn project_subscription_uses_backend_owned_project_collection() {
-    let SubscriptionSnapshot::Projects { projects } = builder()
-        .snapshot(
-            &ctx(),
-            &SubscriptionScope::Projects,
-            None,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap()
-    else {
-        panic!("expected projects snapshot");
-    };
-
-    assert_eq!(projects.projects[0].project_id.as_str(), "project-1");
-    assert_eq!(projects.projects[0].label, "Project");
-}
-
-#[test]
-fn worktree_subscription_uses_repository_scoped_inventory() {
+fn global_state_reads_repository_scoped_inventory_for_projects_that_use_one() {
     let repository_id = WorktreeRepositoryId::from("repository-1");
-    let SubscriptionSnapshot::WorktreeRepository { repository } = builder()
-        .snapshot(
-            &ctx(),
-            &SubscriptionScope::WorktreeRepository {
-                repository_id: repository_id.clone(),
-            },
-            None,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap()
-    else {
-        panic!("expected worktree repository snapshot");
-    };
+    let repository = builder().worktree_repository(&repository_id).unwrap();
 
     assert_eq!(repository.repository_id, repository_id);
 }
 
 #[test]
-fn client_snapshot_includes_backend_owned_settings_collection() {
-    let snapshot = builder()
-        .client_snapshot(
-            &ctx(),
-            RequestedSurface::Home,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap();
+fn global_state_includes_backend_owned_settings_collection() {
+    let global = builder().read_global_state().unwrap();
 
-    let settings = snapshot.settings.unwrap();
     assert_eq!(
-        settings.sections,
+        global.settings.sections,
         vec![SettingsSection::Agents, SettingsSection::CommonSettings]
     );
-}
-
-#[test]
-fn settings_subscription_uses_backend_owned_settings_collection() {
-    let SubscriptionSnapshot::Settings { settings } = builder()
-        .snapshot(
-            &ctx(),
-            &SubscriptionScope::Settings {
-                section: Some(SettingsSection::Agents),
-            },
-            None,
-            &CursorSequencer::new().read_token(),
-        )
-        .unwrap()
-    else {
-        panic!("expected settings snapshot");
-    };
-
-    assert_eq!(settings.sections, vec![SettingsSection::Agents]);
 }
 
 #[test]
@@ -180,6 +91,7 @@ fn client_snapshot_includes_requested_task_for_task_surface() {
             RequestedSurface::Task {
                 task_id: TaskId::from("task-1"),
             },
+            global(),
             &CursorSequencer::new().read_token(),
         )
         .unwrap();
@@ -204,19 +116,16 @@ fn client_snapshot_preserves_global_state_when_requested_task_is_missing() {
             RequestedSurface::Task {
                 task_id: TaskId::from("task-missing"),
             },
+            global(),
             &CursorSequencer::new().read_token(),
         )
         .expect("a missing routed Task must not fail client initialization");
 
     assert!(snapshot.active_task.is_none());
     assert_eq!(
-        snapshot
-            .projects
-            .expect("global Projects remain available")
-            .projects[0]
-            .project_id
-            .as_str(),
-        "project-1"
+        snapshot.global.projects.projects[0].project_id.as_str(),
+        "project-1",
+        "global state stays available when the routed Task is missing"
     );
 }
 
@@ -241,6 +150,10 @@ fn task_subscription_uses_backend_owned_task_snapshot() {
         task.task.title.as_ref().map(|title| title.value.as_str()),
         Some("Stored task")
     );
+}
+
+fn global() -> openaide_app_server_protocol::global_state::GlobalState {
+    builder().read_global_state().unwrap()
 }
 
 fn builder() -> SnapshotBuilder {

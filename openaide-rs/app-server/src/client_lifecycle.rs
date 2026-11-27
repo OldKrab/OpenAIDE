@@ -406,6 +406,14 @@ impl ClientHub {
             .map(|record| record.context.clone())
     }
 
+    /// Every initialized client, in no particular order.
+    pub fn client_contexts(&self) -> Vec<ClientContext> {
+        self.clients
+            .values()
+            .map(|record| record.context.clone())
+            .collect()
+    }
+
     pub fn delivery_for(&self, client_instance_id: &ClientInstanceId) -> Option<Delivery> {
         let context = &self.clients.get(client_instance_id)?.context;
         Some(Delivery::new(

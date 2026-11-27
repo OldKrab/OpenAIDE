@@ -1,16 +1,11 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::client::SettingsSection;
 use crate::events::TaskChatChange;
-use crate::ids::{EventCursor, SubagentId, TaskId, WorktreeRepositoryId};
-use crate::snapshot::{
-    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, SubagentCatalogSnapshot,
-    SubagentHistorySnapshot, TaskSnapshot,
-};
+use crate::ids::{EventCursor, SubagentId, TaskId};
+use crate::snapshot::{SubagentCatalogSnapshot, SubagentHistorySnapshot, TaskSnapshot};
 use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
-use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -53,12 +48,6 @@ pub struct StateUnsubscribeResult {
     rename_all_fields = "camelCase"
 )]
 pub enum SubscriptionScope {
-    Projects,
-    Agents,
-    Settings {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        section: Option<SettingsSection>,
-    },
     TaskNavigation {
         #[serde(default)]
         section: TaskNavigationSection,
@@ -77,13 +66,6 @@ pub enum SubscriptionScope {
         task_id: TaskId,
         artifact_id: String,
     },
-    WorktreeRepository {
-        repository_id: WorktreeRepositoryId,
-    },
-    /// The Remote Devices this App Server trusts. Every client may subscribe.
-    Devices,
-    /// Every open Terminal on this App Server. Every client may subscribe.
-    Terminals,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -96,15 +78,6 @@ pub enum SubscriptionScope {
     rename_all_fields = "camelCase"
 )]
 pub enum SubscriptionSnapshot {
-    Projects {
-        projects: ProjectCollectionSnapshot,
-    },
-    Agents {
-        agents: AgentCollectionSnapshot,
-    },
-    Settings {
-        settings: SettingsSnapshot,
-    },
     /// Every current Task field, with the Chat as `chatSync` says.
     Task {
         /// Complete and current. `task.chat` is the tail page only when `chatSync` is `full`;
@@ -135,15 +108,6 @@ pub enum SubscriptionSnapshot {
         /// `details.revision` is the artifact sequence later notifications follow.
         details: ToolDetailSnapshot,
         terminal_sync: ToolTerminalSync,
-    },
-    WorktreeRepository {
-        repository: WorktreeRepositorySnapshot,
-    },
-    Devices {
-        devices: crate::devices::DeviceCollectionSnapshot,
-    },
-    Terminals {
-        terminals: crate::terminals::TerminalCollectionSnapshot,
     },
 }
 

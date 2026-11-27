@@ -9,8 +9,8 @@ use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_CANCEL_AUTHENTICATE, CLIENT_INITIALIZE,
 };
 use openaide_app_server_protocol::snapshot::{
-    ClientSnapshot, ClientSnapshotScope, ProjectCollectionSnapshot, ProtocolVersion,
-    ServerCapabilities, ServerSnapshot, StateRootSnapshot,
+    ClientSnapshot, ClientSnapshotScope, ProtocolVersion, ServerCapabilities, ServerSnapshot,
+    StateRootSnapshot,
 };
 use serde_json::{json, Value};
 
@@ -932,27 +932,24 @@ fn client_snapshot() -> ClientSnapshot {
             shell_kind: ShellKind::Web,
             surface: RequestedSurface::Home,
         },
-        new_task_defaults: Default::default(),
-        projects: None,
-        agents: None,
+        global: crate::global_state::empty_state_for_tests(),
         active_task: None,
-        settings: None,
-        pending_requests: Vec::new(),
     }
 }
 
 fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
     AppServerEvent {
-        subscription: openaide_app_server_protocol::state::SubscriptionScope::Projects,
+        subscription: openaide_app_server_protocol::state::SubscriptionScope::Task {
+            task_id: "task-1".into(),
+        },
         previous_cursor: previous_cursor.into(),
         cursor: cursor.into(),
-        scope: EventScope::StateRoot {
+        scope: EventScope::Task {
             state_root_id: "root-1".into(),
+            task_id: "task-1".into(),
         },
-        payload: AppServerEventPayload::ProjectCollectionUpdated {
-            projects: ProjectCollectionSnapshot {
-                projects: Vec::new(),
-            },
+        payload: AppServerEventPayload::TaskContentRemoved {
+            task_id: "task-1".into(),
         },
     }
 }

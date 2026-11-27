@@ -272,8 +272,8 @@ describe("app controller mounted lifecycle", () => {
     const request = vi.fn(async (method: string) => { throw new Error(method); });
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
-    initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
-    initializedSnapshot.projects = {
+    initializedSnapshot.global.newTaskDefaults.projectId = "project_1" as never;
+    initializedSnapshot.global.projects = {
       projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
     };
     backendConnection = {
@@ -423,8 +423,8 @@ describe("app controller mounted lifecycle", () => {
     });
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
-    initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
-    initializedSnapshot.projects = {
+    initializedSnapshot.global.newTaskDefaults.projectId = "project_1" as never;
+    initializedSnapshot.global.projects = {
       projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
     };
     backendConnection = {
@@ -947,8 +947,8 @@ describe("app controller mounted lifecycle", () => {
   it("keeps VS Code New Task Project changes client-local until Send", async () => {
     bootstrap = vscodeNewTaskBootstrap("project_1");
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
-    initializedSnapshot.newTaskDefaults.projectId = "project_2" as never;
-    initializedSnapshot.projects = {
+    initializedSnapshot.global.newTaskDefaults.projectId = "project_2" as never;
+    initializedSnapshot.global.projects = {
       projects: [
         { projectId: "project_1" as never, label: "Web", workspaceRoot: "/workspace/web", available: true },
         { projectId: "project_2" as never, label: "API", workspaceRoot: "/workspace/api", available: true },
@@ -990,8 +990,8 @@ describe("app controller mounted lifecycle", () => {
       projectIds: [firstProjectId, defaultProjectId],
     };
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
-    initializedSnapshot.newTaskDefaults.projectId = defaultProjectId as never;
-    initializedSnapshot.projects = {
+    initializedSnapshot.global.newTaskDefaults.projectId = defaultProjectId as never;
+    initializedSnapshot.global.projects = {
       projects: [
         { projectId: firstProjectId as never, label: "First", workspaceRoot: "/workspace/first", available: true },
         { projectId: defaultProjectId as never, label: "Default", workspaceRoot: "/workspace/default", available: true },
@@ -1008,7 +1008,7 @@ describe("app controller mounted lifecycle", () => {
         if (params?.scope?.kind !== "projects") return baseline;
         return {
           ...baseline,
-          snapshot: { kind: "projects" as const, projects: initializedSnapshot.projects },
+          snapshot: { kind: "projects" as const, projects: initializedSnapshot.global.projects },
         };
       }
       if (method === TASK_ACQUIRE) {
@@ -1106,7 +1106,7 @@ describe("app controller mounted lifecycle", () => {
 
   it("adds a Project without a separate discovery request", async () => {
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
-    initializedSnapshot.projects = {
+    initializedSnapshot.global.projects = {
       projects: [{
         projectId: "project_1" as never,
         label: "Existing",
@@ -1453,7 +1453,7 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
       request: request as unknown as BackendConnection["request"],
-      handleNotification: (_method, listener) => { eventListeners.push(listener); return () => undefined; },
+      handleNotification: ((_method: string, listener: unknown) => { eventListeners.push(listener as (event: AppServerEvent) => void); return () => undefined; }) as BackendConnection["handleNotification"],
       close: vi.fn(),
     };
     bootstrap = webTaskBootstrap("task_1");
@@ -1497,10 +1497,10 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initial })),
       request: request as unknown as BackendConnection["request"],
-      handleNotification: (_method, listener) => {
-        eventListeners.push(listener);
+      handleNotification: ((_method: string, listener: unknown) => {
+        eventListeners.push(listener as (event: AppServerEvent) => void);
         return () => undefined;
-      },
+      }) as BackendConnection["handleNotification"],
       close: vi.fn(),
     };
     bootstrap = taskBootstrap("task_1");
@@ -1917,79 +1917,6 @@ describe("app controller mounted lifecycle", () => {
     expect(JSON.stringify(postHostMessage.mock.calls)).not.toContain("NetworkError when attempting to fetch resource.");
   });
 
-  it("keeps active Task mutations available while an unrelated Projects baseline recovers", async () => {
-    const eventListeners: Array<(event: AppServerEvent) => void> = [];
-    const replacementProjects = deferredValue<ReturnType<typeof nonTaskSubscriptionSnapshot>>();
-    let projectSubscriptionAttempts = 0;
-    const request = vi.fn((
-      method: string,
-      params?: { scope?: { kind: string; taskId?: string } },
-    ) => {
-      if (method === TASK_OPEN) return Promise.resolve({});
-      if (method === STATE_UNSUBSCRIBE) return Promise.resolve({ scope: params?.scope });
-      if (isNavigationMethod(method)) return navigationMethodReply(method, undefined);
-      if (method !== STATE_SUBSCRIBE) throw new Error(method);
-      if (params?.scope?.kind === "task") {
-        return Promise.resolve(taskSubscriptionSnapshot("cursor_task"));
-      }
-      if (params?.scope?.kind === "projects") {
-        projectSubscriptionAttempts += 1;
-        if (projectSubscriptionAttempts === 2) return replacementProjects.promise;
-        return Promise.resolve(nonTaskSubscriptionSnapshot(params.scope, "cursor_projects"));
-      }
-      return Promise.resolve(nonTaskSubscriptionSnapshot(params?.scope));
-    });
-    backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
-      request: request as unknown as BackendConnection["request"],
-      handleNotification: (_method, listener) => {
-        eventListeners.push(listener);
-        return () => undefined;
-      },
-      close: vi.fn(),
-    };
-    bootstrap = taskBootstrap("task_1");
-
-    await act(async () => {
-      create(<ControllerProbe />);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(latestController?.backendReady).toBe(true);
-    expect(latestController?.taskMutationReady).toBe(true);
-
-    await act(async () => {
-      const event: AppServerEvent = {
-        subscription: { kind: "projects" },
-        previousCursor: "cursor_missing" as never,
-        cursor: "cursor_projects_gap" as never,
-        scope: { kind: "stateRoot", stateRootId: "state_root_1" as never },
-        payload: {
-          kind: "projectCollectionUpdated",
-          projects: { projects: [] },
-        },
-      };
-      for (const listener of eventListeners) listener(event);
-      await Promise.resolve();
-    });
-
-    expect(projectSubscriptionAttempts).toBe(2);
-    expect(latestController?.backendReady).toBe(false);
-    expect(latestController?.taskMutationReady).toBe(true);
-
-    await act(async () => {
-      replacementProjects.resolve(nonTaskSubscriptionSnapshot(
-        { kind: "projects" },
-        "cursor_projects_recovered",
-      ));
-      await replacementProjects.promise;
-      await Promise.resolve();
-    });
-    expect(latestController?.backendReady).toBe(true);
-    expect(latestController?.taskMutationReady).toBe(true);
-  });
-
   it("opens a task once when navigation changes to its route", async () => {
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
       if (method === TASK_OPEN) return {};
@@ -2125,7 +2052,7 @@ describe("app controller mounted lifecycle", () => {
         };
       }
       if (method === AGENT_PROBE) {
-        return { agents: clientSnapshot({ includeActiveTask: false }).agents };
+        return { agents: clientSnapshot({ includeActiveTask: false }).global.agents };
       }
       if (method === TASK_RELEASE) {
         // The release acknowledgement arrives after React has rendered the discard.
@@ -2856,7 +2783,7 @@ describe("app controller mounted lifecycle", () => {
       throw new Error(method);
     });
     const snapshot = clientSnapshot({ includeActiveTask: false });
-    snapshot.projects = {
+    snapshot.global.projects = {
       projects: [
         { projectId: "project_1" as never, label: "One", workspaceRoot: "/workspace/project_1", available: true },
         { projectId: "project_2" as never, label: "Two", workspaceRoot: "/workspace/project_2", available: true },
@@ -2937,7 +2864,7 @@ describe("app controller mounted lifecycle", () => {
       { projectId: "project_1", label: "One", workspaceRoot: "/workspace/project_1", available: true },
       { projectId: "project_2", label: "Two", workspaceRoot: "/workspace/project_2", available: true },
     ];
-    snapshot.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
+    snapshot.global.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot })),
       request: request as unknown as BackendConnection["request"],
@@ -3026,7 +2953,7 @@ describe("app controller mounted lifecycle", () => {
       { projectId: "project_1", label: "One", workspaceRoot: "/workspace/project_1", available: true },
       { projectId: "project_2", label: "Two", workspaceRoot: "/workspace/project_2", available: true },
     ];
-    snapshot.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
+    snapshot.global.projects = { projects: projects.map((project) => ({ ...project, projectId: project.projectId as never })) };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot })),
       request: request as unknown as BackendConnection["request"],
@@ -4603,14 +4530,14 @@ function clientSnapshot(
   options: {
     activeTaskTitle?: string;
     activeTaskStatus?: "idle" | "running";
-    agents?: NonNullable<ClientSnapshot["agents"]>["agents"];
+    agents?: ClientSnapshot["global"]["agents"]["agents"];
     newTaskDefaultAgentId?: string;
     includeTasks?: boolean;
     includeActiveTask?: boolean;
-    appPreferences?: NonNullable<ClientSnapshot["settings"]>["preferences"];
-    runtimeSettings?: NonNullable<ClientSnapshot["settings"]>["runtime"];
+    appPreferences?: ClientSnapshot["global"]["settings"]["preferences"];
+    runtimeSettings?: ClientSnapshot["global"]["settings"]["runtime"];
     stateRootId?: string;
-    settingsSections?: NonNullable<ClientSnapshot["settings"]>["sections"];
+    settingsSections?: ClientSnapshot["global"]["settings"]["sections"];
   } = {},
 ): ClientSnapshot {
   const includeTasks = options.includeTasks ?? true;
@@ -4627,16 +4554,29 @@ function clientSnapshot(
       shellKind: "vscodeExtension",
       surface: { kind: "home" },
     },
-    newTaskDefaults: {
-      agentId: (options.newTaskDefaultAgentId ?? "codex") as never,
-    },
-    agents: {
-      agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" }],
-    },
-    settings: {
-      sections: options.settingsSections ?? [],
-      preferences: options.appPreferences ?? null,
-      runtime: options.runtimeSettings ?? null,
+    global: {
+      projects: {
+        projects: [{
+          projectId: "project_1" as never,
+          label: "Project",
+          workspaceRoot: "/workspace/project",
+          available: true,
+        }],
+      },
+      worktrees: [],
+      newTaskDefaults: {
+        agentId: (options.newTaskDefaultAgentId ?? "codex") as never,
+      },
+      agents: {
+        agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", icon: "openai", status: "connected" }],
+      },
+      settings: {
+        sections: options.settingsSections ?? [],
+        preferences: options.appPreferences ?? null,
+        runtime: options.runtimeSettings ?? null,
+      },
+      devices: { remoteAccess: "off", serverName: "test" },
+      terminals: { terminals: [] },
     },
     activeTask: includeActiveTask
       ? protocolTaskSnapshot("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus)

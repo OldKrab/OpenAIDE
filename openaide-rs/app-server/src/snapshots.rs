@@ -2,14 +2,15 @@ use openaide_app_server_protocol::client::RequestedSurface;
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use std::sync::Arc;
 
+use openaide_app_server_protocol::global_state::GlobalState;
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, ServerId, StateRootId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ServerCapabilities,
-    ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskLifecycle, TaskPreparationAction, TaskPreparationSnapshot, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
+    ServerSnapshot, SettingsSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot,
+    TaskAgentConfigSnapshot, TaskLifecycle, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState,
+    TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -196,10 +197,12 @@ impl SnapshotBuilder {
         self
     }
 
+    /// The initialize reply. `global` is what the client's global-state owner holds for it.
     pub fn client_snapshot(
         &self,
         ctx: &ClientContext,
         requested_surface: RequestedSurface,
+        global: GlobalState,
         token: &SnapshotReadToken,
     ) -> Result<ClientSnapshot, ProtocolError> {
         let active_task = match &requested_surface {
@@ -237,13 +240,61 @@ impl SnapshotBuilder {
                 shell_kind: ctx.shell.kind,
                 surface: requested_surface,
             },
-            new_task_defaults: self.new_task_defaults.snapshot()?,
-            projects: Some(self.projects.snapshot()?),
-            agents: Some(self.agents.snapshot()?),
+            global,
             active_task,
-            settings: Some(self.settings.snapshot(None)?),
-            pending_requests: Vec::new(),
         })
+    }
+
+    /// Reads every global-state area from its source: the owner's first baseline.
+    pub(crate) fn read_global_state(&self) -> Result<GlobalState, ProtocolError> {
+        let projects = self.projects.snapshot()?;
+        let worktrees = projects
+            .projects
+            .iter()
+            .filter_map(|project| project.worktree_repository_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|repository_id| self.worktree_repository(&repository_id).ok())
+            .collect();
+        Ok(GlobalState {
+            projects,
+            worktrees,
+            agents: self.agents.snapshot()?,
+            settings: self.settings.snapshot(None)?,
+            new_task_defaults: self.new_task_defaults.snapshot()?,
+            devices: self.devices.snapshot(),
+            terminals: self.terminals.snapshot(),
+        })
+    }
+
+    pub(crate) fn settings_snapshot(&self) -> Result<SettingsSnapshot, ProtocolError> {
+        self.settings.snapshot(None)
+    }
+
+    pub(crate) fn new_task_defaults_snapshot(
+        &self,
+    ) -> Result<NewTaskDefaultsSnapshot, ProtocolError> {
+        self.new_task_defaults.snapshot()
+    }
+
+    pub(crate) fn device_collection_snapshot(
+        &self,
+    ) -> openaide_app_server_protocol::devices::DeviceCollectionSnapshot {
+        self.devices.snapshot()
+    }
+
+    pub(crate) fn terminal_collection_snapshot(
+        &self,
+    ) -> openaide_app_server_protocol::terminals::TerminalCollectionSnapshot {
+        self.terminals.snapshot()
+    }
+
+    pub(crate) fn worktree_repository(
+        &self,
+        repository_id: &openaide_app_server_protocol::ids::WorktreeRepositoryId,
+    ) -> Result<openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot, ProtocolError>
+    {
+        self.worktrees.snapshot(repository_id)
     }
 
     pub(crate) fn project_collection_snapshot(
@@ -268,24 +319,6 @@ impl SnapshotProvider for SnapshotBuilder {
         _token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError> {
         Ok(match scope {
-            SubscriptionScope::Projects => SubscriptionSnapshot::Projects {
-                projects: self.projects.snapshot()?,
-            },
-            SubscriptionScope::Devices => SubscriptionSnapshot::Devices {
-                devices: self.devices.snapshot(),
-            },
-            SubscriptionScope::Terminals => SubscriptionSnapshot::Terminals {
-                terminals: self.terminals.snapshot(),
-            },
-            SubscriptionScope::Agents => SubscriptionSnapshot::Agents {
-                agents: self.agents.snapshot()?,
-            },
-            SubscriptionScope::Settings { .. } => SubscriptionSnapshot::Settings {
-                settings: self.settings.snapshot(match scope {
-                    SubscriptionScope::Settings { section } => *section,
-                    _ => None,
-                })?,
-            },
             // Navigation is a view subscription (`navigation/subscribe`), not an entity snapshot.
             SubscriptionScope::TaskNavigation { .. } => {
                 return Err(ProtocolError {
@@ -344,11 +377,6 @@ impl SnapshotProvider for SnapshotBuilder {
                     artifact_id: artifact_id.clone(),
                     details: subscription.details,
                     terminal_sync: subscription.terminal_sync,
-                }
-            }
-            SubscriptionScope::WorktreeRepository { repository_id } => {
-                SubscriptionSnapshot::WorktreeRepository {
-                    repository: self.worktrees.snapshot(repository_id)?,
                 }
             }
         })

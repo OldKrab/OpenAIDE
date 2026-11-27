@@ -75,7 +75,7 @@ impl SharedRpcGateway {
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
-        let outcome = gateway.relay_answer(connection_id, id, &method, meta, answer, now);
+        let outcome = gateway.relay_answer(connection_id, id, &method, meta, answer);
         (gateway, outcome)
     }
 }

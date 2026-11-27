@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use openaide_app_server_protocol::envelopes::ServerRequestEnvelope;
 use openaide_app_server_protocol::events::AppServerEvent;
+use openaide_app_server_protocol::global_state::SyncNotification;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::ConnectionId;
@@ -35,6 +36,8 @@ pub(crate) enum OutboundMessage {
     },
     /// Boxed: an event is far larger than a reply header or a server request.
     Event(Box<AppServerEvent>),
+    /// One change to the global state for this connection's client (ADR-0086).
+    Sync(Box<SyncNotification>),
     ServerRequest(ServerRequestEnvelope<Value>),
 }
 
@@ -115,6 +118,10 @@ impl Outbox {
                 OutboundMessage::Event(Box::new(event.event)),
             );
         }
+    }
+
+    pub(crate) fn push_sync(&self, connection_id: &ConnectionId, sync: SyncNotification) {
+        self.push(connection_id, OutboundMessage::Sync(Box::new(sync)));
     }
 
     pub(crate) fn push_server_requests(

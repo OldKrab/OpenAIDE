@@ -18,6 +18,8 @@ export const CLIENT_REPLACEMENT_IMPACT = "client/replacementImpact" as const;
 
 export const CLIENT_SECRET_KEYS_CHANGED = "client/secretKeysChanged" as const;
 
+export const SYNC_NOTIFICATION = "sync" as const;
+
 export const PENDING_REQUEST_RESOLVE = "pendingRequest/resolve" as const;
 
 export const STATE_SUBSCRIBE = "state/subscribe" as const;
@@ -377,9 +379,9 @@ export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
 export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
-export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", section: TaskNavigationSection, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, } | { "kind": "devices" } | { "kind": "terminals" };
+export type SubscriptionScope = { "kind": "taskNavigation", section: TaskNavigationSection, } | { "kind": "task", taskId: TaskId, } | { "kind": "subagentCatalog", taskId: TaskId, } | { "kind": "subagentHistory", taskId: TaskId, subagentId: SubagentId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "task",
+export type SubscriptionSnapshot = { "kind": "task",
 /**
  * Complete and current. `task.chat` is the tail page only when `chatSync` is `full`;
  * otherwise it is an empty placeholder and the client keeps its own Chat.
@@ -401,7 +403,7 @@ history: SubagentHistorySnapshot, chatSync: SubagentChatSync, } | { "kind": "too
  * `terminalSync` is `full`; otherwise it is empty and the client keeps its own.
  * `details.revision` is the artifact sequence later notifications follow.
  */
-details: ToolDetailSnapshot, terminalSync: ToolTerminalSync, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, } | { "kind": "devices", devices: DeviceCollectionSnapshot, } | { "kind": "terminals", terminals: TerminalCollectionSnapshot, };
+details: ToolDetailSnapshot, terminalSync: ToolTerminalSync, };
 
 export type SubagentOverviewSnapshot = { totalCount: number, runningCount: number, attentionCount: number, available?: boolean, };
 
@@ -1492,13 +1494,13 @@ export type AppServerEvent = {
  */
 subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
 
-export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
+export type EventScope = { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "navigationFrame", frame: NavigationFrame, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
+export type AppServerEventPayload = { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "navigationFrame", frame: NavigationFrame, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "subagentCatalogUpdated", catalog: SubagentCatalogSnapshot, } | { "kind": "subagentHistoryChanged", taskId: TaskId, subagentId: SubagentId, revision: number, chat?: Array<TaskChatChange>,
 /**
  * Outer option controls delta presence; inner option clears the Agent Plan.
  */
-currentPlan?: AgentPlanSnapshot | null | null, } | { "kind": "taskContentRemoved", taskId: TaskId, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, } | { "kind": "deviceCollectionUpdated", devices: DeviceCollectionSnapshot, } | { "kind": "terminalCollectionUpdated", terminals: TerminalCollectionSnapshot, };
+currentPlan?: AgentPlanSnapshot | null | null, } | { "kind": "taskContentRemoved", taskId: TaskId, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, };
 
 export type ToolDetailDelta = { "kind": "replaceDetails", details: ToolDetailSnapshot, } | { "kind": "appendTerminal", terminalId: string, data: string, };
 
@@ -1536,7 +1538,35 @@ removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
-export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
+export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope,
+/**
+ * The complete global state, filtered to the client's Projects for VS Code (ADR-0086). Later
+ * changes arrive as `sync` notifications.
+ */
+global: GlobalState, activeTask?: TaskSnapshot | null, };
+
+export type GlobalState = { projects: ProjectCollectionSnapshot,
+/**
+ * Every Worktree Repository a Project uses, keyed by `repositoryId`. A repository can serve
+ * several Projects and carries the live linked and running Task counts.
+ */
+worktrees: Array<WorktreeRepositorySnapshot>,
+/**
+ * Agents, each with its recovery state (status, setup reason, Sign-in Flow, account limits).
+ */
+agents: AgentCollectionSnapshot, settings: SettingsSnapshot, newTaskDefaults: NewTaskDefaultsSnapshot, devices: DeviceCollectionSnapshot, terminals: TerminalCollectionSnapshot, };
+
+export type GlobalStateChanges = { projects?: ProjectCollectionSnapshot | null,
+/**
+ * Repositories that are new or changed.
+ */
+worktrees?: Array<WorktreeRepositorySnapshot>,
+/**
+ * Repositories no Project uses any more.
+ */
+removedWorktreeRepositories?: Array<WorktreeRepositoryId>, agents?: AgentCollectionSnapshot | null, settings?: SettingsSnapshot | null, newTaskDefaults?: NewTaskDefaultsSnapshot | null, devices?: DeviceCollectionSnapshot | null, terminals?: TerminalCollectionSnapshot | null, };
+
+export type SyncNotification = { changes: GlobalStateChanges, };
 
 export type ServerSnapshot = { serverId: ServerId, protocolVersion: ProtocolVersion, capabilities?: ServerCapabilities, };
 
