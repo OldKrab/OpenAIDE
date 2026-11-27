@@ -546,7 +546,7 @@ fn commit_batch(
     let mut artifact_changes = Vec::new();
     let artifact_started = Instant::now();
     let artifact_count = planned_artifacts.len();
-    let mut artifact_creates = super::frame::DeferredCreates::default();
+    let mut artifact_creates = artifact::ArtifactCreates::default();
     for (artifact_id, committed_head, operations) in planned_artifacts {
         let mut artifact_heads = artifact_heads
             .lock()
@@ -590,11 +590,13 @@ fn commit_batch(
         }
         artifact_changes.push(change);
     }
-    let created_artifact_count = artifact_creates.file_count();
-    if let Err(error) = artifact_creates.sync(super::frame::JournalKind::Artifact, faults) {
-        quarantine_or_abort(tasks_root, task_id);
-        return Err(freeze_shared_task(projections, task_id, error));
-    }
+    let created = match artifact_creates.sync(super::frame::JournalKind::Artifact, faults) {
+        Ok(created) => created,
+        Err(error) => {
+            quarantine_or_abort(tasks_root, task_id);
+            return Err(freeze_shared_task(projections, task_id, error));
+        }
+    };
     let artifacts_ms = artifact_started.elapsed().as_millis() as u64;
     let split_started = Instant::now();
     let chat_version = maintenance::persist_split_commit(
@@ -627,7 +629,9 @@ fn commit_batch(
             serde_json::json!({
                 "task_id": task_id,
                 "artifact_count": artifact_count,
-                "created_artifact_file_count": created_artifact_count,
+                "created_artifact_file_count": created.file_count,
+                "created_artifact_pack_count": created.pack_count,
+                "created_artifact_pack_bytes": created.pack_bytes,
                 "plan_ms": (artifact_started - batch_started).as_millis() as u64,
                 "artifacts_ms": artifacts_ms,
                 "chat_and_task_files_ms": split_ms,

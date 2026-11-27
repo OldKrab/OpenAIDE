@@ -17,6 +17,8 @@ use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, FramedRecor
 use crate::storage::task_journal::model::{JournalFrame, TaskOperation};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
 
+#[path = "artifact_pack_tests.rs"]
+mod artifact_pack;
 #[path = "chat_numbering_tests.rs"]
 mod chat_numbering;
 #[path = "crash_recovery_tests.rs"]
@@ -1275,9 +1277,8 @@ fn durability_sync_metric_counts_exercised_file_syncs() {
 
 #[test]
 fn a_creating_commit_syncs_its_artifacts_as_one_batch() {
-    // An adopted Native Session creates one artifact per replayed Tool call. Each file
-    // needs its own fsync, but the directory anchors and the parent checks are shared, so
-    // the sync count grows by one per artifact, not three.
+    // An adopted Native Session creates one artifact per replayed Tool call. They share one
+    // pack, so the sync count stays well below one per artifact (the pack tests pin it constant).
     const ARTIFACTS: usize = 20;
     let root = TempDir::new().expect("create state root");
     let (store, _commits) =

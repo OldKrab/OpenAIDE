@@ -117,6 +117,31 @@ Task replay records committed artifact heads. Tool-detail replay exposes only
 frames at or below those heads. A missing or corrupt artifact makes that Tool
 detail unavailable without making the Task snapshot unreadable.
 
+### Artifact packs
+
+A commit that creates several artifacts for one Task at once (a Native Session adoption
+replays its whole history into its creating commit) writes their initial records (sequence 1)
+into one immutable `artifacts/pack-<n>.pack` instead of one fsync'd `<artifact>.journal` each:
+one write, one file sync and one directory sync, completed before the Task frame that
+references the artifacts, so the durability order above is unchanged. A pack is a header, one
+checksummed frame per artifact, a checksummed index frame (artifact id to record offset), and a
+trailer holding the index offset and an end marker. A pack without a valid trailer was never
+completed and is ignored; a pack left by a crash before its Task frame is invisible, and when
+several packs hold an id the newest wins. A commit creating a single artifact keeps the
+per-artifact file.
+
+An artifact with no later frame reads from its pack record and reconciles trivially (nothing
+to truncate). Its first later frame, a live Tool update, a detail replacement or a terminal
+append, creates `<artifact>.journal` atomically (temporary file, sync, rename, directory sync)
+holding the pack record as sequence 1 plus the new frame as sequence 2. From then on the file
+is the whole artifact and is read, appended to, reconciled and compacted exactly as before, so
+artifact sequences, heads and Tool-detail versions are unchanged. Stores written before packs
+stay readable with no migration, and one Task may hold both layouts. Compaction skips a
+pack-only artifact (one frame, nothing superseded) and never rewrites a pack. Packs live under
+the Task directory, so Task purge and the Chat-rebuild set-aside move or remove them with the
+other artifacts. Pack read failures are logged as `tool_artifact_pack_unavailable` with a
+classified failure kind, and the artifact reports unavailable without failing the Task.
+
 Artifact journals are not scanned at startup or when only Task Navigation or
 Chat is requested. The first read or write of one Tool detail reconciles only
 that artifact against the committed head recovered from its Task journal. A

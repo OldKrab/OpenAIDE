@@ -14,6 +14,9 @@ use super::model::{
 };
 
 mod compaction;
+mod pack;
+
+pub(super) use pack::ArtifactCreates;
 
 pub(super) use compaction::{compact_artifacts, ArtifactsWrittenSinceCheck};
 
@@ -51,7 +54,7 @@ pub(super) fn prepare_with_faults(
 ) -> Result<CommittedArtifactChange, RuntimeError> {
     let path = artifact_path(tasks_root, task_id, artifact_id)?;
     let reconciled_head = path.exists().then_some(committed_head);
-    let mut creates = frame::DeferredCreates::default();
+    let mut creates = ArtifactCreates::default();
     let change = prepare_reconciled_with_faults(
         tasks_root,
         task_id,
@@ -64,13 +67,15 @@ pub(super) fn prepare_with_faults(
     )?;
     creates
         .sync(JournalKind::Artifact, faults)
+        .map(|_| ())
         .map_err(|error| artifact_frame_error("prepare_create", task_id, artifact_id, error))?;
     Ok(change)
 }
 
-/// Appends to an existing artifact durably, or creates a new one into `creates`: a created
-/// file is durable only after the caller runs `creates.sync(..)`, which must happen before
-/// any Task frame references it.
+/// Appends to an existing artifact durably, or stages a new one in `creates`: a created
+/// artifact (per-artifact file or pack record) is durable only after the caller runs
+/// `creates.sync(..)`, which must happen before any Task frame references it. An artifact
+/// that so far lives only in a pack gets its own file with its first later frame.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_reconciled_with_faults(
     tasks_root: &Path,
@@ -80,7 +85,7 @@ pub(super) fn prepare_reconciled_with_faults(
     reconciled_head: Option<u64>,
     operations: Vec<ArtifactOperation>,
     faults: &FaultInjector,
-    creates: &mut frame::DeferredCreates,
+    creates: &mut ArtifactCreates,
 ) -> Result<CommittedArtifactChange, RuntimeError> {
     let sequence = committed_head
         .checked_add(1)
@@ -108,13 +113,17 @@ pub(super) fn prepare_reconciled_with_faults(
         frame::append_with_faults(&path, &artifact_frame, JournalKind::Artifact, faults)
             .map_err(|error| artifact_frame_error("prepare_append", task_id, artifact_id, error))?;
     } else if sequence == 1 {
-        creates
-            .create(&path, &artifact_frame, JournalKind::Artifact, faults)
-            .map_err(|error| artifact_frame_error("prepare_create", task_id, artifact_id, error))?;
+        creates.stage(path, artifact_id, artifact_frame)?;
+    } else if reconciled_head == Some(committed_head) {
+        let Some(initial) = pack::find(&artifacts_dir(tasks_root, task_id)?, task_id, artifact_id)?
+        else {
+            return Err(missing_committed_sequence(artifact_id, committed_head));
+        };
+        pack::promote_to_file(&path, initial, artifact_frame, faults).map_err(|error| {
+            artifact_frame_error("prepare_promote", task_id, artifact_id, error)
+        })?;
     } else {
-        return Err(RuntimeError::Storage(format!(
-            "Tool artifact {artifact_id} is missing committed sequence {committed_head}"
-        )));
+        return Err(missing_committed_sequence(artifact_id, committed_head));
     }
     Ok(change)
 }
@@ -130,10 +139,9 @@ pub(super) fn load(
     committed_head: u64,
     known_sequence: u64,
 ) -> Result<(ToolArtifactProjection, Vec<TerminalOutputAppend>), RuntimeError> {
-    let path = artifact_path(tasks_root, task_id, artifact_id)?;
-    let replayed: ReplayedFrames<ArtifactFrame> = frame::replay(&path)
+    let frames = replay_frames(tasks_root, task_id, artifact_id)
         .map_err(|error| artifact_frame_error("load_replay", task_id, artifact_id, error))?;
-    if replayed.frames.len() < committed_head as usize {
+    if frames.len() < committed_head as usize {
         return Err(RuntimeError::Storage(format!(
             "Tool artifact {artifact_id} ends before committed sequence {committed_head}"
         )));
@@ -142,7 +150,7 @@ pub(super) fn load(
     let mut terminal_order = Vec::new();
     let mut terminal_outputs = HashMap::<String, String>::new();
     let mut appends_after_known = Vec::new();
-    for artifact_frame in replayed.frames.into_iter().take(committed_head as usize) {
+    for artifact_frame in frames.into_iter().take(committed_head as usize) {
         let after_known = artifact_frame.sequence > known_sequence;
         for operation in artifact_frame.operations {
             match operation {
@@ -224,18 +232,16 @@ fn latest_details(
     if committed_head == 0 {
         return Ok(None);
     }
-    let path = artifact_path(tasks_root, task_id, artifact_id)?;
-    let replayed: ReplayedFrames<ArtifactFrame> = frame::replay(&path)
+    let frames = replay_frames(tasks_root, task_id, artifact_id)
         .map_err(|error| artifact_frame_error("noop_replay", task_id, artifact_id, error))?;
     let committed_frames = usize::try_from(committed_head)
         .map_err(|_| RuntimeError::Storage("Tool artifact head exceeds memory".to_string()))?;
-    if replayed.frames.len() < committed_frames {
+    if frames.len() < committed_frames {
         return Err(RuntimeError::Storage(format!(
             "Tool artifact {artifact_id} ends before committed sequence {committed_head}"
         )));
     }
-    Ok(replayed
-        .frames
+    Ok(frames
         .into_iter()
         .take(committed_frames)
         .rev()
@@ -259,9 +265,14 @@ pub(super) fn reconcile_one(
         if committed_head == 0 {
             return Ok(0);
         }
-        return Err(RuntimeError::Storage(format!(
-            "Tool artifact {artifact_id} is missing committed sequence {committed_head}"
-        )));
+        // An artifact with no later frame lives only in its pack record, which is immutable
+        // and so has no tail to truncate.
+        if committed_head == 1
+            && pack::find(&artifacts_dir(tasks_root, task_id)?, task_id, artifact_id)?.is_some()
+        {
+            return Ok(1);
+        }
+        return Err(missing_committed_sequence(artifact_id, committed_head));
     }
     let replayed: ReplayedFrames<ArtifactFrame> = frame::scan(&path)
         .map_err(|error| artifact_frame_error("reconcile_replay", task_id, artifact_id, error))?;
@@ -388,6 +399,36 @@ pub(super) fn validate_artifact_id(artifact_id: &str) -> Result<(), RuntimeError
         ));
     }
     Ok(())
+}
+
+/// Every frame of one artifact: its own file when it has one (it then holds the packed initial
+/// record too), else the initial record from its pack. With neither, the error is the
+/// per-artifact file's open failure.
+fn replay_frames(
+    tasks_root: &Path,
+    task_id: &str,
+    artifact_id: &str,
+) -> Result<Vec<ArtifactFrame>, RuntimeError> {
+    let path = artifact_path(tasks_root, task_id, artifact_id)?;
+    if !path.try_exists()? {
+        if let Some(initial) =
+            pack::find(&artifacts_dir(tasks_root, task_id)?, task_id, artifact_id)?
+        {
+            return Ok(vec![initial]);
+        }
+    }
+    Ok(frame::replay::<ArtifactFrame>(&path)?.frames)
+}
+
+fn missing_committed_sequence(artifact_id: &str, committed_head: u64) -> RuntimeError {
+    RuntimeError::Storage(format!(
+        "Tool artifact {artifact_id} is missing committed sequence {committed_head}"
+    ))
+}
+
+fn artifacts_dir(tasks_root: &Path, task_id: &str) -> Result<PathBuf, RuntimeError> {
+    validate_task_id(task_id)?;
+    Ok(tasks_root.join(task_id).join(ARTIFACTS_DIR))
 }
 
 fn artifact_path(
