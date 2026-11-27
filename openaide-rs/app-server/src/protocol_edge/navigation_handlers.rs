@@ -34,6 +34,38 @@ impl RpcGateway {
         published
     }
 
+    /// Flushes dirty Navigation and queues the frames after the events `outcome` already carries,
+    /// which are older frames the handler stamped. Appending keeps the outbox in revision order.
+    pub(crate) fn append_navigation_flush(
+        &mut self,
+        outcome: GatewayOutcome,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let flushed = self.flush_navigation_unqueued(now);
+        match outcome {
+            GatewayOutcome::Respond {
+                connection_id,
+                id,
+                response,
+                mut events,
+                server_requests,
+            } => {
+                events.extend(flushed);
+                GatewayOutcome::Respond {
+                    connection_id,
+                    id,
+                    response,
+                    events,
+                    server_requests,
+                }
+            }
+            GatewayOutcome::Noop => {
+                self.outbox.push_events(flushed);
+                GatewayOutcome::Noop
+            }
+        }
+    }
+
     /// Like `flush_navigation`, for a handler whose outcome already carries these events to the
     /// outbox ahead of its reply.
     fn flush_navigation_unqueued(&mut self, now: AppServerTime) -> Vec<GatewayEventDelivery> {

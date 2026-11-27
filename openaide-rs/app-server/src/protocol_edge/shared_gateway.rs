@@ -230,8 +230,11 @@ impl SharedRpcGateway {
         let route = ReplyRoute::for_message(&message);
         let (mut gateway, outcome) =
             self.handle_with_completion_clock(connection_id, message, now, completion_clock);
-        // Frames for what this request changed go out ahead of its reply.
-        gateway.flush_navigation(now);
+        // Frames for what this request changed go out ahead of its reply, but after the frames its
+        // handler already stamped (those are in the outcome): the client drops a frame whose
+        // revision is not above the held one, and a later frame carries no bodies the earlier
+        // one introduced, so the two must reach the outbox in revision order.
+        let outcome = gateway.append_navigation_flush(outcome, now);
         let inspected = inspect(&outcome);
         let replied = gateway.outbox.push_outcome(outcome, route);
         drop(gateway);

@@ -307,3 +307,133 @@ fn raising_a_history_limit_asks_discovery_to_deepen_only_the_shown_project() {
     );
     assert_eq!(workflow.deepening.lock().unwrap().len(), 2);
 }
+
+/// Many history Tasks in one Project; discovery reports `loading` once deepening was asked for.
+#[derive(Default)]
+struct DeepeningSource {
+    loading: std::sync::atomic::AtomicBool,
+}
+
+impl NavigationSource for DeepeningSource {
+    fn groups(
+        &self,
+        _section: TaskNavigationSection,
+        _projects: Option<&HashSet<ProjectId>>,
+    ) -> Result<Vec<SourceGroup>, ProtocolError> {
+        let entries = (0..6)
+            .map(|index| TaskNavigationEntry::Task {
+                task: Box::new(TaskSummary {
+                    task_id: format!("task-{index}").into(),
+                    project_id: "project-1".into(),
+                    agent_id: "agent".into(),
+                    lifecycle: TaskLifecycle::Open,
+                    title: None,
+                    status: TaskStatus::Idle,
+                    updated_at: format!("2026-01-0{}T00:00:00Z", index + 1),
+                    last_activity: format!("2026-01-0{}T00:00:00Z", index + 1),
+                    unread: false,
+                    pinned: false,
+                    attention: None,
+                    has_messages: true,
+                    worktree_id: None,
+                    workspace_available: true,
+                }),
+            })
+            .collect();
+        Ok(vec![SourceGroup {
+            project_id: "project-1".into(),
+            label: "Project".to_string(),
+            entries,
+        }])
+    }
+
+    fn discovery(&self, _project_id: &ProjectId) -> ProjectDiscovery {
+        ProjectDiscovery {
+            loading: self.loading.load(Ordering::SeqCst),
+            ..Default::default()
+        }
+    }
+}
+
+/// Asking for deeper discovery starts it, which marks Navigation dirty during the request.
+struct DiscoveryStartsOnDeepening {
+    source: Arc<DeepeningSource>,
+    dirty: NavigationDirty,
+}
+
+impl AgentListSessionsWorkflow for DiscoveryStartsOnDeepening {
+    fn list_agent_sessions(
+        &self,
+        _params: openaide_app_server_protocol::agent::AgentListSessionsParams,
+    ) -> Result<openaide_app_server_protocol::agent::AgentListSessionsResult, ProtocolError> {
+        Err(test_unavailable("interactive listing is not used"))
+    }
+
+    fn request_native_session_discovery_deepening(&self, _project_id: &str) {
+        self.source.loading.store(true, Ordering::SeqCst);
+        self.dirty.mark_project("project-1".into());
+    }
+}
+
+#[test]
+fn frames_one_request_produces_reach_the_client_in_revision_order() {
+    // The update's own frame reveals rows (bodies); deepening then flips discovery to loading,
+    // which the flush before the reply publishes as a delta without those bodies. If the delta
+    // were queued first, the client would see rows it never received and lose the view.
+    let source = Arc::new(DeepeningSource::default());
+    let dirty = NavigationDirty::default();
+    let owner = NavigationOwner::new(source.clone(), dirty.clone(), DiscoveryState::default());
+    let workflow = Arc::new(DiscoveryStartsOnDeepening {
+        source: source.clone(),
+        dirty,
+    });
+    let shared =
+        SharedRpcGateway::new(gateway_with_agent_session_listing(workflow).with_navigation(owner));
+    let connection_id = ConnectionId::new("conn-order");
+    shared.handle_inbound(
+        connection_id.clone(),
+        request("1", CLIENT_INITIALIZE, init_params("client-order")),
+        AppServerTime(1),
+    );
+    shared.handle_inbound(
+        connection_id.clone(),
+        request("sub", NAVIGATION_SUBSCRIBE, view(2)),
+        AppServerTime(2),
+    );
+    shared.transfer_outbound(&connection_id, |_| ());
+    // The first discovery pass finished; the update's deeper target starts another.
+    source.loading.store(false, Ordering::SeqCst);
+
+    shared.dispatch_inbound(
+        connection_id.clone(),
+        request("up", NAVIGATION_UPDATE, view(5)),
+        AppServerTime(3),
+    );
+
+    let (revisions, bodies) = shared.transfer_outbound(&connection_id, |messages| {
+        let frames: Vec<_> = messages
+            .iter()
+            .filter_map(|message| match message {
+                OutboundMessage::Event(event) => match &event.payload {
+                    AppServerEventPayload::NavigationFrame { frame } => Some(frame.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        let last = messages.last().expect("the reply is queued last");
+        assert!(matches!(last, OutboundMessage::Reply { .. }));
+        (
+            frames
+                .iter()
+                .map(|frame| frame.revision)
+                .collect::<Vec<_>>(),
+            frames
+                .iter()
+                .map(|frame| frame.groups[0].rows.len())
+                .collect::<Vec<_>>(),
+        )
+    });
+    assert_eq!(bodies, vec![3, 0], "revealed rows first, then the delta");
+    assert!(revisions[0] < revisions[1], "{revisions:?}");
+}
