@@ -24,6 +24,8 @@ import type { ComputersSnapshot } from "../services/computers";
 import type { ComputerSwitch } from "../services/computerSwitch";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
+import { SidebarSearchResults } from "./SidebarSearchResults";
+import type { RunNavigationSearch } from "./useNavigationSearch";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -72,6 +74,8 @@ type SidebarProps = {
     title: { kind: "user"; value: string } | { kind: "automatic" },
   ) => Promise<void>;
   onSearchChange: (query: string) => void;
+  /** Runs App Server's one-shot search; while the field has text its results replace the list. */
+  onSearchNavigation?: RunNavigationSearch;
   onSettings: () => void;
   onToggleArchived: () => void;
   searchQuery: string;
@@ -136,6 +140,7 @@ export const Sidebar = memo(function Sidebar({
   onSetTaskPinned,
   onSetTaskTitle,
   onSearchChange,
+  onSearchNavigation,
   onSettings,
   onToggleArchived,
   searchQuery,
@@ -250,6 +255,12 @@ export const Sidebar = memo(function Sidebar({
             aria-label={showArchived ? "Search archive" : "Search tasks"}
             disabled={noProjects}
             onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && hasSearchInput) {
+                event.preventDefault();
+                onSearchChange("");
+              }
+            }}
             placeholder={showArchived ? "Search archive" : "Search"}
             ref={searchInputRef}
             value={searchQuery}
@@ -290,7 +301,19 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
-      <SidebarTaskPreviewProvider><div
+      {/* TODO(state-sync phase 7 merge): while the field has text, server-side search replaces the
+          list, so the client-side `searchQuery` filtering below is replaced by this search mode. */}
+      {onSearchNavigation && hasSearchQuery ? (
+        <SidebarSearchResults
+          activeTaskId={activeTaskId}
+          agentIcons={agentIcons}
+          includeNativeSessions={showNativeSessions}
+          onOpenNativeSession={onOpenNativeSession}
+          onOpenTask={onOpenTask}
+          query={searchQuery}
+          search={onSearchNavigation}
+        />
+      ) : <SidebarTaskPreviewProvider><div
         className="task-list-shell"
         data-more-above={String(taskListOverflow.moreAbove)}
         data-more-below={String(taskListOverflow.moreBelow)}
@@ -486,7 +509,7 @@ export const Sidebar = memo(function Sidebar({
               : hasSearchQuery ? "Search more tasks" : "Load more tasks"}
           </button>
         ) : null}
-      </div></div></SidebarTaskPreviewProvider>
+      </div></div></SidebarTaskPreviewProvider>}
       <div className="sidebar-footer">
         {!showArchived && onAddProject ? (
           <button className="add-project-button" onClick={onAddProject} type="button">
@@ -542,6 +565,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.onDeleteSession === next.onDeleteSession &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
+    prev.onSearchNavigation === next.onSearchNavigation &&
     prev.settingsStatus === next.settingsStatus &&
     prev.computers === next.computers &&
     prev.computerLink === next.computerLink &&

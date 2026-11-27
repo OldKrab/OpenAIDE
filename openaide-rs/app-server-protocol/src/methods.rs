@@ -74,16 +74,16 @@ use crate::task::{
     TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
     TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
     TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
-    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
-    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
-    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
-    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
-    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
-    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
-    TaskToolImagePreviewResult,
+    TaskNavigationSearchParams, TaskNavigationSearchResult, TaskOpenParams, TaskOpenResult,
+    TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
+    TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult,
+    TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
+    TaskReloadNativeSessionResult, TaskResolveConfigPreferencesParams,
+    TaskResolveConfigPreferencesResult, TaskRestoreParams, TaskRestoreResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPermissionPolicyParams,
+    TaskSetPermissionPolicyResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
+    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceCreateDirectoryParams, WorkspaceListDirectoryParams, WorkspaceListDirectoryResult,
@@ -563,6 +563,12 @@ protocol_method!(
     TASK_NAVIGATION_LOAD_MORE,
     TaskNavigationLoadMoreParams,
     TaskNavigationLoadMoreResult
+);
+protocol_method!(
+    TaskNavigationSearch,
+    TASK_NAVIGATION_SEARCH,
+    TaskNavigationSearchParams,
+    TaskNavigationSearchResult
 );
 protocol_method!(
     NativeSessionArchive,

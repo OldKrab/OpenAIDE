@@ -15,6 +15,7 @@ pub mod instance_env;
 pub mod logging;
 pub(crate) mod media;
 pub(crate) mod native_sessions;
+pub(crate) mod navigation_search;
 pub mod projects;
 pub mod protocol;
 pub mod protocol_edge;

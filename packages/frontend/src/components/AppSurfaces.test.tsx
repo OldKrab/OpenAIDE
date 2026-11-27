@@ -1642,6 +1642,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         forkNativeSession: vi.fn(),
         forkTask: vi.fn(),
         changeSearch: vi.fn(),
+        searchNavigation: vi.fn(),
         loadNativeSessions: vi.fn(),
         openNativeSession: vi.fn(),
         openNewTask: vi.fn(),

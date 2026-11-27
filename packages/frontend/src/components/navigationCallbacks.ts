@@ -1,4 +1,6 @@
 import { requestSessionDeletion } from "../intents/sessionDeletionIntent";
+import { requestNavigationSearch } from "../intents/navigationSearchIntent";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import {
   openNewTaskSurface,
   openNativeSessionSurface,
@@ -121,6 +123,12 @@ export function createNavigationCallbacks({
       });
     },
     changeSearch: (query) => dispatch({ type: "search:set", query }),
+    searchNavigation: (text) => {
+      if (!backendConnection?.request) return Promise.reject(new Error("App Server connection unavailable."));
+      const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
+      return requestNavigationSearch(connection, text, (event, fields) =>
+        recordFrontendLifecycleEvent(connection, event, fields));
+    },
     loadNativeSessions: (cursor, projectId, targetRowCount) => {
       if (backendConnection?.request && projectId && targetRowCount !== undefined) {
         void backendConnection.request(TASK_NAVIGATION_LOAD_MORE, {

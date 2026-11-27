@@ -156,7 +156,7 @@ use crate::task::{
     NativeSessionForkParams, NativeSessionForkResult, NativeSessionForkSource,
     NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
     NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
-    TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    SearchSnippet, TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
     TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff, TaskArchiveOlderParams,
     TaskArchiveOlderProtectedNativeSession, TaskArchiveOlderProtectedReason,
@@ -166,7 +166,8 @@ use crate::task::{
     TaskImageParams, TaskImageResult, TaskImageVariant, TaskLifecycleChanged, TaskListLifecycle,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
     TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
+    TaskNavigationRefreshResult, TaskNavigationSearchHit, TaskNavigationSearchParams,
+    TaskNavigationSearchResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
     TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult,
     TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection, TaskQueueTakeParams,
     TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult, TaskReloadNativeSessionParams,
@@ -631,6 +632,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationRefreshResult>(output, config);
     push_decl::<TaskNavigationLoadMoreParams>(output, config);
     push_decl::<TaskNavigationLoadMoreResult>(output, config);
+    push_decl::<TaskNavigationSearchParams>(output, config);
+    push_decl::<TaskNavigationSearchResult>(output, config);
+    push_decl::<TaskNavigationSearchHit>(output, config);
+    push_decl::<SearchSnippet>(output, config);
     push_decl::<NativeSessionArchiveParams>(output, config);
     push_decl::<NativeSessionArchiveResult>(output, config);
     push_decl::<NativeSessionSetTitleParams>(output, config);

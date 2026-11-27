@@ -56,6 +56,7 @@ export type NavigationCallbacks = {
   forkNativeSession: (session: AgentListedSession) => void;
   forkTask: (taskId: string) => void;
   changeSearch: (query: string) => void;
+  searchNavigation: (text: string) => Promise<import("@openaide/app-server-client").TaskNavigationSearchResult>;
   loadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   openNativeSession: (session: AgentListedSession) => void;
   openNewTask: (projectId?: string) => void;

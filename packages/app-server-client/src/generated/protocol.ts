@@ -140,6 +140,7 @@ export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_COMPOSER_HISTORY = "task/composerHistory" as const;
 export const TASK_LIST = "task/list" as const;
+export const TASK_NAVIGATION_SEARCH = "taskNavigation/search" as const;
 export const TASK_NAVIGATION_REFRESH = "taskNavigation/refresh" as const;
 export const TASK_NAVIGATION_LOAD_MORE = "taskNavigation/loadMore" as const;
 export const NATIVE_SESSION_ARCHIVE = "nativeSession/archive" as const;
@@ -1372,6 +1373,44 @@ export type TaskNavigationLoadMoreParams = { projectId: ProjectId, targetRowCoun
 
 export type TaskNavigationLoadMoreResult = { accepted: boolean, };
 
+export type TaskNavigationSearchParams = { text: string,
+/**
+ * Restricts the search to these Projects; absent means every Project.
+ */
+projectIds?: Array<ProjectId> | null, };
+
+export type TaskNavigationSearchResult = { hits: Array<TaskNavigationSearchHit>,
+/**
+ * True when the result cap or the scan budget cut the search short, so more rows
+ * could match.
+ */
+truncated: boolean, };
+
+export type TaskNavigationSearchHit = { row: TaskNavigationEntry,
+/**
+ * Which Navigation section the row belongs to.
+ */
+section: TaskNavigationSection,
+/**
+ * Ranges of the row's title that match, when the title matches.
+ */
+titleHighlights?: Array<[number, number]>,
+/**
+ * Absent for a title-only match.
+ */
+snippet?: SearchSnippet | null,
+/**
+ * The Chat message the snippet came from; present exactly when `snippet` is.
+ */
+messageId?: MessageId | null, };
+
+export type SearchSnippet = {
+/**
+ * A single-line window of the matching Chat message; a leading or trailing
+ * ellipsis marks a cut window.
+ */
+text: string, highlights: Array<[number, number]>, };
+
 export type NativeSessionArchiveParams = { agentId: AgentId, nativeSessionId: string, };
 
 export type NativeSessionArchiveResult = { reference: NativeSessionReference, archived: boolean, };
@@ -1836,7 +1875,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof DEVICES_SET_RELAY | typeof DEVICES_RELAY_PEOPLE | typeof DEVICES_RELAY_ADD_PERSON | typeof DEVICES_RELAY_REVOKE_PERSON | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof DIAGNOSTICS_RECORD_CLIENT_EVENTS | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_UPDATE_NEW_TASK_DEFAULTS | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_TRANSFER | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_RESOLVE_CONFIG_PREFERENCES | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_STOP_BACKGROUND_COMMAND | typeof TASK_STOP_SUBAGENT | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof TASK_NAVIGATION_SEARCH | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_SET_TITLE | typeof NATIVE_SESSION_SET_PINNED | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof CLIENT_UPDATE_SHUTDOWN_PREPARE | typeof CLIENT_UPDATE_SHUTDOWN_COMMIT | typeof CLIENT_UPDATE_SHUTDOWN_ABORT | typeof DIAGNOSTICS_LIST_SUPPORT_EXPORT | typeof DIAGNOSTICS_CREATE_SUPPORT_EXPORT | typeof PROJECT_ADD | typeof PROJECT_RENAME | typeof PROJECT_REMOVE | typeof PROJECT_REFRESH | typeof TASK_QUEUE_APPEND | typeof TASK_QUEUE_REMOVE | typeof TASK_QUEUE_TAKE | typeof TASK_QUEUE_MOVE | typeof TASK_SET_PERMISSION_POLICY | typeof TASK_SET_PINNED | typeof TASK_CLOSE_PLAN | typeof TASK_TOOL_IMAGE_PREVIEW | typeof FILE_VIEWER_LIST_DIRECTORY | typeof FILE_VIEWER_SEARCH | typeof FILE_VIEWER_EXISTING_FILES | typeof FILE_VIEWER_CHANGES | typeof FILE_VIEWER_DIFF | typeof FILE_VIEWER_OPEN | typeof FILE_VIEWER_OPEN_FROM_HANDLE | typeof FILE_VIEWER_REFRESH | typeof FILE_VIEWER_RELEASE | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY | typeof NATIVE_SESSION_DELETE | typeof NATIVE_SESSION_FORK | typeof TASK_RELOAD_NATIVE_SESSION | typeof TASK_ARCHIVE_OLDER | typeof AGENT_CANCEL_AUTHENTICATE | typeof AGENT_LOGOUT | typeof AGENT_REFRESH_ACCOUNT_LIMITS | typeof TASK_QUEUE_RESUME | typeof DEVICES_CREATE_INVITE | typeof DEVICES_CANCEL_INVITE | typeof DEVICES_REMOVE | typeof DEVICES_SET_RELAY | typeof DEVICES_RELAY_PEOPLE | typeof DEVICES_RELAY_ADD_PERSON | typeof DEVICES_RELAY_REVOKE_PERSON | typeof CLIENT_REPLACEMENT_IMPACT | typeof TASK_ATTENTION_WAIT | typeof TERMINALS_OPEN | typeof TERMINALS_ATTACH | typeof TERMINALS_CLOSE | typeof TASK_IMAGE | typeof WORKSPACE_CREATE_DIRECTORY;
 export type RequestParamsByMethod = {
   [FILE_VIEWER_LIST_DIRECTORY]: ProjectFilesParams;
   [FILE_VIEWER_SEARCH]: ProjectFilesParams;
@@ -1958,6 +1997,7 @@ export type RequestParamsByMethod = {
   [TASK_LIST]: TaskListParams;
   [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshParams;
   [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;
+  [TASK_NAVIGATION_SEARCH]: TaskNavigationSearchParams;
   [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveParams;
   [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleParams;
   [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedParams;
@@ -2091,6 +2131,7 @@ export type ResponseResultByMethod = {
   [TASK_LIST]: TaskListResult;
   [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshResult;
   [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;
+  [TASK_NAVIGATION_SEARCH]: TaskNavigationSearchResult;
   [NATIVE_SESSION_ARCHIVE]: NativeSessionArchiveResult;
   [NATIVE_SESSION_SET_TITLE]: NativeSessionSetTitleResult;
   [NATIVE_SESSION_SET_PINNED]: NativeSessionSetPinnedResult;

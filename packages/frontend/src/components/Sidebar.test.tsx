@@ -1029,6 +1029,61 @@ describe("Sidebar", () => {
     expect(onSearchChange).toHaveBeenCalledWith("");
   });
 
+  it("replaces the list with server search results while the field has text", () => {
+    const search = vi.fn(async () => ({ hits: [], truncated: false }));
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchNavigation={search}
+        searchQuery="release"
+        showArchived={false}
+        tasks={[task()]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ "aria-label": "Search results" }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ "aria-label": "Task search results" })).toHaveLength(0);
+    expect(tree.root.findAllByType(SidebarTaskRow)).toHaveLength(0);
+  });
+
+  it("keeps the normal list while server search has no text to answer", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchNavigation={vi.fn()}
+        searchQuery="   "
+        showArchived={false}
+        tasks={[task()]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ "aria-label": "Search results" })).toHaveLength(0);
+  });
+
+  it("clears the search on Escape from the field", () => {
+    const onSearchChange = vi.fn();
+    const preventDefault = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchChange={onSearchChange}
+        searchQuery="release"
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Search tasks" }).props.onKeyDown({ key: "Escape", preventDefault }));
+    expect(onSearchChange).toHaveBeenCalledWith("");
+
+    onSearchChange.mockClear();
+    act(() => tree.root.findByProps({ "aria-label": "Search tasks" }).props.onKeyDown({ key: "a", preventDefault }));
+    expect(onSearchChange).not.toHaveBeenCalled();
+  });
+
   it("hides the clear action and restores the task-list label without a query", () => {
     const tree = render(
       <Sidebar

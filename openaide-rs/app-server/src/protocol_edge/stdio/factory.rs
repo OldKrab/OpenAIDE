@@ -106,6 +106,11 @@ pub(super) fn gateway(
         task_navigation_agents,
         configured_projects.clone(),
     );
+    let task_navigation = Arc::new(task_navigation);
+    let navigation_search = Arc::new(crate::navigation_search::NavigationSearch::new(
+        task_navigation.clone(),
+        store.clone(),
+    ));
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),
         task_product_api.history_sync_snapshots(),
@@ -146,7 +151,7 @@ pub(super) fn gateway(
                     app_preferences.clone(),
                     runtime_settings.clone(),
                 )),
-                Arc::new(task_navigation),
+                task_navigation,
                 task_snapshots.clone(),
             ),
         ),
@@ -179,6 +184,7 @@ pub(super) fn gateway(
         worktrees,
         task_product_api.clone(),
     )
+    .with_navigation_search(navigation_search)
     .with_task_storage_maintenance(task_product_api)
     .with_new_task_defaults(new_task_defaults)
     .with_remote_devices(crate::remote_devices::RemoteDevices::open(

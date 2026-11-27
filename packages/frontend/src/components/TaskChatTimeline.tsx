@@ -48,6 +48,8 @@ type TaskChatTimelineProps = {
   chat: ReturnType<typeof renderedChat>;
   chatScroll: ReturnType<typeof useTaskChatScroll>;
   headerActionsTarget?: HTMLElement | null;
+  /** The message a search hit just revealed; marked briefly. */
+  revealedMessageId?: string;
   commandCatalog: TaskSnapshot["agent_commands"];
   items: ChatMessage[];
   liveTextPresentation?: TaskLiveTextPresentation;
@@ -80,6 +82,7 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
   chat,
   chatScroll,
   headerActionsTarget,
+  revealedMessageId,
   commandCatalog,
   items,
   liveTextPresentation,
@@ -171,6 +174,13 @@ export const TaskChatTimeline = memo(function TaskChatTimeline({
                   followsAgentAnswer(previousRow, row) ? "true" : undefined
                 }
                 data-index={virtualRow.index}
+                data-reveal-target={
+                  revealedMessageId !== undefined
+                  && row.kind === "message"
+                  && row.message.message_id === revealedMessageId
+                    ? "true"
+                    : undefined
+                }
                 data-row-key={row.key}
                 data-row-kind={row.kind}
                 data-user-message-navigation-target={

@@ -3,9 +3,11 @@ use ts_rs::TS;
 
 mod attention;
 mod images;
+mod search;
 mod session_deletion;
 pub use attention::*;
 pub use images::*;
+pub use search::*;
 pub use session_deletion::*;
 
 use crate::attachment::PreSendAttachment;
