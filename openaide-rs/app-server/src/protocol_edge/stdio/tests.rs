@@ -149,29 +149,29 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
         "client-1"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["newTaskDefaults"],
+        response["result"]["result"]["snapshot"]["global"]["newTaskDefaults"],
         serde_json::json!({})
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][0]["agentId"],
         "codex"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][1]["agentId"],
         "claude-code"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["settings"]["runtime"]["developer"]["acpTrace"]
-            ["enabled"],
+        response["result"]["result"]["snapshot"]["global"]["settings"]["runtime"]["developer"]
+            ["acpTrace"]["enabled"],
         false
     );
     assert!(
-        response["result"]["result"]["snapshot"]["settings"]["runtime"]["developer"]["acpTrace"]
-            ["directory"]
+        response["result"]["result"]["snapshot"]["global"]["settings"]["runtime"]["developer"]
+            ["acpTrace"]["directory"]
             .as_str()
             .expect("ACP trace directory")
             .contains("diagnostics/acp-traces")
@@ -721,15 +721,15 @@ fn initialize_uses_stored_agent_catalog_in_production_startup_path() {
 
     let response = response(&responses[0]);
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][0]["agentId"],
         "claude-code"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][1]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][1]["agentId"],
         "custom.local"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["agents"][2]["agentId"],
+        response["result"]["result"]["snapshot"]["global"]["agents"]["agents"][2]["agentId"],
         "opencode"
     );
 }
@@ -991,18 +991,6 @@ fn native_session_title_override_publishes_and_survives_restart() {
 fn agent_probe_updates_agent_snapshot_and_emits_event() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_version: None,
-            }
-        })
-        .to_string(),
-    );
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -1028,10 +1016,9 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
     );
 
     let event = response(&responses[0]);
-    assert_eq!(event["method"], "app/event");
-    assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
+    assert_eq!(event["method"], "sync");
     assert_eq!(
-        event["params"]["payload"]["agents"]["agents"][0]["status"],
+        event["params"]["changes"]["agents"]["agents"][0]["status"],
         "connected"
     );
 }
@@ -1050,18 +1037,6 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
         let state_root = StateRoot::resolve(temp.path()).expect("state root");
         let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
         dispatcher.handle_line(&init_request("1", "client-1"));
-        dispatcher.handle_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": "subscribe",
-                "method": STATE_SUBSCRIBE,
-                "params": StateSubscribeParams {
-                    scope: SubscriptionScope::Agents,
-                    known_version: None,
-                }
-            })
-            .to_string(),
-        );
 
         let responses = dispatcher.handle_line(
             &json!({
@@ -1099,9 +1074,8 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
             .any(|agent| agent["agentId"] == custom_agent_id));
 
         let event = response(&responses[0]);
-        assert_eq!(event["method"], "app/event");
-        assert_eq!(event["params"]["payload"]["kind"], "agentCollectionUpdated");
-        assert!(event["params"]["payload"]["agents"]["agents"]
+        assert_eq!(event["method"], "sync");
+        assert!(event["params"]["changes"]["agents"]["agents"]
             .as_array()
             .unwrap()
             .iter()
@@ -1134,7 +1108,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
     let responses = restarted.handle_line(&init_request("restart", "client-2"));
     let restart_response = response(&responses[0]);
     assert!(
-        restart_response["result"]["result"]["snapshot"]["agents"]["agents"]
+        restart_response["result"]["result"]["snapshot"]["global"]["agents"]["agents"]
             .as_array()
             .unwrap()
             .iter()
@@ -1177,7 +1151,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         })
         .to_string(),
     );
-    let custom_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let custom_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1195,7 +1169,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         .to_string(),
     );
 
-    let disabled_response = response(&disabled[0]);
+    let disabled_response = response(disabled.last().unwrap());
     assert!(disabled_response["result"]["result"]["agents"]["agents"]
         .as_array()
         .unwrap()
@@ -1214,7 +1188,7 @@ fn agent_enabled_and_delete_mutations_update_catalog_snapshot() {
         .to_string(),
     );
 
-    let delete_response = response(&deleted[0]);
+    let delete_response = response(deleted.last().unwrap());
     assert_eq!(
         delete_response["result"]["result"]["agentId"],
         custom_agent_id
@@ -1244,7 +1218,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let old_agent_id = response(&created[0])["result"]["result"]["agentId"]
+    let old_agent_id = response(created.last().unwrap())["result"]["result"]["agentId"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1263,7 +1237,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let update_response = response(&updated[0]);
+    let update_response = response(updated.last().unwrap());
     assert_eq!(update_response["result"]["result"]["agentId"], old_agent_id);
 
     let metadata_only_replace = dispatcher.handle_line(
@@ -1333,7 +1307,7 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
         })
         .to_string(),
     );
-    let replace_response = response(&replaced[0]);
+    let replace_response = response(replaced.last().unwrap());
     let new_agent_id = replace_response["result"]["result"]["newAgentId"]
         .as_str()
         .unwrap();
@@ -1366,18 +1340,6 @@ fn agent_custom_update_and_replace_use_distinct_identity_rules() {
 fn rejected_agent_mutations_return_errors_without_agent_events() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams {
-                scope: SubscriptionScope::Agents,
-                known_version: None,
-            }
-        })
-        .to_string(),
-    );
 
     let invalid_create = dispatcher.handle_line(
         &json!({
@@ -2023,15 +1985,6 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-projects",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_version: None }
-        })
-        .to_string(),
-    );
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2306,9 +2259,7 @@ fn a_mutation_queues_the_changed_rows_navigation_frame_before_its_reply() {
             ["entry"]["task"]["pinned"],
         true
     );
-    assert!(!events
-        .iter()
-        .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
+    assert!(!events.iter().any(|line| response(line)["method"] == "sync"));
 }
 
 #[test]
@@ -2571,7 +2522,9 @@ fn product_request_before_initialize_is_rejected_by_gateway() {
             "id": "2",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::Projects,
+                scope: SubscriptionScope::TaskNavigation {
+                    section: Default::default(),
+                },
                 known_version: None,
             }
         })
@@ -3061,19 +3014,10 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         configured_projects,
     );
     let notifications = dispatcher.take_task_updates().expect("task updates");
-    dispatcher.handle_line(&init_request("1", "client-1"));
-    let subscription = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "subscribe-projects",
-            "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_version: None }
-        })
-        .to_string(),
-    );
-    let project_snapshot = response(&subscription[0]);
+    let initialized = dispatcher.handle_line(&init_request("1", "client-1"));
+    let project_snapshot = response(&initialized[0]);
     assert_eq!(
-        project_snapshot["result"]["result"]["snapshot"]["projects"]["projects"],
+        project_snapshot["result"]["result"]["snapshot"]["global"]["projects"]["projects"],
         json!([{
             "projectId": project_id_for_workspace(workspace_root),
             "label": "configured-project",
@@ -3438,26 +3382,24 @@ fn stdio_time_follows_the_wall_clock_and_never_repeats() {
 fn stdio_writes_a_reply_and_a_later_publication_in_publish_order() {
     let (_temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "2",
-            "method": STATE_SUBSCRIBE,
-            "params": { "scope": { "kind": "agents" } }
-        })
-        .to_string(),
-    );
 
     dispatcher.dispatch_line(
         &json!({ "jsonrpc": "2.0", "id": "3", "method": CLIENT_HEARTBEAT, "params": {} })
             .to_string(),
     );
-    dispatcher.publish_agent_status_update();
+    dispatcher.publish_worktree_update(
+        serde_json::from_value(json!({
+            "repositoryId": "repo-new",
+            "revision": 1,
+            "worktrees": [],
+        }))
+        .unwrap(),
+    );
     let lines = dispatcher.outbound().flush(|lines| lines);
 
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert_eq!(response(&lines[0])["id"], "3");
-    assert_eq!(response(&lines[1])["method"], "app/event");
+    assert_eq!(response(&lines[1])["method"], "sync");
 }
 
 #[test]

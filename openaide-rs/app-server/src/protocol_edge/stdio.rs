@@ -208,15 +208,12 @@ impl ProtocolEdgeStdioDispatcher {
         &mut self,
         repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
     ) {
-        let now = self.next_time();
-        self.gateway
-            .publish_worktree_repository_update(repository, now);
+        self.gateway.publish_worktree_repository_update(repository);
     }
 
     /// Publishes an Agent status change; the flush moves it to stdout.
     pub fn publish_agent_status_update(&mut self) {
-        let now = self.next_time();
-        self.gateway.publish_agent_status_update(now);
+        self.gateway.publish_agent_status_update();
     }
 
     pub fn take_host_requests(&mut self) -> Option<mpsc::Receiver<HostRequest>> {

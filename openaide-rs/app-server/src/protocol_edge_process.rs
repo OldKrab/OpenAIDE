@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use openaide_app_server::client_lifecycle::AppServerTime;
 use openaide_app_server::protocol_edge::run_task_update_publisher;
 use openaide_app_server::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 
@@ -138,7 +137,7 @@ pub(super) fn run_local_http_handoff(
         let gateway = dispatcher.shared_gateway();
         spawn_named("openaide-pub-worktrees", move || {
             for repository in worktree_updates {
-                gateway.publish_worktree_repository_update(repository, AppServerTime::now());
+                gateway.publish_worktree_repository_update(repository);
             }
         });
     }
@@ -146,7 +145,7 @@ pub(super) fn run_local_http_handoff(
         let gateway = dispatcher.shared_gateway();
         spawn_named("openaide-pub-agents", move || {
             for _ in agent_status_updates {
-                gateway.publish_agent_status_update(AppServerTime::now());
+                gateway.publish_agent_status_update();
             }
         });
     }

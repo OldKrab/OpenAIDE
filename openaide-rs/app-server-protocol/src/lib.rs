@@ -9,6 +9,7 @@ pub mod envelopes;
 pub mod errors;
 pub mod events;
 pub mod file_viewer;
+pub mod global_state;
 pub mod ids;
 pub mod methods;
 pub mod navigation;

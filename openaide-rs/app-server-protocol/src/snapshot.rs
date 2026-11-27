@@ -26,17 +26,11 @@ pub struct ClientSnapshot {
     pub server: ServerSnapshot,
     pub state_root: StateRootSnapshot,
     pub client: ClientSnapshotScope,
-    pub new_task_defaults: NewTaskDefaultsSnapshot,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub projects: Option<ProjectCollectionSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agents: Option<AgentCollectionSnapshot>,
+    /// The complete global state, filtered to the client's Projects for VS Code (ADR-0086). Later
+    /// changes arrive as `sync` notifications.
+    pub global: crate::global_state::GlobalState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_task: Option<TaskSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub settings: Option<SettingsSnapshot>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_requests: Vec<PendingRequestSnapshot>,
 }
 
 /// State-root-wide initial selection for a client that has no retained New Task choice.

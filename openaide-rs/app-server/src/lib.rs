@@ -10,6 +10,7 @@ pub mod client_lifecycle;
 pub mod computer_gateway;
 pub mod diagnostics;
 pub mod file_viewer;
+pub(crate) mod global_state;
 pub(crate) mod image_preview;
 pub mod instance_env;
 pub mod logging;

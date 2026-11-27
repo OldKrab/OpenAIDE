@@ -213,23 +213,4 @@ impl RpcGateway {
             now,
         ))
     }
-
-    pub(crate) fn publish_project_collection_update(
-        &mut self,
-        now: AppServerTime,
-    ) -> Option<Vec<GatewayEventDelivery>> {
-        let projects = self.snapshots.project_collection_snapshot().ok()?;
-        let client_hub = self.client_hub.clone();
-        let outcome = self.state_stream.publish_committed(
-            EventScope::StateRoot {
-                state_root_id: self.state_stream.state_root_id().clone(),
-            },
-            AppServerEventPayload::ProjectCollectionUpdated { projects },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        );
-        // Project membership and labels are part of both Navigation sections.
-        self.navigation.mark_all();
-        Some(event_deliveries(outcome))
-    }
 }

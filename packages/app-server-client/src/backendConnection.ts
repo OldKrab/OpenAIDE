@@ -6,6 +6,7 @@ import type {
   InitializeResult,
   ClientNotificationMethod,
   ClientNotificationParamsByMethod,
+  GlobalStateChanges,
   NavigationViewParams,
   ProtocolMethod,
   RequestId,
@@ -25,6 +26,8 @@ import type {
 } from "./generated/protocol.js";
 
 export type BackendEventListener = (event: AppServerEvent) => void;
+/** Receives the changes of one `sync` notification: every changed area of the global state. */
+export type BackendSyncListener = (changes: GlobalStateChanges) => void;
 export type BackendUnsubscribe = () => void;
 export type BackendGenerationInvalidation = {
   reason:
@@ -127,6 +130,12 @@ export interface BackendConnection {
   ): BackendUnsubscribe;
   /** Registers a typed App Server event notification handler. */
   handleNotification(method: "app/event", handler: BackendEventListener): BackendUnsubscribe;
+  /**
+   * Registers a handler for `sync`, the global state's changes (ADR-0086). The state itself is
+   * in the `client/initialize` reply and in each recovery baseline; a change applies to the
+   * state of the current initialization.
+   */
+  handleNotification(method: "sync", handler: BackendSyncListener): BackendUnsubscribe;
   /** Signals that active state subscriptions must install fresh authoritative baselines. */
   handleGenerationInvalidated(
     handler: (event: BackendGenerationInvalidation) => void,

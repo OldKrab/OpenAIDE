@@ -9,6 +9,7 @@ use openaide_app_server_protocol::envelopes::RequestMeta;
 use serde_json::Value;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::global_state::GlobalAreas;
 
 use super::{responses, GatewayOutcome, RpcGateway, UpdateShutdownBarrier};
 
@@ -35,7 +36,6 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<ClientCapabilitiesChangedParams>(params) {
             Ok(params) => params,
@@ -68,18 +68,14 @@ impl RpcGateway {
             Ok(projects) => projects,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = if projects_changed {
-            self.publish_project_collection_update(now)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        self.result_with_events(
+        if projects_changed {
+            self.publish_global_state(GlobalAreas::PROJECTS);
+        }
+        self.result(
             connection_id,
             id,
             meta,
             ClientCapabilitiesChangedResult { projects },
-            events,
         )
     }
 

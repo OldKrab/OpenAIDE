@@ -190,8 +190,7 @@ impl SharedRpcGateway {
         let terminal_runner = self.client_auth_terminal(&connection_id);
         let result = workflow.authenticate_with_client(params, secret_resolver, terminal_runner);
         let mut gateway = self.lock();
-        let outcome =
-            gateway.finish_agent_authenticate(connection_id.clone(), id, meta, now, result);
+        let outcome = gateway.finish_agent_authenticate(connection_id.clone(), id, meta, result);
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());
@@ -268,7 +267,7 @@ impl SharedRpcGateway {
         drop(gateway);
         let result = workflow.logout(params);
         let mut gateway = self.lock();
-        let outcome = gateway.finish_agent_logout(connection_id.clone(), id, meta, now, result);
+        let outcome = gateway.finish_agent_logout(connection_id.clone(), id, meta, result);
         gateway
             .client_hub
             .observe_connection_activity(&connection_id, completion_clock());

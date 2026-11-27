@@ -3,7 +3,7 @@ use std::thread;
 
 use openaide_app_server_protocol::envelopes::ServerRequestEnvelope;
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::snapshot::{PendingRequestScope, ProjectCollectionSnapshot};
+use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::SubscriptionScope;
 use serde_json::{json, Value};
 
@@ -16,16 +16,17 @@ fn connection(name: &str) -> ConnectionId {
 
 fn event(cursor: &str) -> AppServerEvent {
     AppServerEvent {
-        subscription: SubscriptionScope::Projects,
+        subscription: SubscriptionScope::Task {
+            task_id: "task-1".into(),
+        },
         previous_cursor: "0".into(),
         cursor: cursor.into(),
-        scope: EventScope::StateRoot {
+        scope: EventScope::Task {
             state_root_id: "root-1".into(),
+            task_id: "task-1".into(),
         },
-        payload: AppServerEventPayload::ProjectCollectionUpdated {
-            projects: ProjectCollectionSnapshot {
-                projects: Vec::new(),
-            },
+        payload: AppServerEventPayload::TaskContentRemoved {
+            task_id: "task-1".into(),
         },
     }
 }

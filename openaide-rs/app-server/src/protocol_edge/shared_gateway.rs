@@ -499,34 +499,29 @@ impl SharedRpcGateway {
         );
     }
 
-    pub fn publish_worktree_repository_update(
-        &self,
-        repository: WorktreeRepositorySnapshot,
-        now: AppServerTime,
-    ) {
+    pub fn publish_worktree_repository_update(&self, repository: WorktreeRepositorySnapshot) {
         self.lock()
-            .publish_background_worktree_repository_update(repository, now);
+            .publish_background_worktree_repository_update(repository);
     }
 
-    pub fn publish_agent_status_update(&self, now: AppServerTime) {
-        self.lock().publish_background_agent_status_update(now);
+    pub fn publish_agent_status_update(&self) {
+        self.lock().publish_background_agent_status_update();
     }
 
     pub fn remote_devices(&self) -> Option<crate::remote_devices::RemoteDevices> {
         self.lock_quiet().remote_device_service()
     }
 
-    pub fn publish_device_collection_update(&self, now: AppServerTime) {
-        self.lock().publish_background_device_collection_update(now);
+    pub fn publish_device_collection_update(&self) {
+        self.lock().publish_background_device_collection_update();
     }
 
     pub fn terminals(&self) -> crate::terminals::Terminals {
         self.lock_quiet().terminals.clone()
     }
 
-    pub fn publish_terminal_collection_update(&self, now: AppServerTime) {
-        self.lock()
-            .publish_background_terminal_collection_update(now);
+    pub fn publish_terminal_collection_update(&self) {
+        self.lock().publish_background_terminal_collection_update();
     }
 
     /// Records an Agent's sign-in URL as Sign-in Flow state that every client renders. The URL is

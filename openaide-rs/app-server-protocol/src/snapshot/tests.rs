@@ -4,7 +4,7 @@ use super::*;
 use crate::client::SettingsSection;
 
 #[test]
-fn client_snapshot_omits_categories_outside_scope() {
+fn client_snapshot_carries_the_global_state_and_omits_an_absent_active_task() {
     let snapshot = ClientSnapshot {
         cursor: "cursor-1".into(),
         server: ServerSnapshot {
@@ -25,18 +25,36 @@ fn client_snapshot_omits_categories_outside_scope() {
             shell_kind: ShellKind::Web,
             surface: RequestedSurface::Home,
         },
-        new_task_defaults: Default::default(),
-        projects: None,
-        agents: None,
+        global: crate::global_state::GlobalState {
+            projects: ProjectCollectionSnapshot {
+                projects: Vec::new(),
+            },
+            worktrees: Vec::new(),
+            agents: AgentCollectionSnapshot { agents: Vec::new() },
+            settings: SettingsSnapshot {
+                sections: Vec::new(),
+                preferences: None,
+                runtime: None,
+            },
+            new_task_defaults: Default::default(),
+            devices: crate::devices::DeviceCollectionSnapshot {
+                remote_access: crate::devices::RemoteAccessState::Off,
+                server_name: "computer".to_string(),
+                server_key: None,
+                own_relay: None,
+                devices: Vec::new(),
+            },
+            terminals: crate::terminals::TerminalCollectionSnapshot {
+                terminals: Vec::new(),
+            },
+        },
         active_task: None,
-        settings: None,
-        pending_requests: Vec::new(),
     };
 
     let value = serde_json::to_value(snapshot).unwrap();
 
     assert_eq!(value["cursor"], json!("cursor-1"));
-    assert!(value.get("projects").is_none());
+    assert_eq!(value["global"]["projects"]["projects"], json!([]));
     assert!(value.get("activeTask").is_none());
     assert_eq!(value["server"]["protocolVersion"]["major"], json!(1));
     assert_eq!(

@@ -108,6 +108,10 @@ pub(super) fn push_method_constants(output: &mut String) {
         CLIENT_SECRET_KEYS_CHANGED
     ));
     output.push_str(&format!(
+        "export const SYNC_NOTIFICATION = {:?} as const;\n\n",
+        crate::global_state::SYNC_NOTIFICATION
+    ));
+    output.push_str(&format!(
         "export const PENDING_REQUEST_RESOLVE = {:?} as const;\n\n",
         PENDING_REQUEST_RESOLVE
     ));

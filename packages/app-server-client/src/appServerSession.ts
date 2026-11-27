@@ -20,6 +20,7 @@ import {
   type SubscriptionScope,
 } from "./generated/protocol.js";
 import { createDiagnosticsLogger, type DiagnosticsLogger } from "./diagnostics.js";
+import { createGlobalStateSync } from "./globalStateSync.js";
 import type {
   AppServerSession,
   AppServerSessionStatus,
@@ -89,9 +90,11 @@ export function createAppServerSession(
   let recoveryGate: RecoveryGate | undefined;
   let status: AppServerSessionStatus = { status: "connecting", generation };
   let initialization: InitializeResult | undefined;
+  const globalSync = createGlobalStateSync(logger);
   logger.info("app_server_session_created");
 
   const stopEvents = connection.handleNotification("app/event", handleEvent);
+  const stopSync = connection.handleNotification("sync", globalSync.receive);
   const stopInvalidation = connection.handleGenerationInvalidated(beginRecovery);
   const stopRecoveryBaseline = connection.handleRecoveryBaseline((baseline) => {
     void installRecoveryBaseline(baseline);
@@ -116,7 +119,7 @@ export function createAppServerSession(
         const result = await (meta === undefined
           ? connection.initialize(params)
           : connection.initialize(params, meta));
-        if (generation === initialGeneration) initialization = result;
+        if (generation === initialGeneration) initialization = globalSync.install(result);
         initialized = true;
         await refreshCurrentReplicas(initialGeneration);
         // Initialization can lose its transport while installing observed scopes.
@@ -130,7 +133,7 @@ export function createAppServerSession(
           duration_ms: Date.now() - startedAt,
           replica_count: replicas.size,
         });
-        return initialization ?? result;
+        return globalSync.latest() ?? initialization ?? result;
       } catch (error) {
         logger.error("app_server_session_initialize_failed", {
           generation,
@@ -170,8 +173,12 @@ export function createAppServerSession(
     handleRequest(method, handler) {
       return connection.handleRequest(method, handler);
     },
-    handleNotification(method, handler) {
-      return connection.handleNotification(method, handler);
+    handleNotification(method: "app/event" | "sync", handler: never) {
+      // `sync` goes through the session so a change never reaches a caller before the state it
+      // applies to; events keep their own per-scope chain.
+      return method === "sync"
+        ? globalSync.subscribe(handler)
+        : connection.handleNotification(method, handler);
     },
     handleGenerationInvalidated(handler) {
       invalidationListeners.add(handler);
@@ -238,6 +245,8 @@ export function createAppServerSession(
       recoveryGate?.resolve();
       recoveryGate = undefined;
       stopEvents();
+      stopSync();
+      globalSync.clear();
       stopInvalidation();
       stopRecoveryBaseline();
       stopRecoveryFailure();
@@ -257,6 +266,7 @@ export function createAppServerSession(
     if (closed) return;
     const previousGate = recoveryGate;
     generation += 1;
+    globalSync.suspend();
     recoveryGate = deferredGate(generation, Date.now());
     // A replacement transport may expire before all of its baselines arrive.
     // Earlier waiters remain blocked until the newest recovery settles.
@@ -294,8 +304,13 @@ export function createAppServerSession(
       });
       retainedCopies.clear();
     }
-    initialization = baseline.result;
-    notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
+    initialization = globalSync.install(baseline.result);
+    notifyListeners(
+      recoveryBaselineListeners,
+      { ...baseline, result: initialization },
+      logger,
+      "recovery_baseline",
+    );
     await refreshCurrentReplicas(gate.generation);
     if (closed || recoveryGate !== gate) return;
     recoveryGate = undefined;
@@ -690,13 +705,6 @@ function diagnosticErrorFields(error: unknown) {
 
 function scopeKey(scope: SubscriptionScope) {
   switch (scope.kind) {
-    case "projects":
-    case "agents":
-    case "devices":
-    case "terminals":
-      return scope.kind;
-    case "settings":
-      return `settings:${scope.section ?? ""}`;
     case "taskNavigation":
       return `taskNavigation:${scope.section}`;
     case "task":
@@ -707,8 +715,6 @@ function scopeKey(scope: SubscriptionScope) {
       return `subagentHistory:${scope.taskId}:${scope.subagentId}`;
     case "toolDetail":
       return `toolDetail:${scope.taskId}:${scope.artifactId}`;
-    case "worktreeRepository":
-      return `worktreeRepository:${scope.repositoryId}`;
   }
 }
 

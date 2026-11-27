@@ -4,6 +4,7 @@ import {
   mapProtocolTaskSnapshot,
   type ProtocolMappingWarning,
 } from "./appServerProtocolMapping";
+import { agentCollectionAction } from "../services/appServerGlobalSync";
 import { mapProtocolAppPreferences } from "./appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "./runtimeSettingsMapping";
 import { mapSettingsSections } from "./settingsProjectionMapping";
@@ -31,14 +32,15 @@ export function actionsFromInitialSnapshot(
   options: InitialSnapshotIngestionOptions = {},
 ): InitialSnapshotIngestion {
   const includeActiveTask = options.includeActiveTask ?? true;
+  const global = snapshot.global;
   const context = {
-    agents: snapshot.agents?.agents,
-    projects: snapshot.projects?.projects,
+    agents: global.agents.agents,
+    projects: global.projects.projects,
   };
   const actions: AppAction[] = [];
   const warnings: ProtocolMappingWarning[] = [];
   let requiresNativeSurface = false;
-  const projects = snapshot.projects?.projects.map((project) => ({
+  const projects = global.projects.projects.map((project) => ({
     projectId: project.projectId,
     label: project.label,
     workspaceRoot: project.workspaceRoot,
@@ -46,34 +48,32 @@ export function actionsFromInitialSnapshot(
     worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
     projectWorktreeId: project.projectWorktreeId ?? undefined,
     worktreeError: project.worktreeError ?? undefined,
-  })) ?? [];
+  }));
   const shellProjectId = snapshot.client.surface.kind === "newTask"
     ? snapshot.client.surface.projectId ?? undefined
     : undefined;
   const initialContext = selectInitialNewTaskContext({
     retained: options.retainedNewTaskContext,
     shellProjectId,
-    defaults: snapshot.newTaskDefaults,
+    defaults: global.newTaskDefaults,
     projects,
-    agents: snapshot.agents?.agents ?? [],
+    agents: global.agents.agents,
   });
   const newTaskProjectSelection = selectInitialNewTaskProject({
     retained: options.retainedNewTaskContext,
     shellProjectId,
-    defaults: snapshot.newTaskDefaults,
+    defaults: global.newTaskDefaults,
     projects,
   });
 
-  if (snapshot.projects) {
-    actions.push({
-      type: "projects",
-      initialProjectId: initialContext.projectId,
-      projects,
-    });
-  }
+  actions.push({
+    type: "projects",
+    initialProjectId: initialContext.projectId,
+    projects,
+  });
 
   if (initialContext.agentId) {
-    const agent = snapshot.agents?.agents.find((candidate) => candidate.agentId === initialContext.agentId);
+    const agent = global.agents.agents.find((candidate) => candidate.agentId === initialContext.agentId);
     actions.push({
       type: "newTask:agent",
       agentId: initialContext.agentId,
@@ -81,26 +81,32 @@ export function actionsFromInitialSnapshot(
     });
   }
 
-  if (snapshot.settings?.runtime) {
+  if (global.settings.runtime) {
     actions.push({
       type: "settings:runtimeSettings",
-      settings: mapProtocolRuntimeSettings(snapshot.settings.runtime),
+      settings: mapProtocolRuntimeSettings(global.settings.runtime),
     });
   }
 
-  if (snapshot.settings?.sections.length) {
+  if (global.settings.sections.length) {
     actions.push({
       type: "settings:sections",
-      tabs: mapSettingsSections(snapshot.settings.sections),
+      tabs: mapSettingsSections(global.settings.sections),
     });
   }
 
-  if (snapshot.settings?.preferences) {
+  if (global.settings.preferences) {
     actions.push({
       type: "settings:preferences",
-      preferences: mapProtocolAppPreferences(snapshot.settings.preferences),
+      preferences: mapProtocolAppPreferences(global.settings.preferences),
     });
   }
+
+  // The Frontend renders these areas live, so a baseline installs them as a change would.
+  actions.push(agentCollectionAction(global.agents));
+  actions.push({ type: "settings:devices", devices: global.devices });
+  actions.push({ type: "terminals", terminals: global.terminals });
+  for (const repository of global.worktrees) actions.push({ type: "worktreeRepository", repository });
 
   if (includeActiveTask && snapshot.activeTask) {
     const mapped = mapProtocolTaskSnapshot(snapshot.activeTask, context);

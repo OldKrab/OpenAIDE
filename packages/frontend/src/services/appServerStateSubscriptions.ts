@@ -12,8 +12,6 @@ import {
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
-import { agentSettingsStatusFromProtocol, agentSignInFlowFromProtocol } from "../intents/agentSettingsRecords";
-import { applyProtocolAgents } from "../state/appServerAgents";
 import {
   createProtocolTaskSnapshotMapper,
   mapProtocolTaskNavigation,
@@ -34,8 +32,8 @@ export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): Stat
   return {
     stateRootId: snapshot.stateRoot.stateRootId,
     clientInstanceId: snapshot.client.clientInstanceId,
-    agents: snapshot.agents?.agents,
-    projects: snapshot.projects?.projects,
+    agents: snapshot.global.agents.agents,
+    projects: snapshot.global.projects.projects,
   };
 }
 
@@ -159,35 +157,6 @@ function actionsFromSubscriptionSnapshot(
   mapTaskSnapshot = createProtocolTaskSnapshotMapper(),
 ): AppAction[] {
   switch (snapshot.kind) {
-    case "projects":
-      context.projects = snapshot.projects.projects;
-      return [{
-        type: "projects",
-        projects: snapshot.projects.projects.map((project) => ({
-          projectId: project.projectId,
-          label: project.label,
-          workspaceRoot: project.workspaceRoot,
-          available: project.available,
-          worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
-          projectWorktreeId: project.projectWorktreeId ?? undefined,
-          worktreeError: project.worktreeError ?? undefined,
-        })),
-      }, ...remappedTaskNavigationActions(context)];
-    case "agents":
-      context.agents = snapshot.agents.agents;
-      if (agents.setAgents) {
-        applyProtocolAgents(snapshot.agents, agents.currentAgentId?.() ?? "", agents.setAgents, agents.dispatch);
-      }
-      agents.dispatch({
-        type: "settings:agentCollection",
-        agents: snapshot.agents.agents.map((agent) => ({
-          agentId: agent.agentId,
-          status: agentSettingsStatusFromProtocol(agent.status),
-          setupReason: agent.setupReason ?? undefined,
-          signIn: agentSignInFlowFromProtocol(agent.signIn),
-        })),
-      });
-      return remappedTaskNavigationActions(context);
     case "taskNavigation":
       context.taskNavigations = {
         ...context.taskNavigations,
@@ -198,12 +167,6 @@ function actionsFromSubscriptionSnapshot(
       const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];
     }
-    case "settings":
-      return [];
-    case "devices":
-      return [{ type: "settings:devices", devices: snapshot.devices }];
-    case "terminals":
-      return [{ type: "terminals", terminals: snapshot.terminals }];
     case "toolDetail":
       return [{
         type: "toolDetail:result",
@@ -215,12 +178,10 @@ function actionsFromSubscriptionSnapshot(
     case "subagentHistory":
       // Focused Task inspection owns these independently ordered replicas.
       return [];
-    case "worktreeRepository":
-      return [{ type: "worktreeRepository", repository: snapshot.repository }];
   }
 }
 
-function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
+export function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
   return (["tasks", "archive"] as const).flatMap((section): AppAction[] => {
     const navigation = context.taskNavigations?.[section];
     if (!navigation) return [];

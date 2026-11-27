@@ -673,6 +673,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskChatChange>(output, config);
 
     push_decl::<ClientSnapshot>(output, config);
+    push_decl::<crate::global_state::GlobalState>(output, config);
+    push_decl::<crate::global_state::GlobalStateChanges>(output, config);
+    push_decl::<crate::global_state::SyncNotification>(output, config);
     push_decl::<ServerSnapshot>(output, config);
     push_decl::<ProtocolVersion>(output, config);
     push_decl::<ServerCapabilities>(output, config);

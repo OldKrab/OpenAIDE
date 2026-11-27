@@ -72,6 +72,11 @@ impl From<OutboundMessage> for WireMessage {
                 method: "app/event",
                 params: serde_json::to_value(event).expect("event serializes"),
             }),
+            OutboundMessage::Sync(sync) => Self::Notification(WireNotification {
+                jsonrpc: "2.0",
+                method: openaide_app_server_protocol::global_state::SYNC_NOTIFICATION,
+                params: serde_json::to_value(sync).expect("sync notification serializes"),
+            }),
             OutboundMessage::ServerRequest(envelope) => Self::Request(WireServerRequest {
                 jsonrpc: "2.0",
                 id: envelope.request_id.into_string(),

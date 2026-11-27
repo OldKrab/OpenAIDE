@@ -4,6 +4,7 @@ import {
   CLIENT_CAPABILITIES_CHANGED,
   CLIENT_DETACH,
   SHELL_RESOLVE_FILE_REVEAL,
+  applyGlobalStateChanges,
   createReliableLocalHttpBackendConnection,
   isAppServerSessionViewMessage,
   reliableHttpErrorDiagnosticFields,
@@ -19,6 +20,7 @@ import {
   type ClientInstanceId,
   type ClientWorkspaceRoot,
   type DiagnosticsLogger,
+  type GlobalStateChanges,
   type InitializeResult,
   type ProtocolMethod,
   type RequestMeta,
@@ -61,6 +63,8 @@ export class AppServerHostClient {
   private connection: AppServerSession | undefined;
   private initialized: Promise<AppServerSession> | undefined;
   private initializationResult: InitializeResult | undefined;
+  /** `sync` changes seen while no initialization result is held; applied when one is. */
+  private pendingSync: GlobalStateChanges[] = [];
   private latestSessionStatus: AppServerSessionStatus | undefined;
   private desiredWorkspaceRoots: ClientWorkspaceRoot[] = [];
   private reportedWorkspaceRoots: ClientWorkspaceRoot[] | undefined;
@@ -300,7 +304,7 @@ export class AppServerHostClient {
       });
       this.bindSessionEvents(connection);
       const initializedWorkspaceRoots = cloneWorkspaceRoots(this.desiredWorkspaceRoots);
-      this.initializationResult = await connection.initialize({
+      this.setInitializationResult(await connection.initialize({
         clientInstanceId: this.clientInstanceId,
         shell: { kind: "vscodeExtension", name: "OpenAIDE" },
         requestedSurface: { kind: "home" },
@@ -317,7 +321,7 @@ export class AppServerHostClient {
           ],
         },
         workspaceRoots: initializedWorkspaceRoots,
-      });
+      }));
       this.reportedWorkspaceRoots = initializedWorkspaceRoots;
       this.connection = connection;
       this.logger?.info("app server host client initialized", {
@@ -333,6 +337,20 @@ export class AppServerHostClient {
     return this.initialized;
   }
 
+  private setInitializationResult(result: InitializeResult) {
+    this.initializationResult = this.pendingSync.reduce(withGlobalChanges, result);
+    this.pendingSync = [];
+  }
+
+  /** Keeps the result a later-attaching webview receives current with the global state. */
+  private applySync(changes: GlobalStateChanges) {
+    if (this.initializationResult) {
+      this.initializationResult = withGlobalChanges(this.initializationResult, changes);
+    } else {
+      this.pendingSync.push(changes);
+    }
+  }
+
   private bindSessionEvents(connection: AppServerSession) {
     this.sessionStops.push(
       connection.handleNotification("app/event", (event) => {
@@ -341,7 +359,12 @@ export class AppServerHostClient {
       connection.handleGenerationInvalidated((event) => {
         this.broadcast({ type: "appServer.session.generationInvalidated", event });
       }),
+      connection.handleNotification("sync", (changes) => {
+        this.applySync(changes);
+        this.broadcast({ type: "appServer.session.sync", changes });
+      }),
       connection.handleRecoveryBaseline((event) => {
+        this.pendingSync = [];
         this.initializationResult = event.result;
         this.broadcast({ type: "appServer.session.recoveryBaseline", event });
       }),
@@ -501,4 +524,11 @@ function sameWorkspaceRoots(
   return left !== undefined
     && left.length === right.length
     && left.every((root, index) => root.path === right[index]?.path);
+}
+
+function withGlobalChanges(result: InitializeResult, changes: GlobalStateChanges): InitializeResult {
+  return {
+    ...result,
+    snapshot: { ...result.snapshot, global: applyGlobalStateChanges(result.snapshot.global, changes) },
+  };
 }

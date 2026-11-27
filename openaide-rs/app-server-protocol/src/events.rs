@@ -1,19 +1,15 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{
-    ClientInstanceId, EventCursor, MessageId, StateRootId, SubagentId, TaskId, WorktreeRepositoryId,
-};
+use crate::ids::{ClientInstanceId, EventCursor, MessageId, StateRootId, SubagentId, TaskId};
 use crate::snapshot::{
-    AgentCollectionSnapshot, AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot,
-    ClientSnapshot, PendingRequestSnapshot, ProjectCollectionSnapshot, SubagentCatalogSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage, TaskHistorySyncSnapshot,
-    TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot, TaskPermissionPolicy,
-    TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
+    AgentPlanSnapshot, BackgroundCommandSnapshot, ChatItem, ChatSnapshot, PendingRequestSnapshot,
+    SubagentCatalogSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskContextUsage,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskMessageQueueSnapshot,
+    TaskPermissionPolicy, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
-use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -33,9 +29,6 @@ pub struct AppServerEvent {
     rename_all_fields = "camelCase"
 )]
 pub enum EventScope {
-    StateRoot {
-        state_root_id: StateRootId,
-    },
     Client {
         state_root_id: StateRootId,
         client_instance_id: ClientInstanceId,
@@ -56,9 +49,6 @@ pub enum EventScope {
     rename_all_fields = "camelCase"
 )]
 pub enum AppServerEventPayload {
-    SnapshotReplaced {
-        snapshot: ClientSnapshot,
-    },
     TaskChanged {
         task_id: TaskId,
         revision: u64,
@@ -71,9 +61,6 @@ pub enum AppServerEventPayload {
     /// One Navigation view changed (design 2.2). Frames also carry the subscribe baseline.
     NavigationFrame {
         frame: crate::navigation::NavigationFrame,
-    },
-    ProjectCollectionUpdated {
-        projects: ProjectCollectionSnapshot,
     },
     TaskRequestsUpdated {
         task_id: TaskId,
@@ -104,21 +91,6 @@ pub enum AppServerEventPayload {
         artifact_id: String,
         revision: u64,
         deltas: Vec<ToolDetailDelta>,
-    },
-    AgentCollectionUpdated {
-        agents: AgentCollectionSnapshot,
-    },
-    WorktreeRepositoryUpdated {
-        repository_id: WorktreeRepositoryId,
-        repository: WorktreeRepositorySnapshot,
-    },
-    /// Replaces the trusted Remote Device list and its connection state.
-    DeviceCollectionUpdated {
-        devices: crate::devices::DeviceCollectionSnapshot,
-    },
-    /// Replaces the open Terminal list, including each Terminal's status.
-    TerminalCollectionUpdated {
-        terminals: crate::terminals::TerminalCollectionSnapshot,
     },
 }
 

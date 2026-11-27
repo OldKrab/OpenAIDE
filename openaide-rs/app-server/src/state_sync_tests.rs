@@ -3,9 +3,7 @@ use openaide_app_server_protocol::client::{
 };
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope, TaskChanges};
 use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
-use openaide_app_server_protocol::snapshot::{
-    AgentCollectionSnapshot, ProjectCollectionSnapshot, TaskHistorySyncSnapshot,
-};
+use openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot;
 use openaide_app_server_protocol::state::SubscriptionScope;
 
 use crate::client_lifecycle::{ClientContext, ConnectionId};
@@ -31,42 +29,38 @@ fn subscribe_returns_scope_baseline_and_registers_subscription() {
 fn unrelated_subscription_event_does_not_advance_task_cursor() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
     let context = ctx("client-1", "conn-1");
-    let task_scope = SubscriptionScope::Task {
-        task_id: TaskId::from("task-1"),
-    };
     let task_baseline = stream
-        .subscribe(&context, task_scope.clone(), &snapshots(), AppServerTime(1))
+        .subscribe(
+            &context,
+            task_scope("task-1"),
+            &snapshots(),
+            AppServerTime(1),
+        )
         .unwrap();
     stream
         .subscribe(
             &context,
-            SubscriptionScope::Agents,
+            task_scope("task-2"),
             &snapshots(),
             AppServerTime(1),
         )
         .unwrap();
 
-    let agent_event = stream.publish_committed(
-        state_root_scope(),
-        AppServerEventPayload::AgentCollectionUpdated {
-            agents: AgentCollectionSnapshot { agents: Vec::new() },
-        },
+    let other_event = stream.publish_committed(
+        task_event_scope("task-2"),
+        task_changed("task-2"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
     );
-    assert_eq!(agent_event.deliveries.len(), 1);
+    assert_eq!(other_event.deliveries.len(), 1);
     assert_eq!(
-        agent_event.deliveries[0].event.subscription,
-        SubscriptionScope::Agents
+        other_event.deliveries[0].event.subscription,
+        task_scope("task-2")
     );
 
     let task_event = stream.publish_committed(
         task_event_scope("task-1"),
-        AppServerEventPayload::TaskChanged {
-            task_id: TaskId::from("task-1"),
-            revision: 2,
-            changes: TaskChanges::default(),
-        },
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(3),
     );
@@ -77,7 +71,10 @@ fn unrelated_subscription_event_does_not_advance_task_cursor() {
     );
     // Cursor values come from one sequence that every publication advances.
     assert_eq!(task_event.deliveries[0].event.cursor.as_str(), "cursor-2");
-    assert_eq!(task_event.deliveries[0].event.subscription, task_scope);
+    assert_eq!(
+        task_event.deliveries[0].event.subscription,
+        task_scope("task-1")
+    );
 }
 
 #[test]
@@ -87,7 +84,7 @@ fn clients_sharing_one_scope_receive_the_same_cursor_link() {
         stream
             .subscribe(
                 &ctx(client, &format!("conn-{client}")),
-                SubscriptionScope::Projects,
+                task_scope("task-1"),
                 &snapshots(),
                 AppServerTime(1),
             )
@@ -95,12 +92,8 @@ fn clients_sharing_one_scope_receive_the_same_cursor_link() {
     }
 
     let publish = stream.publish_committed(
-        state_root_scope(),
-        AppServerEventPayload::ProjectCollectionUpdated {
-            projects: ProjectCollectionSnapshot {
-                projects: Vec::new(),
-            },
-        },
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
     );
@@ -112,26 +105,53 @@ fn clients_sharing_one_scope_receive_the_same_cursor_link() {
         .all(
             |delivery| delivery.event.previous_cursor.as_str() == "cursor-0"
                 && delivery.event.cursor.as_str() == "cursor-1"
-                && delivery.event.subscription == SubscriptionScope::Projects
+                && delivery.event.subscription == task_scope("task-1")
         ));
 }
 
-fn agents_updated() -> AppServerEventPayload {
-    AppServerEventPayload::AgentCollectionUpdated {
-        agents: AgentCollectionSnapshot { agents: Vec::new() },
+fn task_changed(task_id: &str) -> AppServerEventPayload {
+    AppServerEventPayload::TaskChanged {
+        task_id: TaskId::from(task_id),
+        revision: 2,
+        changes: TaskChanges::default(),
+    }
+}
+
+fn task_scope(task_id: &str) -> SubscriptionScope {
+    SubscriptionScope::Task {
+        task_id: TaskId::from(task_id),
+    }
+}
+
+fn nav_scope() -> SubscriptionScope {
+    SubscriptionScope::TaskNavigation {
+        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+    }
+}
+
+fn nav_frame() -> AppServerEventPayload {
+    AppServerEventPayload::NavigationFrame {
+        frame: openaide_app_server_protocol::navigation::NavigationFrame {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            group_order: None,
+            removed_groups: Vec::new(),
+            groups: Default::default(),
+        },
     }
 }
 
 #[test]
-fn an_event_for_one_client_leaves_another_clients_chain_unbroken() {
+fn a_private_event_leaves_every_task_chain_unbroken() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
     let mut baselines = Vec::new();
     for client in ["client-1", "client-2"] {
+        let context = ctx(client, &format!("conn-{client}"));
+        stream.register_view_subscription(&context, nav_scope());
         baselines.push(
             stream
                 .subscribe(
-                    &ctx(client, &format!("conn-{client}")),
-                    SubscriptionScope::Agents,
+                    &context,
+                    task_scope("task-1"),
                     &snapshots(),
                     AppServerTime(1),
                 )
@@ -145,13 +165,13 @@ fn an_event_for_one_client_leaves_another_clients_chain_unbroken() {
             state_root_id: StateRootId::from("root-1"),
             client_instance_id: ClientInstanceId::from("client-1"),
         },
-        agents_updated(),
+        nav_frame(),
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
     );
     let shared = stream.publish_committed(
-        state_root_scope(),
-        agents_updated(),
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(3),
     );
@@ -165,7 +185,8 @@ fn an_event_for_one_client_leaves_another_clients_chain_unbroken() {
             .map(|delivery| delivery.event.previous_cursor.clone())
             .unwrap()
     };
-    assert_eq!(link("client-1"), private.deliveries[0].event.cursor);
+    // The private frame is on its own Navigation chain, so neither Task chain moved.
+    assert_eq!(link("client-1"), baselines[0]);
     assert_eq!(link("client-2"), baselines[1]);
 }
 
@@ -176,14 +197,14 @@ fn resubscribing_rebases_the_chain_on_the_new_baseline() {
     stream
         .subscribe(
             &context,
-            SubscriptionScope::Agents,
+            task_scope("task-1"),
             &snapshots(),
             AppServerTime(1),
         )
         .unwrap();
     let before = stream.publish_committed(
-        state_root_scope(),
-        agents_updated(),
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
     );
@@ -191,15 +212,15 @@ fn resubscribing_rebases_the_chain_on_the_new_baseline() {
     let baseline = stream
         .subscribe(
             &context,
-            SubscriptionScope::Agents,
+            task_scope("task-1"),
             &snapshots(),
             AppServerTime(3),
         )
         .unwrap()
         .cursor;
     let after = stream.publish_committed(
-        state_root_scope(),
-        agents_updated(),
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(4),
     );
@@ -216,7 +237,7 @@ fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
     let baseline = stream
         .subscribe(
             &ctx("client-1", "conn-1"),
-            SubscriptionScope::Agents,
+            task_scope("task-1"),
             &snapshots(),
             AppServerTime(1),
         )
@@ -224,14 +245,14 @@ fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
         .cursor;
 
     let missed = stream.publish_committed(
-        state_root_scope(),
-        agents_updated(),
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |_| None,
         AppServerTime(2),
     );
     let next = stream.publish_committed(
-        state_root_scope(),
-        agents_updated(),
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(3),
     );
@@ -241,33 +262,19 @@ fn an_undeliverable_event_still_moves_the_chain_so_the_client_sees_the_gap() {
 }
 
 #[test]
-fn project_updates_do_not_leak_into_navigation_or_task_subscriptions() {
+fn a_task_event_does_not_leak_into_navigation_or_other_task_subscriptions() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
     let context = ctx("client-1", "conn-1");
-    stream.register_view_subscription(
-        &context,
-        SubscriptionScope::TaskNavigation {
-            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
-        },
-    );
-    for scope in [
-        SubscriptionScope::Projects,
-        SubscriptionScope::Task {
-            task_id: TaskId::from("task-1"),
-        },
-    ] {
+    stream.register_view_subscription(&context, nav_scope());
+    for scope in [task_scope("task-1"), task_scope("task-2")] {
         stream
             .subscribe(&context, scope, &snapshots(), AppServerTime(1))
             .unwrap();
     }
 
     let publish = stream.publish_committed(
-        state_root_scope(),
-        AppServerEventPayload::ProjectCollectionUpdated {
-            projects: ProjectCollectionSnapshot {
-                projects: Vec::new(),
-            },
-        },
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
     );
@@ -275,7 +282,7 @@ fn project_updates_do_not_leak_into_navigation_or_task_subscriptions() {
     assert_eq!(publish.deliveries.len(), 1);
     assert_eq!(
         publish.deliveries[0].event.subscription,
-        SubscriptionScope::Projects
+        task_scope("task-1")
     );
 }
 
@@ -349,20 +356,16 @@ fn unsubscribe_removes_only_the_requested_scope() {
     stream
         .subscribe(
             &context,
-            SubscriptionScope::Projects,
+            task_scope("task-1"),
             &snapshots(),
             AppServerTime(1),
         )
         .unwrap();
-    stream.unsubscribe(&context, SubscriptionScope::Projects, AppServerTime(2));
+    stream.unsubscribe(&context, task_scope("task-1"), AppServerTime(2));
 
     let publish = stream.publish_committed(
-        state_root_scope(),
-        AppServerEventPayload::ProjectCollectionUpdated {
-            projects: ProjectCollectionSnapshot {
-                projects: Vec::new(),
-            },
-        },
+        task_event_scope("task-1"),
+        task_changed("task-1"),
         |client_id| Some(delivery(client_id)),
         AppServerTime(3),
     );
@@ -371,12 +374,6 @@ fn unsubscribe_removes_only_the_requested_scope() {
 
 fn snapshots() -> SnapshotBuilder {
     SnapshotBuilder::new("server-1".into(), "root-1".into())
-}
-
-fn state_root_scope() -> EventScope {
-    EventScope::StateRoot {
-        state_root_id: StateRootId::from("root-1"),
-    }
 }
 
 fn task_event_scope(task_id: &str) -> EventScope {

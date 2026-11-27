@@ -5,6 +5,8 @@ import type {
   StateRootId,
   SubscriptionScope,
 } from "@openaide/app-server-client";
+import type { GlobalStateChanges } from "@openaide/app-server-client";
+import { startGlobalSyncSubscription } from "./appServerGlobalSync";
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
@@ -37,30 +39,40 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it("maps a session-owned Projects baseline into Frontend state", () => {
-    const subscription = fakeSubscription();
+  it("maps one sync notification into every changed area in one step", () => {
+    const sync = fakeSync();
     const dispatch = vi.fn();
-
-    startAppServerStateSubscription({
-      backendConnection: subscription.connection,
+    const setAgents = vi.fn();
+    const repository = { repositoryId: "repository_1", revision: 3, worktrees: [] };
+    const devices = {
+      remoteAccess: "on" as const,
+      serverName: "workstation",
+      devices: [{ deviceId: "device_1", name: "Phone", addedAtMs: 1 }],
+    };
+    startGlobalSyncSubscription({
+      backendConnection: sync.connection,
       context: { stateRootId: "root_1" as StateRootId },
+      currentAgentId: () => "",
       dispatch,
-      scope: { kind: "projects" },
+      setAgents,
     });
-    subscription.observer().onSnapshot({
-      kind: "projects",
+
+    sync.emit({
       projects: {
         projects: [{
-          projectId: "project_1" as never,
+          projectId: "project_1",
           label: "OpenAIDE",
           workspaceRoot: "/workspace/OpenAIDE",
           available: true,
-          worktreeRepositoryId: "repository_1" as never,
-          projectWorktreeId: "worktree_root" as never,
+          worktreeRepositoryId: "repository_1",
+          projectWorktreeId: "worktree_root",
           worktreeError: null,
         }],
       },
-    });
+      agents: { agents: [{ agentId: "codex", label: "Codex", status: "connected" }] },
+      worktrees: [repository],
+      devices,
+    } as never);
 
     expect(dispatch).toHaveBeenCalledWith({
       type: "projects",
@@ -74,54 +86,28 @@ describe("startAppServerStateSubscription", () => {
         worktreeError: undefined,
       }],
     });
-  });
-
-  it("maps a session-owned Worktree Repository baseline into Frontend state", () => {
-    const subscription = fakeSubscription();
-    const dispatch = vi.fn();
-    const repository = {
-      repositoryId: "repository_1",
-      revision: 3,
-      worktrees: [],
-    };
-
-    startAppServerStateSubscription({
-      backendConnection: subscription.connection,
-      context: { stateRootId: "root_1" as StateRootId },
-      dispatch,
-      scope: { kind: "worktreeRepository", repositoryId: "repository_1" as never },
-    });
-    subscription.observer().onSnapshot({
-      kind: "worktreeRepository",
-      repository,
-    } as never);
-
     expect(dispatch).toHaveBeenCalledWith({ type: "worktreeRepository", repository });
+    expect(dispatch).toHaveBeenCalledWith({ type: "settings:devices", devices });
+    expect(setAgents).toHaveBeenCalledWith([expect.objectContaining({ id: "codex", label: "Codex" })]);
   });
 
-  it("maps the Remote Device list into Settings state", () => {
-    const subscription = fakeSubscription();
+  it("dispatches nothing for areas a sync notification leaves out", () => {
+    const sync = fakeSync();
     const dispatch = vi.fn();
-    const devices = {
-      remoteAccess: "on" as const,
-      serverName: "workstation",
-      devices: [{ deviceId: "device_1", name: "Phone", addedAtMs: 1 }],
-    };
-
-    startAppServerStateSubscription({
-      backendConnection: subscription.connection,
+    startGlobalSyncSubscription({
+      backendConnection: sync.connection,
       context: { stateRootId: "root_1" as StateRootId },
       dispatch,
-      scope: { kind: "devices" },
     });
-    subscription.observer().onSnapshot({ kind: "devices", devices });
 
-    expect(dispatch).toHaveBeenCalledWith({ type: "settings:devices", devices });
+    sync.emit({} as never);
+
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("remaps task navigation when session-owned Project metadata arrives", () => {
     const navigation = fakeSubscription();
-    const projects = fakeSubscription();
+    const sync = fakeSync();
     const dispatch = vi.fn();
     const context = {
       stateRootId: "root_1" as StateRootId,
@@ -134,12 +120,7 @@ describe("startAppServerStateSubscription", () => {
       scope: { kind: "taskNavigation", section: "tasks" },
       view: viewParams("tasks"),
     });
-    startAppServerStateSubscription({
-      backendConnection: projects.connection,
-      context,
-      dispatch,
-      scope: { kind: "projects" },
-    });
+    startGlobalSyncSubscription({ backendConnection: sync.connection, context, dispatch });
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
@@ -155,8 +136,7 @@ describe("startAppServerStateSubscription", () => {
         hasMessages: true,
       } } })]),
     } as never);
-    projects.observer().onSnapshot({
-      kind: "projects",
+    sync.emit({
       projects: { projects: [{ projectId: "project_1", label: "OpenAIDE" }] },
     } as never);
 
@@ -300,29 +280,15 @@ describe("startAppServerStateSubscription", () => {
     });
   });
 
-  it("maps Agent baselines and ordered live text without owning stream state", () => {
-    const agents = fakeSubscription();
+  it("maps ordered live Task text without owning stream state", () => {
     const task = fakeSubscription();
     const dispatch = vi.fn();
-    const setAgents = vi.fn();
-    startAppServerStateSubscription({
-      backendConnection: agents.connection,
-      context: { stateRootId: "root_1" as StateRootId },
-      currentAgentId: () => "",
-      dispatch,
-      scope: { kind: "agents" },
-      setAgents,
-    });
     startAppServerStateSubscription({
       backendConnection: task.connection,
       context: { stateRootId: "root_1" as StateRootId },
       dispatch,
       scope: { kind: "task", taskId: "task_1" as never },
     });
-    agents.observer().onSnapshot({
-      kind: "agents",
-      agents: { agents: [{ agentId: "codex", label: "Codex", status: "connected" }] },
-    } as never);
     task.observer().onSnapshot({
       kind: "task",
       task: {
@@ -342,9 +308,6 @@ describe("startAppServerStateSubscription", () => {
       },
     } as never, false);
 
-    expect(setAgents).toHaveBeenCalledWith([
-      expect.objectContaining({ id: "codex", label: "Codex" }),
-    ]);
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskChat:liveText",
       taskId: "task_1",
@@ -367,7 +330,8 @@ describe("startAppServerStateSubscription", () => {
       onBaselineError,
       onBaselineLost,
       onBaselineReady,
-      scope: { kind: "agents" },
+      scope: { kind: "taskNavigation", section: "tasks" },
+      view: viewParams("tasks"),
     });
     subscription.observer().onBaselineLost?.();
     subscription.observer().onBaselineError?.(new Error("offline"));
@@ -398,6 +362,21 @@ function fakeSubscription() {
       return currentObserver;
     },
     stop,
+  };
+}
+
+function fakeSync() {
+  let listener: ((changes: GlobalStateChanges) => void) | undefined;
+  const handleNotification = vi.fn((_method: string, next: (changes: GlobalStateChanges) => void) => {
+    listener = next;
+    return () => undefined;
+  });
+  return {
+    connection: { handleNotification } as unknown as Pick<AppServerSession, "handleNotification">,
+    emit(changes: GlobalStateChanges) {
+      if (!listener) throw new Error("sync listener was not installed");
+      listener(changes);
+    },
   };
 }
 

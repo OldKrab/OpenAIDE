@@ -17,6 +17,7 @@ use crate::app_lifecycle::{
 #[cfg(test)]
 use crate::client_lifecycle::Delivery;
 use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
+use crate::global_state::GlobalAreas;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{
     event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway,
@@ -68,7 +69,7 @@ impl RpcGateway {
                 server_request_response_error(outcome),
             );
         };
-        let events = self.publish_request_resolution(&context, scope, now);
+        let events = self.publish_request_resolution(scope, now);
         responses::result_with_events(
             connection_id,
             id,
@@ -159,7 +160,7 @@ impl RpcGateway {
                 serde_json::json!({ "error": error.message }),
             );
         }
-        self.remove_expired_client_workspace_roots(client_instance_id, now);
+        self.remove_expired_client_workspace_roots(client_instance_id);
         self.file_viewer.release_client(client_instance_id);
         crate::logging::info(
             "client_detach_completed",
@@ -202,7 +203,7 @@ impl RpcGateway {
                     serde_json::json!({ "error": error.message }),
                 );
             }
-            self.remove_expired_client_workspace_roots(client_instance_id, now);
+            self.remove_expired_client_workspace_roots(client_instance_id);
         }
         if matches!(
             &outcome,
@@ -260,7 +261,7 @@ impl RpcGateway {
                 .remove_client_workspace_roots(client_instance_id);
         }
         if projects_changed {
-            self.queue_project_collection_update(now);
+            self.publish_global_state(GlobalAreas::PROJECTS);
         }
         if batch.last_client_expired {
             self.begin_draining_after_last_client("client_liveness_expired");
@@ -300,19 +301,12 @@ impl RpcGateway {
     fn remove_expired_client_workspace_roots(
         &mut self,
         client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
-        now: AppServerTime,
     ) {
         if self
             .project_roots
             .remove_client_workspace_roots(client_instance_id)
         {
-            self.queue_project_collection_update(now);
-        }
-    }
-
-    fn queue_project_collection_update(&mut self, now: AppServerTime) {
-        if let Some(events) = self.publish_project_collection_update(now) {
-            self.outbox.push_events(events);
+            self.publish_global_state(GlobalAreas::PROJECTS);
         }
     }
 
@@ -327,6 +321,23 @@ impl RpcGateway {
                 .into_iter()
                 .filter_map(|message| match message {
                     super::outbox::OutboundMessage::Event(event) => Some(*event),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// Takes the connection's queued `sync` changes and drops anything else queued for it.
+    #[cfg(test)]
+    pub(crate) fn drain_sync_for_connection(
+        &mut self,
+        connection_id: &ConnectionId,
+    ) -> Vec<openaide_app_server_protocol::global_state::GlobalStateChanges> {
+        self.outbox.transfer(connection_id, |messages| {
+            messages
+                .into_iter()
+                .filter_map(|message| match message {
+                    super::outbox::OutboundMessage::Sync(sync) => Some(sync.changes),
                     _ => None,
                 })
                 .collect()
@@ -392,7 +403,7 @@ impl RpcGateway {
         if terminal_exchange {
             return GatewayOutcome::Noop;
         }
-        let events = self.publish_request_resolution(&context, scope, now);
+        let events = self.publish_request_resolution(scope, now);
         if events.is_empty() {
             GatewayOutcome::Noop
         } else {
@@ -511,7 +522,6 @@ impl RpcGateway {
 
     fn publish_request_resolution(
         &mut self,
-        context: &ClientContext,
         scope: PendingRequestScope,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
@@ -519,11 +529,8 @@ impl RpcGateway {
             PendingRequestScope::Task { task_id } => {
                 self.publish_task_snapshot_replaced(&task_id, now)
             }
-            PendingRequestScope::Client { client_instance_id }
-                if client_instance_id == context.client_instance_id =>
-            {
-                self.publish_client_snapshot_replaced(context, now)
-            }
+            // A Client-scoped request is a server request on that client's wire; nothing renders
+            // it as state, so its resolution publishes nothing.
             PendingRequestScope::Client { .. } => Vec::new(),
         }
     }
@@ -545,35 +552,6 @@ impl RpcGateway {
                 task_id: task_id.clone(),
                 requests,
             },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ))
-    }
-
-    fn publish_client_snapshot_replaced(
-        &mut self,
-        context: &ClientContext,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        let token = self
-            .state_stream
-            .read_token_for_client(&context.client_instance_id);
-        let Ok(mut snapshot) =
-            self.snapshots
-                .client_snapshot(context, context.requested_surface.clone(), &token)
-        else {
-            return Vec::new();
-        };
-        snapshot.pending_requests = self
-            .server_requests
-            .pending_for_client(&context.client_instance_id);
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Client {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                client_instance_id: context.client_instance_id.clone(),
-            },
-            AppServerEventPayload::SnapshotReplaced { snapshot },
             |client_id| client_hub.delivery_for(client_id),
             now,
         ))

@@ -171,7 +171,7 @@ impl RpcGateway {
             CLIENT_PROBE => self.handle_client_probe(connection_id, id, params, meta),
             CLIENT_INITIALIZE => self.handle_initialize(connection_id, id, params, meta, now),
             CLIENT_CAPABILITIES_CHANGED => {
-                self.handle_client_capabilities_changed(connection_id, id, params, meta, now)
+                self.handle_client_capabilities_changed(connection_id, id, params, meta)
             }
             CLIENT_HEARTBEAT => self.handle_client_heartbeat(connection_id, id, params, meta, now),
             CLIENT_DETACH => self.handle_client_detach(connection_id, id, params, meta, now),
@@ -207,13 +207,13 @@ impl RpcGateway {
             SUPPORT_RECOVER_STUCK_SESSIONS => {
                 self.handle_support_recover_stuck_sessions(connection_id, id, params, meta, now)
             }
-            AGENT_PROBE => self.handle_agent_probe(connection_id, id, params, meta, now),
+            AGENT_PROBE => self.handle_agent_probe(connection_id, id, params, meta),
             AGENT_AUTHENTICATE => {
                 self.handle_agent_authenticate(connection_id, id, params, meta, now)
             }
             AGENT_LOGOUT => unreachable!("shared gateway routes logout outside the protocol lock"),
             AGENT_CANCEL_AUTHENTICATE => {
-                self.handle_agent_cancel_authenticate(connection_id, id, params, meta, now)
+                self.handle_agent_cancel_authenticate(connection_id, id, params, meta)
             }
             AGENT_REFRESH_ACCOUNT_LIMITS => {
                 self.handle_agent_refresh_account_limits(connection_id, id, params, meta)
@@ -247,21 +247,15 @@ impl RpcGateway {
                 self.handle_native_session_delete(connection_id, id, params, meta)
             }
             NATIVE_SESSION_FORK => self.handle_native_session_fork(connection_id, id, params, meta),
-            AGENT_CREATE_CUSTOM => {
-                self.handle_agent_create_custom(connection_id, id, params, meta, now)
-            }
+            AGENT_CREATE_CUSTOM => self.handle_agent_create_custom(connection_id, id, params, meta),
             AGENT_UPDATE_CUSTOM_METADATA => {
-                self.handle_agent_update_custom_metadata(connection_id, id, params, meta, now)
+                self.handle_agent_update_custom_metadata(connection_id, id, params, meta)
             }
             AGENT_REPLACE_CUSTOM => {
-                self.handle_agent_replace_custom(connection_id, id, params, meta, now)
+                self.handle_agent_replace_custom(connection_id, id, params, meta)
             }
-            AGENT_DELETE_CUSTOM => {
-                self.handle_agent_delete_custom(connection_id, id, params, meta, now)
-            }
-            AGENT_SET_ENABLED => {
-                self.handle_agent_set_enabled(connection_id, id, params, meta, now)
-            }
+            AGENT_DELETE_CUSTOM => self.handle_agent_delete_custom(connection_id, id, params, meta),
+            AGENT_SET_ENABLED => self.handle_agent_set_enabled(connection_id, id, params, meta),
             SETTINGS_GET_AGENT_DETAILS => {
                 self.handle_settings_get_agent_details(connection_id, id, params, meta)
             }
@@ -303,26 +297,26 @@ impl RpcGateway {
                 self.handle_devices_create_invite(connection_id, id, params, meta, now)
             }
             openaide_app_server_protocol::methods::DEVICES_CANCEL_INVITE => {
-                self.handle_devices_cancel_invite(connection_id, id, params, meta, now)
+                self.handle_devices_cancel_invite(connection_id, id, params, meta)
             }
             openaide_app_server_protocol::methods::DEVICES_REMOVE => {
-                self.handle_devices_remove(connection_id, id, params, meta, now)
+                self.handle_devices_remove(connection_id, id, params, meta)
             }
             openaide_app_server_protocol::methods::DEVICES_SET_RELAY
             | openaide_app_server_protocol::methods::DEVICES_RELAY_PEOPLE
             | openaide_app_server_protocol::methods::DEVICES_RELAY_ADD_PERSON
             | openaide_app_server_protocol::methods::DEVICES_RELAY_REVOKE_PERSON => {
                 let method = method.clone();
-                self.handle_relay_request(connection_id, id, &method, params, meta, now)
+                self.handle_relay_request(connection_id, id, &method, params, meta)
             }
             openaide_app_server_protocol::methods::TERMINALS_OPEN => {
-                self.handle_terminals_open(connection_id, id, params, meta, now)
+                self.handle_terminals_open(connection_id, id, params, meta)
             }
             openaide_app_server_protocol::methods::TERMINALS_ATTACH => {
                 self.handle_terminals_attach(connection_id, id, params, meta)
             }
             openaide_app_server_protocol::methods::TERMINALS_CLOSE => {
-                self.handle_terminals_close(connection_id, id, params, meta, now)
+                self.handle_terminals_close(connection_id, id, params, meta)
             }
             ATTACHMENT_LIST_ROOTS => {
                 self.handle_attachment_list_roots(connection_id, id, params, meta)
@@ -368,24 +362,22 @@ impl RpcGateway {
             WORKSPACE_CREATE_DIRECTORY => {
                 self.handle_workspace_create_directory(connection_id, id, params, meta)
             }
-            PROJECT_ADD => self.handle_project_add(connection_id, id, params, meta, now),
-            PROJECT_RENAME => self.handle_project_rename(connection_id, id, params, meta, now),
-            PROJECT_REMOVE => self.handle_project_remove(connection_id, id, params, meta, now),
-            PROJECT_REFRESH => self.handle_project_refresh(connection_id, id, params, meta, now),
+            PROJECT_ADD => self.handle_project_add(connection_id, id, params, meta),
+            PROJECT_RENAME => self.handle_project_rename(connection_id, id, params, meta),
+            PROJECT_REMOVE => self.handle_project_remove(connection_id, id, params, meta),
+            PROJECT_REFRESH => self.handle_project_refresh(connection_id, id, params, meta),
             TASK_ACQUIRE => self.handle_task_acquire(connection_id, id, params, meta, now),
             TASK_ACQUIRE_IN_WORKTREE => {
                 self.handle_task_acquire_in_worktree(connection_id, id, params, meta)
             }
-            WORKTREE_REFRESH => self.handle_worktree_refresh(connection_id, id, params, meta, now),
-            WORKTREE_CREATE => self.handle_worktree_create(connection_id, id, params, meta, now),
-            WORKTREE_RECREATE => {
-                self.handle_worktree_recreate(connection_id, id, params, meta, now)
-            }
+            WORKTREE_REFRESH => self.handle_worktree_refresh(connection_id, id, params, meta),
+            WORKTREE_CREATE => self.handle_worktree_create(connection_id, id, params, meta),
+            WORKTREE_RECREATE => self.handle_worktree_recreate(connection_id, id, params, meta),
             WORKTREE_REMOVAL_PREFLIGHT => {
                 self.handle_worktree_removal_preflight(connection_id, id, params, meta)
             }
-            WORKTREE_REMOVE => self.handle_worktree_remove(connection_id, id, params, meta, now),
-            WORKTREE_RENAME => self.handle_worktree_rename(connection_id, id, params, meta, now),
+            WORKTREE_REMOVE => self.handle_worktree_remove(connection_id, id, params, meta),
+            WORKTREE_RENAME => self.handle_worktree_rename(connection_id, id, params, meta),
             WORKTREE_RESOLVE_FOLDER => {
                 self.handle_worktree_resolve_folder(connection_id, id, params, meta)
             }

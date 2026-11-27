@@ -12,6 +12,7 @@ import { AppServerProtocolError, NAVIGATION_UPDATE, type AppServerSession } from
 import { refreshAgentSettingsThroughBackend } from "../intents/agentSettingsIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
+import { startGlobalSyncSubscription } from "../services/appServerGlobalSync";
 import { startSecretKeyDeclaration } from "../services/secretKeyDeclaration";
 import {
   mappingContextFromClientSnapshot,
@@ -269,7 +270,7 @@ export function useAppControllerBackendLifecycle({
         if (action.type === "settings:preferences") setPreferences(action.preferences);
         recoveredDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
       }
-      if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
+      if (recoveredSnapshot.global.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.global.agents));
       setBackendStateGeneration((current) => current + 1);
       sendWebviewTelemetry(postHostMessage, "app_server_recovery_baseline_applied", {
         surface: initialBootstrap.surface,
@@ -413,57 +414,19 @@ export function useAppControllerBackendLifecycle({
                 }
                 initializedDispatch(routeOwnedSnapshotAction(action, currentBootstrap));
               }
-              if (result.snapshot.agents) {
-                setAgents(agentOptionsFromProtocol(result.snapshot.agents));
+              if (result.snapshot.global.agents) {
+                setAgents(agentOptionsFromProtocol(result.snapshot.global.agents));
               }
               if (backendConnection) {
-                const subscriptionConnection = { subscribeState: backendConnection.subscribeState };
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  onBaselineLost: () => markGlobalSubscriptionLost("projects"),
-                  onBaselineError: (error) => markSubscriptionError("projects", error),
-                  onBaselineReady: () => markSubscriptionReady("projects"),
-                  scope: { kind: "projects" },
-                }));
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
+                // One `sync` stream carries projects, worktrees, Agents, devices and Terminals;
+                // none of them gates readiness, because the initialize reply holds the state.
+                stopSubscriptions.push(startGlobalSyncSubscription({
+                  backendConnection: { handleNotification: backendConnection.handleNotification },
                   context: subscriptionContext,
                   currentAgentId: () => currentAgentId.current,
                   dispatch: dispatchForCurrentReplica,
-                  onBaselineLost: () => markGlobalSubscriptionLost("agents"),
-                  onBaselineError: (error) => markSubscriptionError("agents", error),
-                  onBaselineReady: () => markSubscriptionReady("agents"),
-                  scope: { kind: "agents" },
                   setAgents,
                 }));
-                // Devices never gates readiness: the list only feeds Settings and the new-device notice.
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  scope: { kind: "devices" },
-                }));
-                // Terminals never gate readiness either: only the Terminal page and quit warnings read them.
-                stopSubscriptions.push(startAppServerStateSubscription({
-                  backendConnection: subscriptionConnection,
-                  context: subscriptionContext,
-                  dispatch: dispatchForCurrentReplica,
-                  scope: { kind: "terminals" },
-                }));
-                for (const project of result.snapshot.projects?.projects ?? []) {
-                  if (!project.worktreeRepositoryId) continue;
-                  stopSubscriptions.push(startAppServerStateSubscription({
-                    backendConnection: subscriptionConnection,
-                    context: subscriptionContext,
-                    dispatch: dispatchForCurrentReplica,
-                    scope: {
-                      kind: "worktreeRepository",
-                      repositoryId: project.worktreeRepositoryId,
-                    },
-                  }));
-                }
               }
               if (initialBootstrap.surface === "settings") {
                 if (initialBootstrap.settingsTab) {

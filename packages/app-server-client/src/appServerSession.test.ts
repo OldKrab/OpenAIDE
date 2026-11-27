@@ -391,37 +391,6 @@ describe("AppServerSession", () => {
       session.close();
     }
   });
-
-  it("maintains an independent replica for each Worktree Repository", async () => {
-    const subscribedRepositories: string[] = [];
-    const raw = fakeConnection(async (method, params) => {
-      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
-      const scope = (params as { scope: { kind: "worktreeRepository"; repositoryId: WorktreeRepositoryId } }).scope;
-      subscribedRepositories.push(scope.repositoryId);
-      return {
-        cursor: `cursor_${subscribedRepositories.length}` as EventCursor,
-        scope,
-        snapshot: {
-          kind: "worktreeRepository",
-          repository: { repositoryId: scope.repositoryId, revision: 1, worktrees: [] },
-        },
-      } as unknown as StateSubscribeResult;
-    });
-    const session = createAppServerSession(raw.connection);
-    await session.initialize(initializeParams());
-
-    session.subscribeState(
-      { kind: "worktreeRepository", repositoryId: "repository_1" as WorktreeRepositoryId },
-      { onSnapshot: vi.fn() },
-    );
-    session.subscribeState(
-      { kind: "worktreeRepository", repositoryId: "repository_2" as WorktreeRepositoryId },
-      { onSnapshot: vi.fn() },
-    );
-
-    await vi.waitFor(() => expect(subscribedRepositories).toEqual(["repository_1", "repository_2"]));
-    session.close();
-  });
 });
 
 function fakeConnection(
@@ -571,7 +540,15 @@ function initializeResult(): InitializeResult {
       server: { serverId: "server_1" as never, protocolVersion: { major: 1, minor: 0 }, capabilities: {} },
       stateRoot: { stateRootId: "root_1" as never },
       client: { clientInstanceId: "client_1" as never, shellKind: "web", surface: { kind: "home" } },
-      newTaskDefaults: { projectId: null, agentId: null },
+      global: {
+        projects: { projects: [] },
+        worktrees: [],
+        agents: { agents: [] },
+        settings: { sections: [] },
+        newTaskDefaults: { projectId: null, agentId: null },
+        devices: { remoteAccess: "off", serverName: "test" },
+        terminals: { terminals: [] },
+      },
       pendingRequests: [],
     },
   };
