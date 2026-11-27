@@ -496,6 +496,7 @@ export function createAppServerSession(
         ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
         generation,
         reason: result.reason,
+        ...result.detail,
       });
       invalidateReplica(replica);
       void refreshReplica(replica, generation);

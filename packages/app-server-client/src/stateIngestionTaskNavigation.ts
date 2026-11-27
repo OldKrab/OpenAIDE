@@ -6,6 +6,7 @@ import type {
   ProjectId,
   TaskNavigationSection,
 } from "./generated/protocol.js";
+import type { RejectionDetail } from "./stateIngestionTypes.js";
 
 /** One Project's rows in a Navigation view, exactly as App Server last sent them. */
 export type NavigationGroupReplica = {
@@ -40,7 +41,14 @@ export type NavigationFrameApplication =
   | { kind: "applied"; navigation: NavigationReplica }
   /** The frame was sent before the baseline the client holds. */
   | { kind: "stale" }
-  | { kind: "resyncRequired"; reason: "missingNavigationRow" | "missingNavigationGroup" };
+  | {
+      kind: "resyncRequired";
+      reason: "missingNavigationRow" | "missingNavigationGroup";
+      detail: RejectionDetail;
+    };
+
+/** Bounds the opaque row ids a rejection reports. */
+const MAX_REPORTED_MISSING_ROWS = 5;
 
 /** Installs a `navigation/subscribe` reply, whose frame is the complete baseline. */
 export function installNavigationReply(result: NavigationSubscribeResult): NavigationReplica | undefined {
@@ -64,12 +72,16 @@ export function applyNavigationFrame(
     (previous?.groups ?? []).map((group) => [group.projectId, group]),
   );
   for (const projectId of frame.removedGroups) known.delete(projectId);
+  const missingRowIds: string[] = [];
   for (const changed of frame.groups) {
     const before = known.get(changed.projectId);
     const rowsById: Record<string, NavigationRow> = {};
     for (const rowId of changed.order) {
       const row = changed.rows[rowId] ?? before?.rowsById[rowId];
-      if (!row) return { kind: "resyncRequired", reason: "missingNavigationRow" };
+      if (!row) {
+        missingRowIds.push(rowId);
+        continue;
+      }
       rowsById[rowId] = row;
     }
     known.set(changed.projectId, {
@@ -83,12 +95,32 @@ export function applyNavigationFrame(
       discovery: changed.discovery,
     });
   }
+  if (missingRowIds.length > 0) {
+    return {
+      kind: "resyncRequired",
+      reason: "missingNavigationRow",
+      detail: {
+        eventRevision: frame.revision,
+        heldRevision: previous?.revision,
+        missingRowCount: missingRowIds.length,
+        missingRowIds: missingRowIds.slice(0, MAX_REPORTED_MISSING_ROWS),
+      },
+    };
+  }
   const groupOrder = frame.groupOrder ?? previous?.groups.map((group) => group.projectId) ?? [];
   const groups: NavigationGroupReplica[] = [];
+  let missingGroupCount = 0;
   for (const projectId of groupOrder) {
     const group = known.get(projectId);
-    if (!group) return { kind: "resyncRequired", reason: "missingNavigationGroup" };
-    groups.push(group);
+    if (!group) missingGroupCount += 1;
+    else groups.push(group);
+  }
+  if (missingGroupCount > 0) {
+    return {
+      kind: "resyncRequired",
+      reason: "missingNavigationGroup",
+      detail: { eventRevision: frame.revision, heldRevision: previous?.revision, missingGroupCount },
+    };
   }
   return { kind: "applied", navigation: { section: frame.section, revision: frame.revision, groups } };
 }

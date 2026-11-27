@@ -29,7 +29,7 @@ impl RpcGateway {
     /// Recomputes dirty Navigation once and publishes every affected view's frame, in one batch
     /// under the protocol lock. Returns what was published; it is also in the outbox.
     pub(crate) fn flush_navigation(&mut self, now: AppServerTime) -> Vec<GatewayEventDelivery> {
-        let published = self.flush_navigation_unqueued(now);
+        let published = self.flush_navigation_unqueued(now, false);
         self.outbox.push_events(published.clone());
         published
     }
@@ -41,7 +41,8 @@ impl RpcGateway {
         outcome: GatewayOutcome,
         now: AppServerTime,
     ) -> GatewayOutcome {
-        let flushed = self.flush_navigation_unqueued(now);
+        let ahead_of_reply = matches!(outcome, GatewayOutcome::Respond { .. });
+        let flushed = self.flush_navigation_unqueued(now, ahead_of_reply);
         match outcome {
             GatewayOutcome::Respond {
                 connection_id,
@@ -68,14 +69,20 @@ impl RpcGateway {
 
     /// Like `flush_navigation`, for a handler whose outcome already carries these events to the
     /// outbox ahead of its reply.
-    fn flush_navigation_unqueued(&mut self, now: AppServerTime) -> Vec<GatewayEventDelivery> {
+    /// `ahead_of_reply` is whether the frames ride in front of a request's reply (recorded in
+    /// the `navigation_frame_published` event).
+    fn flush_navigation_unqueued(
+        &mut self,
+        now: AppServerTime,
+        ahead_of_reply: bool,
+    ) -> Vec<GatewayEventDelivery> {
         let mut published = Vec::new();
         for _ in 0..MAX_FLUSH_PASSES {
             if !self.navigation.is_dirty() {
                 break;
             }
             let flushed = self.navigation.flush();
-            published.extend(self.publish_navigation_flush(flushed, now));
+            published.extend(self.publish_navigation_flush(flushed, now, ahead_of_reply));
         }
         published
     }
@@ -84,6 +91,7 @@ impl RpcGateway {
         &mut self,
         flushed: FlushedFrames,
         now: AppServerTime,
+        ahead_of_reply: bool,
     ) -> Vec<GatewayEventDelivery> {
         for (project_id, _target) in &flushed.deepen {
             self.agent_list_sessions
@@ -91,7 +99,7 @@ impl RpcGateway {
         }
         let mut events = Vec::new();
         for (client, frame) in flushed.frames {
-            events.extend(self.publish_navigation_frame(&client, frame, now));
+            events.extend(self.publish_navigation_frame(&client, frame, now, ahead_of_reply));
         }
         events
     }
@@ -102,7 +110,9 @@ impl RpcGateway {
         client: &ClientInstanceId,
         frame: NavigationFrame,
         now: AppServerTime,
+        ahead_of_reply: bool,
     ) -> Vec<GatewayEventDelivery> {
+        log_navigation_frame_published(client, &frame, ahead_of_reply);
         let client_hub = self.client_hub.clone();
         event_deliveries(self.state_stream.publish(
             EventAddress::Client {
@@ -142,7 +152,7 @@ impl RpcGateway {
         };
         // Bring every existing view current first, so this subscription's baseline revision
         // orders after the frames those views were owed.
-        let mut events = self.flush_navigation_unqueued(now);
+        let mut events = self.flush_navigation_unqueued(now, true);
         let section = params.section;
         let scope = SubscriptionScope::TaskNavigation { section };
         let newly_subscribed = !self.state_stream.is_subscribed(&ctx, &scope);
@@ -170,7 +180,7 @@ impl RpcGateway {
                 revision: self.navigation.revision(),
                 ..Default::default()
             });
-        events.extend(self.publish_navigation_flush(flushed, now));
+        events.extend(self.publish_navigation_flush(flushed, now, true));
         crate::logging::info(
             "navigation_subscribed",
             serde_json::json!({
@@ -239,7 +249,7 @@ impl RpcGateway {
                 },
             );
         }
-        let mut events = self.flush_navigation_unqueued(now);
+        let mut events = self.flush_navigation_unqueued(now, true);
         let flushed = match self
             .navigation
             .upsert_view(&ctx.client_instance_id, params, false)
@@ -247,7 +257,7 @@ impl RpcGateway {
             Ok(flushed) => flushed,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        events.extend(self.publish_navigation_flush(flushed, now));
+        events.extend(self.publish_navigation_flush(flushed, now, true));
         crate::logging::info(
             "navigation_updated",
             serde_json::json!({
@@ -312,4 +322,28 @@ impl RpcGateway {
             NavigationUnsubscribeResult {},
         )
     }
+}
+
+/// Records the ordering facts of one published frame (metadata only: revision, counts, section,
+/// the opaque client instance id). With the debug level on, a reordering like a delta overtaking
+/// the frame that carried its rows is visible from the server log without a browser capture.
+fn log_navigation_frame_published(
+    client: &ClientInstanceId,
+    frame: &NavigationFrame,
+    ahead_of_reply: bool,
+) {
+    let row_body_count: usize = frame.groups.iter().map(|group| group.rows.len()).sum();
+    let order_len: usize = frame.groups.iter().map(|group| group.order.len()).sum();
+    crate::logging::debug(
+        "navigation_frame_published",
+        serde_json::json!({
+            "client_instance_id": client.as_str(),
+            "section": format!("{:?}", frame.section),
+            "revision": frame.revision,
+            "group_count": frame.groups.len(),
+            "row_body_count": row_body_count,
+            "order_len": order_len,
+            "ahead_of_reply": ahead_of_reply,
+        }),
+    );
 }

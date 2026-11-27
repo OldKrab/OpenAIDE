@@ -85,7 +85,11 @@ export function updateToolDetailSnapshot(
   // A baseline can race with dispatch of the durable delta it already contains.
   if (payload.revision <= snapshot.details.revision) return unchanged(snapshot);
   if (payload.revision !== snapshot.details.revision + 1) {
-    return { kind: "resyncRequired", reason: "toolDetailRevisionGap" };
+    return {
+      kind: "resyncRequired",
+      reason: "toolDetailRevisionGap",
+      detail: { eventRevision: payload.revision, heldRevision: snapshot.details.revision },
+    };
   }
   let details: ToolDetailSnapshot = snapshot.details;
   let terminalOutputs = snapshot.details.terminalOutputs ?? [];
@@ -120,12 +124,22 @@ export function updateSubagentHistorySnapshot(
   // A baseline can race with dispatch of a revision it already contains.
   if (payload.revision <= history.revision) return unchanged(snapshot);
   if (payload.revision !== history.revision + 1) {
-    return { kind: "resyncRequired", reason: "subagentHistoryRevisionGap" };
+    return {
+      kind: "resyncRequired",
+      reason: "subagentHistoryRevisionGap",
+      detail: { eventRevision: payload.revision, heldRevision: history.revision },
+    };
   }
   let chat = history.chat;
   for (const change of payload.chat ?? []) {
     const next = applyChatChange(chat, change);
-    if (!next) return { kind: "resyncRequired", reason: "missingChatItem" };
+    if (!next) {
+      return {
+        kind: "resyncRequired",
+        reason: "missingChatItem",
+        detail: { eventRevision: payload.revision, heldRevision: history.revision },
+      };
+    }
     chat = next;
   }
   return changed({

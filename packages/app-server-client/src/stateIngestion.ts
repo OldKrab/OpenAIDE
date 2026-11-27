@@ -5,6 +5,7 @@ import type {
   SubscriptionScope,
 } from "./generated/protocol.js";
 import type { ReplicaSnapshot } from "./backendConnection.js";
+import type { RejectionDetail, ResyncReason } from "./stateIngestionTypes.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
 import { installSubagentHistoryReply, installToolDetailReply } from "./stateIngestionEntities.js";
 import { installTaskReply } from "./stateIngestionTask.js";
@@ -32,7 +33,8 @@ export type SubscriptionEventApplyResult =
   | {
       kind: "resyncRequired";
       state: SubscriptionIngestionState;
-      reason: "missingChatItem" | "taskRevisionGap" | "toolDetailRevisionGap" | "subagentHistoryRevisionGap" | "missingNavigationRow" | "missingNavigationGroup";
+      reason: ResyncReason;
+      detail: RejectionDetail;
       event: AppServerEvent;
     };
 
@@ -99,7 +101,7 @@ export function applySubscriptionEvent(
 
   const update = updateSubscriptionSnapshot(state.scope, state.snapshot, event.payload);
   if (update.kind === "resyncRequired") {
-    return { kind: "resyncRequired", state, reason: update.reason, event };
+    return { kind: "resyncRequired", state, reason: update.reason, detail: update.detail, event };
   }
 
   return {

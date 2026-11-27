@@ -73,9 +73,17 @@ describe("Navigation frame ingestion", () => {
     })!;
     expect(applyNavigationFrame(base, frame({ revision: 2,
       groups: [{ ...group(one, ["a", "lost"]), rows: {} }],
-    }))).toEqual({ kind: "resyncRequired", reason: "missingNavigationRow" });
+    }))).toEqual({
+      kind: "resyncRequired",
+      reason: "missingNavigationRow",
+      detail: { eventRevision: 2, heldRevision: base.revision, missingRowCount: 1, missingRowIds: ["task:lost"] },
+    });
     expect(applyNavigationFrame(base, frame({ revision: 2, groupOrder: [one, two] })))
-      .toEqual({ kind: "resyncRequired", reason: "missingNavigationGroup" });
+      .toEqual({
+        kind: "resyncRequired",
+        reason: "missingNavigationGroup",
+        detail: { eventRevision: 2, heldRevision: base.revision, missingGroupCount: 1 },
+      });
   });
 
   it("ingests the frames of its subscription", () => {

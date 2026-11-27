@@ -404,10 +404,28 @@ fn frames_one_request_produces_reach_the_client_in_revision_order() {
     // The first discovery pass finished; the update's deeper target starts another.
     source.loading.store(false, Ordering::SeqCst);
 
+    let logs = crate::logging::capture_test_logs();
     shared.dispatch_inbound(
         connection_id.clone(),
         request("up", NAVIGATION_UPDATE, view(5)),
         AppServerTime(3),
+    );
+    let published: Vec<_> = logs
+        .snapshot()
+        .into_iter()
+        .filter(|line| line["event"] == "navigation_frame_published")
+        .filter(|line| line["fields"]["client_instance_id"] == "client-order")
+        .collect();
+    assert_eq!(published.len(), 2, "{published:?}");
+    assert_eq!(published[0]["level"], "debug");
+    assert_eq!(published[0]["fields"]["section"], "Tasks");
+    assert_eq!(published[0]["fields"]["group_count"], 1);
+    assert_eq!(published[0]["fields"]["row_body_count"], 3);
+    assert_eq!(published[0]["fields"]["order_len"], 5);
+    assert_eq!(published[0]["fields"]["ahead_of_reply"], true);
+    assert_eq!(published[1]["fields"]["row_body_count"], 0);
+    assert!(
+        published[0]["fields"]["revision"].as_u64() < published[1]["fields"]["revision"].as_u64()
     );
 
     let (revisions, bodies) = shared.transfer_outbound(&connection_id, |messages| {

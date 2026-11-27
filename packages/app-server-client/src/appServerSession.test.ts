@@ -211,7 +211,7 @@ describe("AppServerSession", () => {
       await vi.waitFor(() => expect(subscribeCount).toBe(2));
       expect(logger.warn).toHaveBeenCalledWith(
         "app_server_state_event_rejected",
-        expect.objectContaining({ reason: "taskRevisionGap" }),
+        expect.objectContaining({ reason: "taskRevisionGap", eventRevision: 3, heldRevision: 1 }),
       );
       replacement.resolve(taskSubscription(3));
       await vi.waitFor(() => expect(snapshots.at(-1)).toBe(3));

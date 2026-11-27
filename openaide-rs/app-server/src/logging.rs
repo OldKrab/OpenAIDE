@@ -62,6 +62,30 @@ pub fn init_file_logger(storage_root: &Path) {
     };
 }
 
+/// Debug events are for high-volume protocol ordering facts that are only worth recording while
+/// investigating; `OPENAIDE_LOG_LEVEL=debug` turns them on (tests always see them).
+fn debug_enabled() -> bool {
+    #[cfg(test)]
+    {
+        true
+    }
+    #[cfg(not(test))]
+    {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("OPENAIDE_LOG_LEVEL")
+                .is_ok_and(|level| level.eq_ignore_ascii_case("debug"))
+        })
+    }
+}
+
+/// Writes only when debug logging is enabled; build `fields` cheaply, it is built regardless.
+pub fn debug(event: &str, fields: Value) {
+    if debug_enabled() {
+        write("debug", event, fields);
+    }
+}
+
 pub fn info(event: &str, fields: Value) {
     write("info", event, fields);
 }

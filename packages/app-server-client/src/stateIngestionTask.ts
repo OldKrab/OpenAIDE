@@ -19,7 +19,11 @@ export function updateTaskSnapshot(
   switch (payload.kind) {
     case "taskChanged":
       if (payload.taskId !== task.task.taskId || payload.revision <= task.revision) return unchanged(snapshot);
-      if (payload.revision !== task.revision + 1) return { kind: "resyncRequired", reason: "taskRevisionGap" };
+      if (payload.revision !== task.revision + 1) return {
+        kind: "resyncRequired",
+        reason: "taskRevisionGap",
+        detail: { eventRevision: payload.revision, heldRevision: task.revision },
+      };
       return applyTaskChanges(snapshot, payload.revision, payload.changes);
     case "taskHistorySyncUpdated":
       return payload.taskId === task.task.taskId
@@ -91,7 +95,9 @@ function applyTaskChanges(
 
   for (const chatChange of changes.chat ?? []) {
     const result = applyChatChange(task, chatChange);
-    if (result.kind === "resyncRequired") return result;
+    if (result.kind === "resyncRequired") {
+      return { ...result, detail: { eventRevision: revision, heldRevision: snapshot.task.revision } };
+    }
     task = result.task;
   }
   return changed({ ...snapshot, task, chatVersion: changes.chatVersion ?? snapshot.chatVersion });
