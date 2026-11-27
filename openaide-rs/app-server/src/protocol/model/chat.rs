@@ -12,6 +12,10 @@ pub struct MessagePage {
     pub has_before: bool,
     pub total_count: u64,
     pub version: u64,
+    /// The Chat version (last `chat.log` frame number) of the projection this page was cut
+    /// from; zero for a page that is not cut from a Task projection.
+    #[serde(default)]
+    pub chat_version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

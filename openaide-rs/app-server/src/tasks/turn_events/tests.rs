@@ -776,7 +776,10 @@ fn question_waits_for_a_late_responder() {
             ServerRequestAnswer::Result(
                 serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
             ),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
+            &[
+                ResponderScope::Task(TaskId::from("task_1")),
+                ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -884,7 +887,10 @@ fn session_question_round_trips_and_persists_submitted_history() {
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(result),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
+            &[
+                ResponderScope::Task(TaskId::from("task_1")),
+                ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -981,7 +987,10 @@ fn permission_is_transient_until_the_server_request_resolves() {
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow" })),
-            &[ResponderScope::Task(TaskId::from("task_1"))],
+            &[
+                ResponderScope::Task(TaskId::from("task_1")),
+                ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -1219,8 +1228,7 @@ fn register_question_responder(server_requests: &ServerRequestRuntime, task_id: 
         crate::client_lifecycle::Delivery::new(
             ClientInstanceId::from("client-1"),
             crate::client_lifecycle::ConnectionId::new("conn-1"),
-        )
-        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Question]),
+        ),
         TaskId::from(task_id),
         AppServerTime(0),
     );
@@ -1231,8 +1239,7 @@ fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id
         crate::client_lifecycle::Delivery::new(
             ClientInstanceId::from("client-1"),
             crate::client_lifecycle::ConnectionId::new("conn-1"),
-        )
-        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Permission]),
+        ),
         TaskId::from(task_id),
         AppServerTime(0),
     );
@@ -1246,7 +1253,10 @@ fn answer_permission(server_requests: &ServerRequestRuntime, task_id: &str, opti
             ClientInstanceId::from("client-1"),
             request.request_id,
             ServerRequestAnswer::Result(serde_json::json!({ "optionId": option_id })),
-            &[ResponderScope::Task(task_id)],
+            &[
+                ResponderScope::Task(task_id),
+                ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
@@ -1265,7 +1275,10 @@ fn answer_question(
             ServerRequestAnswer::Result(
                 serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
             ),
-            &[ResponderScope::Task(task_id.clone())],
+            &[
+                ResponderScope::Task(task_id.clone()),
+                ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }

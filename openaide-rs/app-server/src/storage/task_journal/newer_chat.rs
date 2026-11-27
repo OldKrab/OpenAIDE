@@ -180,6 +180,7 @@ pub(super) fn rebuild(
             messages: Vec::new(),
             message_meta,
             artifact_heads: Default::default(),
+            chat_version: 0,
         };
         let storage_sequence = file.storage_sequence().saturating_add(1);
         // The next frame number, so a client holding any version of the set-aside

@@ -634,7 +634,7 @@ fn persist_changed_projection(
     changes: ProjectionChanges,
 ) -> Result<TaskCommitFacts, RuntimeError> {
     let ProjectionChanges {
-        mut chat,
+        chat,
         mut tool_details,
         artifact_replacements,
         terminal_appends,
@@ -658,11 +658,6 @@ fn persist_changed_projection(
         .revision
         .checked_add(1)
         .ok_or_else(|| RuntimeError::Internal("Task revision overflow".to_string()))?;
-    if projection.task.message_history_version != original.message_history_version
-        && chat.is_empty()
-    {
-        chat.push(CommittedChatChange::Replace);
-    }
     let fields = changed_fields(original, &projection.task);
     let has_messages = !projection.messages.is_empty();
     let projected = crate::snapshots::task_snapshot::project_committed_task_state(
@@ -676,7 +671,7 @@ fn persist_changed_projection(
     // Build every fallible publication value before the durability barrier.
     // Once the receipt resolves, the remaining path only installs revision
     // facts and returns already-owned data.
-    let changes = project_committed_changes(target, &projected, projection, fields, chat)?;
+    let mut changes = project_committed_changes(target, &projected, projection, fields, chat)?;
     let committed = target
         .store
         .task_journal()
@@ -697,6 +692,9 @@ fn persist_changed_projection(
             ),
         )?
         .wait()?;
+    if !changes.chat.is_empty() {
+        changes.chat_version = committed.chat_version;
+    }
     for detail in &mut tool_details {
         if let Some(change) = committed
             .artifact_changes
@@ -779,6 +777,7 @@ fn project_committed_changes(
         current_plan: fields.current_plan.then(|| task.current_plan.clone()),
         message_queue: fields.message_queue.then(|| task.message_queue.clone()),
         chat: projected_chat,
+        chat_version: None,
         removed: fields.removed,
     })
 }

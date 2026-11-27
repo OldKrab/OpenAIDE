@@ -83,7 +83,6 @@ fn waitable_client_request_returns_accepted_response() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
-                request_capabilities: Vec::new(),
             },
             "agent.secret".to_string(),
             Some("Agent secret".to_string()),
@@ -116,7 +115,6 @@ fn shell_reveal_file_request_uses_opaque_handle_params() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
-                request_capabilities: Vec::new(),
             },
             "file-reveal-1".to_string(),
             Some("main.rs".to_string()),
@@ -142,7 +140,6 @@ fn waitable_client_request_timeout_interrupts_pending_request() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
-                request_capabilities: Vec::new(),
             },
             ShellNotificationLevel::Info,
             "Saved".to_string(),
@@ -181,7 +178,6 @@ fn waitable_task_request_delivers_when_task_responder_subscribes() {
         Delivery {
             client_instance_id: ClientInstanceId::from("client-1"),
             connection_id: ConnectionId::new("conn-1"),
-            request_capabilities: Vec::new(),
         },
         task_id,
         AppServerTime(2),
@@ -236,5 +232,4 @@ fn permission_delivery() -> Delivery {
         ClientInstanceId::from("client-1"),
         ConnectionId::new("conn-1"),
     )
-    .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Permission])
 }

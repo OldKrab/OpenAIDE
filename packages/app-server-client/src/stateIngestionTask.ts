@@ -2,18 +2,16 @@ import type {
   AppServerEventPayload,
   ChatItem,
   MessagePart,
-  PendingRequestSnapshot,
   TaskChatChange,
-  TaskId,
-  TaskResumeSnapshot,
+  SubscriptionSnapshot,
   TaskSnapshot,
 } from "./generated/protocol.js";
-import type { ReplicaSnapshot } from "./backendConnection.js";
+import type { TaskReplicaSnapshot } from "./backendConnection.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
 
 export function updateTaskSnapshot(
-  snapshot: Extract<ReplicaSnapshot, { kind: "task" }>,
+  snapshot: TaskReplicaSnapshot,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
   const task = snapshot.task;
@@ -32,49 +30,38 @@ export function updateTaskSnapshot(
       return payload.taskId === task.task.taskId
         ? changed({ ...snapshot, task: { ...task, pendingRequests: payload.requests } })
         : unchanged(snapshot);
-    case "requestUpdated":
-      return requestMatchesTask(payload.request, task.task.taskId)
-        ? changed({ ...snapshot, task: upsertPendingRequest(task, payload.request) })
-        : unchanged(snapshot);
     default:
       return unchanged(snapshot);
   }
 }
 
 /**
- * Rebuilds the Task from a copy retained at `resume.knownRevision` (ADR-0073). The
- * missed changes go through the same ordered application as live events; the
- * unrevisioned fields then take their current values.
+ * Installs a Task subscribe reply (ADR-0086). The reply's fields are always current and
+ * complete. Its Chat is the tail page (`full`), or the Chat of `retained`, the copy the client
+ * offered as its known version, brought current with the missed `deltas`. `undefined` means
+ * the reply cannot be built on `retained`, and the caller must subscribe again without a
+ * known version.
  */
-export function resumeTaskSnapshot(
-  retained: Extract<ReplicaSnapshot, { kind: "task" }>,
-  resume: TaskResumeSnapshot,
-): SnapshotUpdate {
-  if (retained.task.task.taskId !== resume.taskId || retained.task.revision !== resume.knownRevision) {
-    return { kind: "resyncRequired", reason: "taskRevisionGap" };
+export function installTaskReply(
+  reply: Extract<SubscriptionSnapshot, { kind: "task" }>,
+  retained?: TaskReplicaSnapshot,
+): TaskReplicaSnapshot | undefined {
+  const { task, chatVersion, chatSync } = reply;
+  if (chatSync.kind === "full") return { kind: "task", task, chatVersion };
+  if (!retained || retained.task.task.taskId !== task.task.taskId) return undefined;
+  let current: TaskSnapshot = { ...task, chat: retained.task.chat };
+  if (chatSync.kind === "deltas") {
+    for (const change of chatSync.changes) {
+      const result = applyChatChange(current, change);
+      if (result.kind === "resyncRequired") return undefined;
+      current = result.task;
+    }
   }
-  let snapshot = retained;
-  for (const { revision, changes } of resume.changes) {
-    if (revision !== snapshot.task.revision + 1) return { kind: "resyncRequired", reason: "taskRevisionGap" };
-    const update = applyTaskChanges(snapshot, revision, changes);
-    if (update.kind === "resyncRequired") return update;
-    snapshot = update.snapshot as typeof retained;
-  }
-  const task = snapshot.task;
-  return changed({
-    ...snapshot,
-    task: {
-      ...task,
-      task: { ...task.task, workspaceAvailable: resume.workspaceAvailable },
-      historySync: resume.historySync,
-      pendingRequests: resume.pendingRequests,
-      subagents: resume.subagents,
-    },
-  });
+  return { kind: "task", task: current, chatVersion };
 }
 
 function applyTaskChanges(
-  snapshot: Extract<ReplicaSnapshot, { kind: "task" }>,
+  snapshot: TaskReplicaSnapshot,
   revision: number,
   changes: Extract<AppServerEventPayload, { kind: "taskChanged" }>["changes"],
 ): SnapshotUpdate {
@@ -107,7 +94,7 @@ function applyTaskChanges(
     if (result.kind === "resyncRequired") return result;
     task = result.task;
   }
-  return changed({ ...snapshot, task });
+  return changed({ ...snapshot, task, chatVersion: changes.chatVersion ?? snapshot.chatVersion });
 }
 
 type ChatApplyResult = { kind: "applied"; task: TaskSnapshot }
@@ -177,17 +164,4 @@ export function appendTextToMessageParts(parts: MessagePart[], text: string): Me
   const last = parts.at(-1);
   if (last?.kind !== "text") return [...parts, { kind: "text", text }];
   return [...parts.slice(0, -1), { ...last, text: last.text + text }];
-}
-
-function upsertPendingRequest(task: TaskSnapshot, request: PendingRequestSnapshot): TaskSnapshot {
-  const pendingRequests = task.pendingRequests ?? [];
-  const existing = pendingRequests.findIndex((pending) => pending.requestId === request.requestId);
-  const next = existing === -1
-    ? [...pendingRequests, request]
-    : pendingRequests.map((pending, index) => index === existing ? request : pending);
-  return { ...task, pendingRequests: next };
-}
-
-function requestMatchesTask(request: PendingRequestSnapshot, taskId: TaskId): boolean {
-  return request.scope.kind === "task" && request.scope.taskId === taskId;
 }

@@ -15,9 +15,10 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
     ATTACHMENT_TRANSFER, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE,
-    NATIVE_SESSION_RESTORE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
+    NATIVE_SESSION_RESTORE, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE,
+    TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ,
+    TASK_OPEN, TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION, TASK_SET_PINNED,
+    TASK_TOOL_IMAGE_PREVIEW,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -223,7 +224,7 @@ fn reset_task_history_removes_local_tasks_without_touching_project_files() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-reset"),
                 },
-                known_revision: None,
+                known_version: None,
             },
         })
         .to_string(),
@@ -778,7 +779,7 @@ fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
-                known_revision: None,
+                known_version: None,
             },
         })
         .to_string(),
@@ -832,7 +833,7 @@ fn native_session_archive_updates_both_navigation_section_subscriptions() {
                 "method": STATE_SUBSCRIBE,
                 "params": StateSubscribeParams {
                     scope: SubscriptionScope::TaskNavigation { section, project_ids: None },
-                    known_revision: None,
+                    known_version: None,
                 }
             })
             .to_string(),
@@ -928,7 +929,7 @@ fn native_session_title_override_publishes_and_survives_restart() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
-                known_revision: None,
+                known_version: None,
             },
         })
         .to_string(),
@@ -1010,7 +1011,7 @@ fn native_session_title_override_publishes_and_survives_restart() {
                     section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
                     project_ids: None,
                 },
-                known_revision: None,
+                known_version: None,
             },
         })
         .to_string(),
@@ -1038,7 +1039,7 @@ fn agent_probe_updates_agent_snapshot_and_emits_event() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -1097,7 +1098,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
                 "method": STATE_SUBSCRIBE,
                 "params": StateSubscribeParams {
                     scope: SubscriptionScope::Agents,
-                    known_revision: None,
+                    known_version: None,
                 }
             })
             .to_string(),
@@ -1413,7 +1414,7 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -1844,7 +1845,13 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
 
 #[test]
 fn stdio_error_response_is_refused_and_does_not_resolve_pending_server_request() {
-    let (temp, mut dispatcher) = dispatcher();
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("task-1")).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -1862,7 +1869,7 @@ fn stdio_error_response_is_refused_and_does_not_resolve_pending_server_request()
     );
     let opened = dispatcher
         .gateway
-        .open_server_request(task_server_request("task-1"), AppServerTime(2));
+        .open_server_request(task_secret_request("task-1"), AppServerTime(2));
     assert!(matches!(
         opened,
         OpenRequestOutcome::Opened {
@@ -1989,7 +1996,7 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
             "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
+            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_version: None }
         })
         .to_string(),
     );
@@ -2125,7 +2132,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2213,7 +2220,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2253,7 +2260,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Task { task_id: TaskId::from("task-existing") },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2265,7 +2272,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2313,7 +2320,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2331,25 +2338,18 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
         .to_string(),
     );
 
-    let request = wait_for_server_request(&mut dispatcher, &notifications, "permission/request");
-    assert_eq!(request["id"], "server-request-1");
-    assert!(request["params"]["requestId"]
-        .as_str()
-        .expect("agent permission request id")
-        .starts_with("perm_"));
-    let option_id = request["params"]["options"][0]["optionId"]
+    let request = wait_for_pending_permission(&mut dispatcher, &notifications);
+    assert_eq!(request["requestId"], "server-request-1");
+    assert!(!request["permission"]["options"]
+        .as_array()
+        .expect("permission options")
+        .is_empty());
+    let option_id = request["permission"]["options"][0]["optionId"]
         .as_str()
         .expect("option id")
         .to_string();
 
-    let updates = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": request["id"],
-            "result": { "optionId": option_id }
-        })
-        .to_string(),
-    );
+    let updates = resolve_pending_permission(&mut dispatcher, &request, &option_id);
     assert!(updates.iter().any(|line| {
         let value = response(line);
         value["method"] == "app/event"
@@ -2402,7 +2402,7 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
                 scope: SubscriptionScope::Task {
                     task_id: TaskId::from("task-existing"),
                 },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2420,19 +2420,12 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
         .to_string(),
     );
 
-    let request = wait_for_server_request(&mut dispatcher, &notifications, "permission/request");
-    let option_id = request["params"]["options"][1]["optionId"]
+    let request = wait_for_pending_permission(&mut dispatcher, &notifications);
+    let option_id = request["permission"]["options"][1]["optionId"]
         .as_str()
         .expect("reject option id")
         .to_string();
-    dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": request["id"],
-            "result": { "optionId": option_id }
-        })
-        .to_string(),
-    );
+    resolve_pending_permission(&mut dispatcher, &request, &option_id);
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
     drop(dispatcher);
@@ -2568,7 +2561,7 @@ fn product_request_before_initialize_is_rejected_by_gateway() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -2631,7 +2624,7 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
                 scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
-                known_revision: None,
+                known_version: None,
             }
         })
         .to_string(),
@@ -3022,7 +3015,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
             "method": STATE_SUBSCRIBE,
-            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_revision: None }
+            "params": StateSubscribeParams { scope: SubscriptionScope::Projects, known_version: None }
         })
         .to_string(),
     );
@@ -3234,17 +3227,6 @@ fn task_record(task_id: &str) -> TaskRecord {
     }
 }
 
-fn task_server_request(task_id: &str) -> ServerRequestDraft {
-    ServerRequestDraft {
-        scope: PendingRequestScope::Task {
-            task_id: TaskId::from(task_id),
-        },
-        method: "permission/request".to_string(),
-        title: "Permission needed".to_string(),
-        params: json!({ "prompt": "Allow?" }),
-    }
-}
-
 fn task_secret_request(task_id: &str) -> ServerRequestDraft {
     ServerRequestDraft {
         scope: PendingRequestScope::Task {
@@ -3267,10 +3249,11 @@ fn event_payload_kind(line: &str, kind: &str) -> bool {
     value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind
 }
 
-fn wait_for_server_request(
+/// Waits for the pending Permission to arrive as Task state. It never arrives as a server
+/// request (ADR-0086).
+fn wait_for_pending_permission(
     dispatcher: &mut ProtocolEdgeStdioDispatcher,
     notifications: &mpsc::Receiver<TaskUpdate>,
-    method: &str,
 ) -> Value {
     let deadline = Instant::now() + crate::test_sync::WATCHDOG;
     while Instant::now() < deadline {
@@ -3281,12 +3264,38 @@ fn wait_for_server_request(
         };
         for line in dispatcher.handle_task_update(notification) {
             let value = response(&line);
-            if value["method"] == method {
-                return value;
+            assert_ne!(
+                value["method"], "permission/request",
+                "a Permission must not be sent as a server request"
+            );
+            let payload = &value["params"]["payload"];
+            if value["method"] == "app/event" && payload["kind"] == "taskRequestsUpdated" {
+                if let Some(request) = payload["requests"].as_array().and_then(|r| r.first()) {
+                    return request.clone();
+                }
             }
         }
     }
-    panic!("server request {method} was not emitted");
+    panic!("no pending Permission reached the Task state");
+}
+
+fn resolve_pending_permission(
+    dispatcher: &mut ProtocolEdgeStdioDispatcher,
+    request: &Value,
+    option_id: &str,
+) -> Vec<String> {
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": request["requestId"],
+                "resolution": { "kind": "permission", "optionId": option_id }
+            }
+        })
+        .to_string(),
+    )
 }
 
 fn wait_for_protocol_task_status(

@@ -124,9 +124,6 @@ pub enum AppServerEventPayload {
         revision: u64,
         deltas: Vec<ToolDetailDelta>,
     },
-    RequestUpdated {
-        request: PendingRequestSnapshot,
-    },
     AgentCollectionUpdated {
         agents: AgentCollectionSnapshot,
     },
@@ -192,6 +189,11 @@ pub struct TaskChanges {
     pub message_queue: Option<TaskMessageQueueSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat: Vec<TaskChatChange>,
+    /// The Chat version after `chat`: the number of the Chat frame the transaction committed.
+    /// Present exactly when `chat` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_version: Option<u64>,
+    /// The Task is deleted. This is the subscription's final notification.
     #[serde(default, skip_serializing_if = "is_false")]
     pub removed: bool,
 }

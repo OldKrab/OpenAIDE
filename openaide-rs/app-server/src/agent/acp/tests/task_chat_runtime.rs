@@ -15,7 +15,7 @@ use openaide_app_server_protocol::task::{
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
 use crate::agent::registry::AgentRegistry;
 use crate::attachment_runtime::AttachmentOwner;
-use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
+use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageProjectResolver};
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage, TaskStatus};
 use crate::server_requests::{ResponderScope, ServerRequestAnswer, ServerRequestRuntime};
@@ -1576,8 +1576,7 @@ fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id
         Delivery::new(
             AttachmentOwner::test_client_instance_id(),
             ConnectionId::new("conn-1"),
-        )
-        .with_request_capabilities(vec![RequestCapability::Permission]),
+        ),
         TaskId::from(task_id),
         AppServerTime(0),
     );
@@ -1596,7 +1595,10 @@ fn auto_allow_permission(server_requests: &ServerRequestRuntime, task_id: &str) 
             AttachmentOwner::test_client_instance_id(),
             request.request_id.clone(),
             ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow-once" })),
-            &[ResponderScope::Task(task_id.clone())],
+            &[
+                ResponderScope::Task(task_id.clone()),
+                ResponderScope::Client(AttachmentOwner::test_client_instance_id()),
+            ],
             AppServerTime(1),
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }

@@ -174,6 +174,7 @@ impl Store {
             has_before: start > 0,
             total_count: history.messages.len() as u64,
             version: history.revision,
+            chat_version: 0,
         })
     }
 

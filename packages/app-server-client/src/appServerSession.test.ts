@@ -5,9 +5,12 @@ import type {
   BackendGenerationInvalidation,
   BackendRecoveryBaseline,
   BackendRecoveryFailure,
+  ChatItem,
   EventCursor,
   InitializeResult,
+  MessageId,
   StateSubscribeResult,
+  TaskChatSync,
   TaskId,
   WorktreeRepositoryId,
 } from "./index";
@@ -463,12 +466,20 @@ function fakeConnection(
   };
 }
 
-function taskSubscription(cursor: string, revision: number): StateSubscribeResult {
+function taskSubscription(
+  cursor: string,
+  revision: number,
+  chatVersion = revision,
+  chatSync: TaskChatSync = { kind: "full" },
+  chatItems: ChatItem[] = [],
+): StateSubscribeResult {
   return {
     cursor: cursor as EventCursor,
     scope: { kind: "task", taskId: "task_1" as TaskId },
     snapshot: {
       kind: "task",
+      chatVersion,
+      chatSync,
       task: {
         task: taskSummary(),
         lifecycle: "open",
@@ -481,11 +492,21 @@ function taskSubscription(cursor: string, revision: number): StateSubscribeResul
         messageQueue: { revision: 0, items: [] },
         historySync: { state: "idle", generation: 0 },
         subagents: { totalCount: 0, runningCount: 0, attentionCount: 0, available: true },
-        chat: { items: [], hasMessages: false },
+        chat: { items: chatItems, hasMessages: chatItems.length > 0 },
         pendingRequests: [],
       },
     },
   };
+}
+
+function userItem(messageId: string): ChatItem {
+  const id = messageId as MessageId;
+  return {
+    kind: "user",
+    messageId: id,
+    cursor: messageId,
+    parts: [{ kind: "text", text: messageId }],
+  } as unknown as ChatItem;
 }
 
 function recordingLogger() {
@@ -556,26 +577,22 @@ function deferred<T>() {
 describe("AppServerSession Task resume", () => {
   const scope = { kind: "task" as const, taskId: "task_1" as TaskId };
 
-  function resume(knownRevision: number, revisions: number[], cursor = "cursor_resume"): StateSubscribeResult {
-    return {
-      cursor: cursor as EventCursor,
-      scope,
-      snapshot: {
-        kind: "taskResume",
-        resume: {
-          taskId: "task_1" as TaskId,
-          knownRevision,
-          changes: revisions.map((revision) => ({
-            revision,
-            changes: { task: { ...taskSummary(), title: { value: `Revision ${revision}`, source: "user" as const } } },
-          })),
-          historySync: { state: "reloadAvailable", generation: 3 },
-          pendingRequests: [],
-          subagents: { totalCount: 2, runningCount: 1, attentionCount: 0, available: true },
-          workspaceAvailable: false,
-        },
-      },
+  function resume(
+    revision: number,
+    chatVersion: number,
+    chatSync: TaskChatSync,
+    cursor = "cursor_resume",
+  ): StateSubscribeResult {
+    const reply = taskSubscription(cursor, revision, chatVersion, chatSync);
+    if (reply.snapshot.kind !== "task") throw new Error("expected a Task reply");
+    // Fields are always current; the placeholder Chat is replaced by the client's own.
+    reply.snapshot.task = {
+      ...reply.snapshot.task,
+      task: { ...taskSummary(), workspaceAvailable: false },
+      historySync: { state: "reloadAvailable", generation: 3 },
+      subagents: { totalCount: 2, runningCount: 1, attentionCount: 0, available: true },
     };
+    return reply;
   }
 
   async function sessionWithReleasedTask(replies: StateSubscribeResult[]) {
@@ -597,60 +614,108 @@ describe("AppServerSession Task resume", () => {
     return { raw, session, params };
   }
 
-  it("offers the released copy's revision and installs it with only the missed changes", async () => {
-    const { session, params } = await sessionWithReleasedTask([taskSubscription("cursor_1", 4), resume(4, [5, 6])]);
-    const snapshots: unknown[] = [];
+  function taskSnapshots(session: ReturnType<typeof createAppServerSession>) {
+    const snapshots: Array<Extract<StateSubscribeResult["snapshot"], { kind: "task" }>> = [];
+    session.subscribeState(scope, {
+      onSnapshot: (snapshot) => {
+        if (snapshot.kind === "task") snapshots.push(snapshot as never);
+      },
+    });
+    return snapshots;
+  }
 
-    session.subscribeState(scope, { onSnapshot: (snapshot) => snapshots.push(snapshot) });
+  it("offers the released copy's Chat version and installs the missed changes on its Chat", async () => {
+    const { session, params } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
+      resume(6, 12, { kind: "deltas", changes: [{ kind: "append", item: userItem("two") }] }),
+    ]);
+
+    const snapshots = taskSnapshots(session);
 
     await vi.waitFor(() => expect(snapshots).toHaveLength(1));
-    expect(params).toEqual([{ scope }, { scope, knownRevision: 4 }]);
-    const [snapshot] = snapshots as Array<Extract<StateSubscribeResult["snapshot"], { kind: "task" }>>;
-    expect(snapshot.kind).toBe("task");
+    expect(params).toEqual([{ scope }, { scope, knownVersion: 10 }]);
+    const [snapshot] = snapshots;
     expect(snapshot.task.revision).toBe(6);
-    expect(snapshot.task.task.title).toEqual({ value: "Revision 6", source: "user" });
-    // Unrevisioned state comes from the reply, not the retained copy.
+    expect(snapshot.chatVersion).toBe(12);
+    expect(snapshot.task.chat.items.map((item) => item.messageId)).toEqual(["one", "two"]);
+    // Fields come from the reply, not the retained copy.
     expect(snapshot.task.task.workspaceAvailable).toBe(false);
     expect(snapshot.task.historySync).toEqual({ state: "reloadAvailable", generation: 3 });
     expect(snapshot.task.subagents.totalCount).toBe(2);
     session.close();
   });
 
-  it("subscribes again for a baseline when the missed changes do not continue the copy", async () => {
-    const { session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4),
-      resume(4, [6]),
-      taskSubscription("cursor_2", 6),
+  it("keeps the retained Chat when the reply says it is current", async () => {
+    const { session } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
+      resume(5, 10, { kind: "current" }),
     ]);
-    const snapshots: number[] = [];
 
-    session.subscribeState(scope, {
-      onSnapshot: (snapshot) => {
-        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
-      },
-    });
+    const snapshots = taskSnapshots(session);
 
-    await vi.waitFor(() => expect(snapshots).toEqual([6]));
-    expect(params).toEqual([{ scope }, { scope, knownRevision: 4 }, { scope }]);
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0].task.chat.items.map((item) => item.messageId)).toEqual(["one"]);
+    expect(snapshots[0].chatVersion).toBe(10);
     session.close();
   });
 
-  it("never offers a copy from before a recovery", async () => {
+  it("takes the reply's tail page when the server answers full", async () => {
+    const { session } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4, 10, { kind: "full" }, [userItem("one")]),
+      taskSubscription("cursor_2", 9, 30, { kind: "full" }, [userItem("fresh")]),
+    ]);
+
+    const snapshots = taskSnapshots(session);
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0].task.chat.items.map((item) => item.messageId)).toEqual(["fresh"]);
+    expect(snapshots[0].chatVersion).toBe(30);
+    session.close();
+  });
+
+  it("subscribes again without a version when the missed changes do not fit the copy", async () => {
+    const { session, params } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4, 10),
+      resume(6, 12, { kind: "deltas", changes: [{ kind: "appendText", messageId: "absent" as MessageId, text: "x" }] }),
+      taskSubscription("cursor_2", 6, 12, { kind: "full" }, [userItem("fresh")]),
+    ]);
+
+    const snapshots = taskSnapshots(session);
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope }, { scope, knownVersion: 10 }, { scope }]);
+    expect(snapshots[0].task.chat.items.map((item) => item.messageId)).toEqual(["fresh"]);
+    session.close();
+  });
+
+  it("offers a copy across a recovery on the same state root", async () => {
     const { raw, session, params } = await sessionWithReleasedTask([
-      taskSubscription("cursor_1", 4),
-      taskSubscription("cursor_2", 7),
+      taskSubscription("cursor_1", 4, 10),
+      resume(7, 10, { kind: "current" }),
     ]);
     raw.invalidate();
     raw.recover();
-    const snapshots: number[] = [];
 
-    session.subscribeState(scope, {
-      onSnapshot: (snapshot) => {
-        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
-      },
-    });
+    const snapshots = taskSnapshots(session);
 
-    await vi.waitFor(() => expect(snapshots).toEqual([7]));
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(params).toEqual([{ scope }, { scope, knownVersion: 10 }]);
+    session.close();
+  });
+
+  it("drops copies when a recovery reports another state root", async () => {
+    const { raw, session, params } = await sessionWithReleasedTask([
+      taskSubscription("cursor_1", 4, 10),
+      taskSubscription("cursor_2", 7, 3),
+    ]);
+    raw.invalidate();
+    const other = initializeResult();
+    other.snapshot.stateRoot = { stateRootId: "root_2" as never };
+    raw.recover(other);
+
+    const snapshots = taskSnapshots(session);
+
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
     expect(params).toEqual([{ scope }, { scope }]);
     session.close();
   });

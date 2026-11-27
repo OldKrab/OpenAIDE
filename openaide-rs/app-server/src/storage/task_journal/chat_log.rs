@@ -430,8 +430,8 @@ pub(super) fn inspect(task_dir: &Path) -> Result<LogShape, RuntimeError> {
 }
 
 /// The operations committed after a client's known Chat version.
+#[allow(dead_code)] // Versions are asserted by tests; callers read them from the projection.
 #[derive(Debug)]
-#[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads these.
 pub(crate) enum ChatChangesSince {
     /// The known version is the latest.
     Current { version: u64 },
@@ -449,7 +449,7 @@ pub(crate) enum ChatChangesSince {
 
 /// One committed transaction's Chat operations.
 #[derive(Debug)]
-#[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads these.
+#[allow(dead_code)] // The frame number is asserted by tests; callers read the projection version.
 pub(crate) struct ChatFrameChanges {
     /// The Chat version after this frame.
     pub(crate) version: u64,

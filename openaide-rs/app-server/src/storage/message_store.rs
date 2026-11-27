@@ -6,7 +6,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     ActivityStep, AgentMessageRole, ChatMessage, MessagePage, NormalizedMessage,
 };
-use crate::storage::records::{MessageMeta, StoredMessage};
+use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
 
 use super::cursor;
@@ -95,11 +95,23 @@ impl Store {
     }
 
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
+        self.read_task_with_tail(task_id, limit)
+            .map(|(_, page)| page)
+    }
+
+    /// The Task record and the Chat tail page cut from one committed projection, so the
+    /// record's revision, the page and its Chat version describe the same state.
+    pub fn read_task_with_tail(
+        &self,
+        task_id: &str,
+        limit: usize,
+    ) -> Result<(TaskRecord, MessagePage), RuntimeError> {
         let limit = limit.clamp(1, 500);
         let projection = self.task_journal().load(task_id)?;
         let total = projection.messages.len();
         let start = chat_page_start(&projection.messages, total.saturating_sub(limit), total);
-        self.page_from_projection(&projection, start, total)
+        let page = self.page_from_projection(&projection, start, total)?;
+        Ok((projection.task, page))
     }
 
     pub fn page_before(
@@ -217,6 +229,7 @@ impl Store {
             has_before: start > 0,
             total_count: projection.messages.len() as u64,
             version: projection.message_meta.version,
+            chat_version: projection.chat_version,
             items,
         })
     }

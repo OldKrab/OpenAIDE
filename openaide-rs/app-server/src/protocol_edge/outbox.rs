@@ -39,6 +39,7 @@ pub(crate) enum OutboundMessage {
 }
 
 impl OutboundMessage {
+    #[cfg(test)]
     pub(crate) fn server_request_method(&self) -> Option<&str> {
         match self {
             Self::ServerRequest(envelope) => Some(envelope.method.as_str()),

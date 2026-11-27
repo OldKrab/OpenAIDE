@@ -14,6 +14,7 @@ import type {
   StateRootId,
   SubscriptionScope,
   SubscriptionSnapshot,
+  TaskSnapshot,
 } from "./generated/protocol.js";
 
 export type BackendEventListener = (event: AppServerEvent) => void;
@@ -38,10 +39,13 @@ export type AppServerSessionStatus =
   | { status: "recovering"; generation: number; reason: BackendGenerationInvalidation["reason"] }
   | { status: "unavailable"; generation: number; error: unknown };
 /**
- * A scope replica's installed state. A subscribe reply's `taskResume` is rebuilt into
- * a complete `task` snapshot before any observer sees it (ADR-0073).
+ * A Task replica's installed state: its complete current fields and Chat, and the Chat version
+ * they were built at. A subscribe reply's `chatSync` is resolved into a complete Chat before any
+ * observer sees it (ADR-0086), so it is not kept.
  */
-export type ReplicaSnapshot = Exclude<SubscriptionSnapshot, { kind: "taskResume" }>;
+export type TaskReplicaSnapshot = { kind: "task"; task: TaskSnapshot; chatVersion: number };
+/** A scope replica's installed state. */
+export type ReplicaSnapshot = Exclude<SubscriptionSnapshot, { kind: "task" }> | TaskReplicaSnapshot;
 export type AppServerStateObserver = {
   onSnapshot(snapshot: ReplicaSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
   onBaselineLost?(): void;

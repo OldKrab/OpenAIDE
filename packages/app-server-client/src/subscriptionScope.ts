@@ -123,8 +123,7 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "snapshotReplaced" ||
         payload.kind === "taskChanged" ||
         payload.kind === "taskHistorySyncUpdated" ||
-        payload.kind === "taskRequestsUpdated" ||
-        payload.kind === "requestUpdated"
+        payload.kind === "taskRequestsUpdated"
       );
     case "subagentCatalog":
       return payload.kind === "subagentCatalogUpdated"

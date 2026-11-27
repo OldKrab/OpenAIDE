@@ -1594,7 +1594,6 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     let delivery = Delivery {
         client_instance_id: ClientInstanceId::from("client-1"),
         connection_id: ConnectionId::new("connection-1"),
-        request_capabilities: vec![crate::client_lifecycle::RequestCapability::Permission],
     };
     let deliveries = server_requests.observe_subscription_added(
         delivery.clone(),

@@ -20,7 +20,7 @@ fn subscribe_to_terminals(gateway: &mut RpcGateway, connection_id: &ConnectionId
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Terminals,
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),

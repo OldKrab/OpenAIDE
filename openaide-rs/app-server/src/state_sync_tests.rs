@@ -430,6 +430,5 @@ fn delivery(client_id: &ClientInstanceId) -> Delivery {
     Delivery {
         client_instance_id: client_id.clone(),
         connection_id: ConnectionId::new(format!("conn-for-{}", client_id.as_str())),
-        request_capabilities: Vec::new(),
     }
 }

@@ -486,6 +486,7 @@ fn agent_chat(identity: &str, text_bytes: usize) -> ChatMessage {
 
 fn task_projection(task_id: &str) -> TaskProjection {
     TaskProjection {
+        chat_version: 0,
         task: task_record(task_id),
         messages: Vec::new(),
         message_meta: MessageMeta {

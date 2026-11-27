@@ -22,6 +22,7 @@ import type {
   BackendRecoveryFailure,
   BackendUnsubscribe,
   ReplicaSnapshot,
+  TaskReplicaSnapshot,
 } from "./backendConnection.js";
 
 const SUBSCRIPTION_RETRY_MS = 500;
@@ -61,7 +62,7 @@ export function createAppServerSession(
   // Task copies kept after their last observer leaves, least recently released first.
   // Returning to the Task offers the copy's revision instead of paying for a baseline
   // (ADR-0073). A copy is trusted only within the generation that installed it.
-  const retainedTaskCopies = new Map<string, Extract<ReplicaSnapshot, { kind: "task" }>>();
+  const retainedTaskCopies = new Map<string, TaskReplicaSnapshot>();
   const statusListeners = new Set<(status: AppServerSessionStatus) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
@@ -233,8 +234,13 @@ export function createAppServerSession(
       replica_count: replicas.size,
     });
     updateStatus({ status: "recovering", generation, reason: event.reason });
-    retainedTaskCopies.clear();
-    for (const replica of replicas.values()) invalidateReplica(replica);
+    // A copy stays valid across a transport loss or an App Server restart: it carries the Chat
+    // version it was built at, and App Server answers it with the missed Chat changes, or the
+    // whole Chat when it cannot. Only another state root makes the copies meaningless.
+    for (const [key, replica] of replicas) {
+      retainTaskCopy(key, replica);
+      invalidateReplica(replica);
+    }
     notifyListeners(invalidationListeners, event, logger, "generation_invalidation");
   }
 
@@ -247,6 +253,14 @@ export function createAppServerSession(
       replica_count: replicas.size,
       duration_ms: Date.now() - gate.startedAt,
     });
+    if (initialization && initialization.snapshot.stateRoot.stateRootId !== baseline.result.snapshot.stateRoot.stateRootId) {
+      logger.info("app_server_retained_task_copies_dropped", {
+        generation,
+        retained_copy_count: retainedTaskCopies.size,
+        reason: "stateRootChanged",
+      });
+      retainedTaskCopies.clear();
+    }
     initialization = baseline.result;
     notifyListeners(recoveryBaselineListeners, baseline, logger, "recovery_baseline");
     await refreshCurrentReplicas(gate.generation);
@@ -329,17 +343,17 @@ export function createAppServerSession(
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
       attempt += 1;
       const startedAt = Date.now();
-      const knownRevision = retained?.task.revision;
+      const knownVersion = retained?.chatVersion;
       try {
         logger.info("app_server_state_baseline_request_started", {
           ...scopeDiagnosticFields(replica.scope, scopeKey(replica.scope)),
           generation: targetGeneration,
           attempt,
-          known_revision_offered: knownRevision !== undefined,
+          known_version_offered: knownVersion !== undefined,
         });
         const result = await connection.request(
           STATE_SUBSCRIBE,
-          knownRevision === undefined ? { scope: replica.scope } : { scope: replica.scope, knownRevision },
+          knownVersion === undefined ? { scope: replica.scope } : { scope: replica.scope, knownVersion },
         );
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
         const snapshot = initialization?.snapshot;
@@ -373,7 +387,10 @@ export function createAppServerSession(
           generation: targetGeneration,
           attempt,
           reply_kind: result.snapshot.kind,
-          missed_change_count: result.snapshot.kind === "taskResume" ? result.snapshot.resume.changes.length : 0,
+          chat_sync: result.snapshot.kind === "task" ? result.snapshot.chatSync.kind : undefined,
+          missed_change_count: result.snapshot.kind === "task" && result.snapshot.chatSync.kind === "deltas"
+            ? result.snapshot.chatSync.changes.length
+            : 0,
           dropped_pending_event_count: droppedPendingCount,
           duration_ms: Date.now() - startedAt,
         });

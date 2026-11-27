@@ -116,9 +116,9 @@ function updateFromClientSnapshot(
         ? changed({ kind: "taskNavigation", navigation: filterTaskNavigationForScope(clientSnapshot.tasks, scope) })
         : unchanged(snapshot);
     case "task":
-      return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
-        ? changed({ kind: "task", task: clientSnapshot.activeTask })
-        : unchanged(snapshot);
+      // A Client snapshot's active Task has no Chat version, so it cannot replace the replica;
+      // the Task's own stream carries every change to it.
+      return unchanged(snapshot);
     case "subagentCatalog":
     case "subagentHistory":
       return unchanged(snapshot);

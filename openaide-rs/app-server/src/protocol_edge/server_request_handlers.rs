@@ -420,17 +420,11 @@ impl RpcGateway {
         snapshot: &mut openaide_app_server_protocol::state::SubscriptionSnapshot,
     ) {
         use openaide_app_server_protocol::state::SubscriptionSnapshot;
-        let (task_id, requests) = match snapshot {
-            SubscriptionSnapshot::Task { task } => {
-                *task = self.task_with_pending_requests(task.clone());
-                (task.task.task_id.clone(), &task.pending_requests)
-            }
-            SubscriptionSnapshot::TaskResume { resume } => {
-                resume.pending_requests = self.server_requests.pending_for_task(&resume.task_id);
-                (resume.task_id.clone(), &resume.pending_requests)
-            }
-            _ => return,
+        let SubscriptionSnapshot::Task { task, .. } = snapshot else {
+            return;
         };
+        *task = self.task_with_pending_requests(task.clone());
+        let (task_id, requests) = (task.task.task_id.clone(), &task.pending_requests);
         if !requests.is_empty() {
             // One subscriber's empty baseline says nothing about what other clients hold,
             // so a snapshot can only add visibility; the Task stream withdraws it.

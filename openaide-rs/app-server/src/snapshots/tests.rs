@@ -87,6 +87,7 @@ fn agent_subscription_uses_backend_owned_agent_collection() {
         .snapshot(
             &ctx(),
             &SubscriptionScope::Agents,
+            None,
             &CursorSequencer::new().read_token(),
         )
         .unwrap()
@@ -103,6 +104,7 @@ fn project_subscription_uses_backend_owned_project_collection() {
         .snapshot(
             &ctx(),
             &SubscriptionScope::Projects,
+            None,
             &CursorSequencer::new().read_token(),
         )
         .unwrap()
@@ -123,6 +125,7 @@ fn worktree_subscription_uses_repository_scoped_inventory() {
             &SubscriptionScope::WorktreeRepository {
                 repository_id: repository_id.clone(),
             },
+            None,
             &CursorSequencer::new().read_token(),
         )
         .unwrap()
@@ -158,6 +161,7 @@ fn settings_subscription_uses_backend_owned_settings_collection() {
             &SubscriptionScope::Settings {
                 section: Some(SettingsSection::Agents),
             },
+            None,
             &CursorSequencer::new().read_token(),
         )
         .unwrap()
@@ -218,12 +222,13 @@ fn client_snapshot_preserves_global_state_when_requested_task_is_missing() {
 
 #[test]
 fn task_subscription_uses_backend_owned_task_snapshot() {
-    let SubscriptionSnapshot::Task { task } = builder()
+    let SubscriptionSnapshot::Task { task, .. } = builder()
         .snapshot(
             &ctx(),
             &SubscriptionScope::Task {
                 task_id: TaskId::from("task-1"),
             },
+            None,
             &CursorSequencer::new().read_token(),
         )
         .unwrap()

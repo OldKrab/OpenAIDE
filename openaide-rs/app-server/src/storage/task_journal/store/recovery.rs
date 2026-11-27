@@ -194,6 +194,10 @@ pub(super) fn ensure_task_loaded(
     };
     if let RecoveredTask::Available { projection, .. } = &mut task {
         migrate_inline_images(&task_dir, projection)?;
+        // Hydration owns the in-memory Chat version: every conversion and repair above has
+        // already published the committed `task.json`, which is its source.
+        projection.chat_version =
+            split::load_task(&task_dir)?.map_or(0, |metadata| metadata.chat_frame);
     }
     let epoch_overlay = epoch_task_overlays
         .read()

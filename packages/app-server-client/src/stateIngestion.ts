@@ -6,7 +6,7 @@ import type {
 } from "./generated/protocol.js";
 import type { ReplicaSnapshot } from "./backendConnection.js";
 import { updateSubscriptionSnapshot } from "./stateIngestionSnapshots.js";
-import { resumeTaskSnapshot } from "./stateIngestionTask.js";
+import { installTaskReply } from "./stateIngestionTask.js";
 import { matchSubscriptionEvent } from "./subscriptionScope.js";
 import type { SubscriptionIngestionContext } from "./subscriptionScope.js";
 export type { SubscriptionIngestionContext } from "./subscriptionScope.js";
@@ -40,7 +40,7 @@ export type SubscriptionEventApplyResult =
 
 /** Installs a subscribe reply that carries a complete baseline. */
 export function createSubscriptionIngestionState(
-  result: StateSubscribeResult & { snapshot: ReplicaSnapshot },
+  result: Omit<StateSubscribeResult, "snapshot"> & { snapshot: ReplicaSnapshot },
   context: SubscriptionIngestionContext,
 ): SubscriptionIngestionState {
   return {
@@ -52,9 +52,9 @@ export function createSubscriptionIngestionState(
 }
 
 /**
- * Installs any subscribe reply. A Task resume is rebuilt from `retained`, the copy
- * the client offered as its known revision (ADR-0073); `undefined` means it could
- * not be, and the caller must subscribe again for a baseline.
+ * Installs any subscribe reply. A Task reply is built on `retained`, the copy the client offered
+ * as its known version (ADR-0086); `undefined` means it could not be, and the caller must
+ * subscribe again without one.
  */
 export function installSubscriptionReply(
   result: StateSubscribeResult,
@@ -62,11 +62,10 @@ export function installSubscriptionReply(
   retained?: ReplicaSnapshot,
 ): SubscriptionIngestionState | undefined {
   const { snapshot } = result;
-  if (snapshot.kind !== "taskResume") return createSubscriptionIngestionState({ ...result, snapshot }, context);
-  if (retained?.kind !== "task") return undefined;
-  const update = resumeTaskSnapshot(retained, snapshot.resume);
-  if (update.kind === "resyncRequired") return undefined;
-  return createSubscriptionIngestionState({ ...result, snapshot: update.snapshot }, context);
+  if (snapshot.kind !== "task") return createSubscriptionIngestionState({ ...result, snapshot }, context);
+  const installed = installTaskReply(snapshot, retained?.kind === "task" ? retained : undefined);
+  if (!installed) return undefined;
+  return createSubscriptionIngestionState({ ...result, snapshot: installed }, context);
 }
 
 export function applySubscriptionEvent(

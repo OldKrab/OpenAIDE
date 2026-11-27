@@ -16,6 +16,12 @@ pub struct TaskProjection {
     /// Highest artifact operation made visible by a durable Task commit.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub artifact_heads: HashMap<String, u64>,
+    /// The Chat version (last `chat.log` frame number) this projection reflects. The store sets
+    /// it when it hydrates a Task and when it publishes a commit, so a reader that clones or
+    /// inspects the projection gets its fields, Chat and Chat version from one committed state.
+    /// A caller that builds a projection leaves it zero; it is never serialized.
+    #[serde(skip)]
+    pub chat_version: u64,
 }
 
 /// One admitted semantic write. Constructors preserve the ordering boundary at

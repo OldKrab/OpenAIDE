@@ -15,7 +15,7 @@ use crate::protocol::model::MessagePage;
 use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
+use crate::tasks::snapshot::snapshot_from_record_and_chat;
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 
@@ -56,7 +56,9 @@ use super::task_navigation::{
 
 mod chat_projection;
 mod readiness;
-mod resume;
+mod subscription;
+#[cfg(test)]
+mod subscription_tests;
 
 pub trait TaskSnapshotSource: Send + Sync {
     fn list(
@@ -76,14 +78,20 @@ pub trait TaskSnapshotSource: Send + Sync {
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, ProtocolError>;
 
-    /// Reads a Task's resume basis on behalf of a client with `open_for_client`'s
-    /// access checks, without reading Chat (ADR-0073).
-    fn resume_basis_for_client(
+    /// Answers a Task subscription with `open_for_client`'s access checks: every current
+    /// field, and the Chat as current, deltas after `known_version`, or the whole tail page
+    /// (ADR-0086).
+    fn subscription_for_client(
         &self,
-        _client_instance_id: &ClientInstanceId,
-        _task_id: &TaskId,
-    ) -> Result<Option<crate::snapshots::TaskResumeBasis>, ProtocolError> {
-        Ok(None)
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        _known_version: Option<u64>,
+    ) -> Result<crate::snapshots::TaskSubscription, ProtocolError> {
+        Ok(crate::snapshots::TaskSubscription {
+            task: self.open_for_client(client_instance_id, task_id)?,
+            chat_version: 0,
+            chat_sync: openaide_app_server_protocol::state::TaskChatSync::Full,
+        })
     }
 
     /// Reads one expanded Tool detail after enforcing Task access for the client.
@@ -267,12 +275,13 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         })
     }
 
-    fn resume_basis_for_client(
+    fn subscription_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
-    ) -> Result<Option<crate::snapshots::TaskResumeBasis>, ProtocolError> {
-        self.resume_basis(client_instance_id, task_id).map(Some)
+        known_version: Option<u64>,
+    ) -> Result<crate::snapshots::TaskSubscription, ProtocolError> {
+        self.subscription(client_instance_id, task_id, known_version)
     }
 
     fn tool_detail_for_client(
@@ -472,25 +481,8 @@ impl TaskSnapshotStore {
             &crate::storage::records::TaskRecord,
         ) -> Result<(), crate::protocol::errors::RuntimeError>,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        let task = self
-            .store
-            .read_task(task_id.as_str())
-            .map_err(task_snapshot_error)?;
-        if task.tombstoned {
-            return Err(ProtocolError {
-                code: ProtocolErrorCode::NotFound,
-                message: format!("task not found: {}", task_id.as_str()),
-                recoverable: false,
-                target: None,
-            });
-        }
-        authorize(&task).map_err(task_snapshot_error)?;
-        let snapshot = build_snapshot(&self.store, task_id.as_str(), self.tail_limit)
-            .map_err(task_snapshot_error)?;
-        let history_sync = self.history_sync.history_sync_snapshot(task_id.as_str());
-        let mut projected = project_stored_task_snapshot_with_history_sync(snapshot, history_sync)?;
-        projected.subagents = subagent_overview(&self.store, task_id.as_str());
-        Ok(projected)
+        self.open_authorized_with_version(task_id, authorize)
+            .map(|(task, _)| task)
     }
 }
 
@@ -777,6 +769,7 @@ pub(crate) fn project_committed_task_state(
                 has_before: false,
                 total_count: u64::from(has_messages),
                 version,
+                chat_version: 0,
                 start_cursor: None,
                 end_cursor: None,
             },

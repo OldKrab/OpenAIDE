@@ -287,6 +287,8 @@ pub(super) fn load_projection(
         messages: replayed.snapshot.messages,
         message_meta: replayed.snapshot.message_meta,
         artifact_heads: replayed.snapshot.artifact_heads,
+        // TODO(state-sync): set the real version here instead of relying on hydration to overwrite it.
+        chat_version: 0,
     };
     let task_id = metadata.task.task_id.clone();
     let replayed_frames = !replayed.frames.is_empty();

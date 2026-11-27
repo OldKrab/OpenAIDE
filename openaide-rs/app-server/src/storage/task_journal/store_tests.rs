@@ -1394,6 +1394,7 @@ pub(in crate::storage::task_journal) fn task_projection(task_id: &str) -> TaskPr
             last_cursor: None,
         },
         artifact_heads: HashMap::new(),
+        chat_version: 0,
     }
 }
 

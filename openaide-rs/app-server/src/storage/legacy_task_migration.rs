@@ -235,6 +235,7 @@ fn read_projection(source: &Path, task_id: &str) -> Result<TaskProjection, Impor
         messages,
         message_meta,
         artifact_heads: HashMap::new(),
+        chat_version: 0,
     })
 }
 

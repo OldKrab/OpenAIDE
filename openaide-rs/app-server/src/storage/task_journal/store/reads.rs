@@ -3,7 +3,6 @@ use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
 
 use crate::storage::task_journal::chat_log::{self, ChatChangesSince};
-use crate::storage::task_journal::split;
 
 use super::{
     artifact, recovery, RecoveredTask, TaskJournalStore, TaskProjection, ToolArtifactProjection,
@@ -41,38 +40,36 @@ impl TaskJournalStore {
 
     /// The Task's Chat version: the number of the last committed `chat.log`
     /// frame. It is durable and never restarts, so it survives restarts,
-    /// compaction and replacement.
-    #[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads it.
+    /// compaction and replacement. The store keeps it in the projection, so it
+    /// is the version of exactly the Chat that projection holds.
+    #[cfg(test)]
     pub(crate) fn chat_version(&self, task_id: &str) -> Result<u64, RuntimeError> {
-        let task_dir = self.committed_task_dir(task_id)?;
-        let metadata = split::load_task(&task_dir)?
-            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
-        Ok(metadata.chat_frame)
+        self.inspect_projection(task_id, |projection| projection.chat_version)
     }
 
-    /// What changed in the Chat after `known`: nothing (`Current`), the
-    /// committed frames' operations (`Deltas`), or a reason the client must
-    /// take the whole Chat instead: its version predates the log's snapshot or
-    /// a replacement (`TooOld`), or is newer than anything committed
-    /// (`Ahead`). Reads the log without touching it, so it may run beside the
-    /// storage worker; it sees only frames `task.json` has committed.
-    #[allow(dead_code)] // TODO(state-sync phase 3): the Task subscription reads it.
+    /// What changed in the Chat after `known` up to `through`: nothing
+    /// (`Current`), the committed frames' operations (`Deltas`), or a reason
+    /// the client must take the whole Chat instead: its version predates the
+    /// log's snapshot or a replacement (`TooOld`), or is newer than anything
+    /// committed (`Ahead`). `through` is the Chat version of a projection the
+    /// caller already read, so the answer describes that state even when a
+    /// later commit has landed. Reads the log without touching it, so it may
+    /// run beside the storage worker.
     pub(crate) fn chat_changes_since(
         &self,
         task_id: &str,
         known: u64,
+        through: u64,
     ) -> Result<ChatChangesSince, RuntimeError> {
         let task_dir = self.committed_task_dir(task_id)?;
-        let metadata = split::load_task(&task_dir)?
-            .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
-        chat_log::changes_since(&task_dir, known, metadata.chat_frame).inspect_err(|error| {
+        chat_log::changes_since(&task_dir, known, through).inspect_err(|error| {
             crate::logging::warn(
                 "chat_log_read_failed",
                 serde_json::json!({
                     "operation": "chat_changes_since",
                     "task_id": task_id,
                     "known_version": known,
-                    "chat_version": metadata.chat_frame,
+                    "chat_version": through,
                     "error_kind": error.reason(),
                 }),
             );
@@ -131,7 +128,7 @@ impl TaskJournalStore {
     /// Reads a committed projection in place. Chat history makes a clone expensive on a long
     /// Task, and these reads can run once per Tool row of a Chat page. The callback runs under a
     /// read lock and must not call back into storage.
-    fn inspect_projection<T>(
+    pub(crate) fn inspect_projection<T>(
         &self,
         task_id: &str,
         inspect: impl FnOnce(&TaskProjection) -> T,

@@ -3,7 +3,6 @@
 //! queueing are shared with pushing links.
 
 use openaide_app_server_protocol::methods::AGENT_AUTHENTICATE;
-use openaide_app_server_protocol::server_requests::{PERMISSION_REQUEST, QUESTION_REQUEST};
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::ConnectionId;
@@ -208,15 +207,6 @@ pub(super) fn transfer_to_session(
         let mut queued = 0;
         let mut dropped = 0;
         for message in messages {
-            // TODO(state-sync phase 3): stop opening Permission and Question server-request
-            // copies once Task state is their only channel (ADR-0086); until then a session
-            // drops them here, because its clients answer them through pendingRequest/resolve.
-            if matches!(
-                message.server_request_method(),
-                Some(PERMISSION_REQUEST | QUESTION_REQUEST)
-            ) {
-                continue;
-            }
             let message =
                 serde_json::to_value(WireMessage::from(message)).expect("wire message serializes");
             if sessions.enqueue_server_message(session_id, message) {

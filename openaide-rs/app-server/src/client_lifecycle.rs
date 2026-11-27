@@ -100,13 +100,6 @@ pub enum DetachOutcome {
 pub struct Delivery {
     pub client_instance_id: ClientInstanceId,
     pub connection_id: ConnectionId,
-    pub request_capabilities: Vec<RequestCapability>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RequestCapability {
-    Permission,
-    Question,
 }
 
 impl Delivery {
@@ -114,26 +107,17 @@ impl Delivery {
         Self {
             client_instance_id,
             connection_id,
-            request_capabilities: Vec::new(),
         }
     }
 
-    pub fn with_request_capabilities(mut self, capabilities: Vec<RequestCapability>) -> Self {
-        self.request_capabilities = capabilities;
-        self
-    }
-
+    /// Permission and Question requests reach clients only as Task state (ADR-0086); a client
+    /// answers them with `pendingRequest/resolve`, never as a server request on the wire.
     pub fn supports_method(&self, method: &str) -> bool {
-        let required = match method {
-            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST => {
-                RequestCapability::Permission
-            }
-            openaide_app_server_protocol::server_requests::QUESTION_REQUEST => {
-                RequestCapability::Question
-            }
-            _ => return true,
-        };
-        self.request_capabilities.contains(&required)
+        !matches!(
+            method,
+            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
+                | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
+        )
     }
 }
 
@@ -424,10 +408,10 @@ impl ClientHub {
 
     pub fn delivery_for(&self, client_instance_id: &ClientInstanceId) -> Option<Delivery> {
         let context = &self.clients.get(client_instance_id)?.context;
-        Some(
-            Delivery::new(client_instance_id.clone(), context.connection_id.clone())
-                .with_request_capabilities(request_capabilities(&context.capabilities)),
-        )
+        Some(Delivery::new(
+            client_instance_id.clone(),
+            context.connection_id.clone(),
+        ))
     }
 
     /// Returns connected clients that declared support for an App Server request method.
@@ -455,25 +439,6 @@ impl ClientHub {
             .filter_map(|record| self.delivery_for(&record.context.client_instance_id))
             .collect()
     }
-}
-
-fn request_capabilities(capabilities: &ClientCapabilities) -> Vec<RequestCapability> {
-    use openaide_app_server_protocol::client::ClientProtocolCapability;
-
-    let mut result = Vec::new();
-    if capabilities
-        .protocol
-        .contains(&ClientProtocolCapability::PermissionResponses)
-    {
-        result.push(RequestCapability::Permission);
-    }
-    if capabilities
-        .protocol
-        .contains(&ClientProtocolCapability::QuestionResponses)
-    {
-        result.push(RequestCapability::Question);
-    }
-    result
 }
 
 #[cfg(test)]

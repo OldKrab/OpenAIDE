@@ -3,29 +3,13 @@ use crate::protocol::model::{MessagePage, SettingsSummary, TaskSnapshot};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 
-const CONSISTENT_SNAPSHOT_READ_ATTEMPTS: usize = 4;
-
 pub fn build_snapshot(
     store: &Store,
     task_id: &str,
     tail_limit: usize,
 ) -> Result<TaskSnapshot, RuntimeError> {
-    for _ in 0..CONSISTENT_SNAPSHOT_READ_ATTEMPTS {
-        let task = store.read_task(task_id)?;
-        #[cfg(test)]
-        store.run_after_task_snapshot_read_hook_for_test();
-        let chat = store.tail_page(task_id, tail_limit)?;
-        // Separate reads may straddle one atomic journal projection swap. Matching versions prove
-        // the Task record and Chat page came from the same committed projection.
-        if task.message_history_version != chat.version {
-            std::thread::yield_now();
-            continue;
-        }
-        return Ok(snapshot_from_record_and_chat(task, chat));
-    }
-    Err(RuntimeError::Storage(format!(
-        "Task snapshot did not stabilize after {CONSISTENT_SNAPSHOT_READ_ATTEMPTS} reads"
-    )))
+    let (task, chat) = store.read_task_with_tail(task_id, tail_limit)?;
+    Ok(snapshot_from_record_and_chat(task, chat))
 }
 
 /// Projects one already-committed record and its matching Chat page without another store read.

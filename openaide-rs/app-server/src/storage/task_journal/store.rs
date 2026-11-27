@@ -604,6 +604,12 @@ fn commit_batch(
         quarantine_or_abort(tasks_root, task_id);
         return Err(freeze_shared_task(projections, task_id, error));
     }
+    let mut next_task = next_task;
+    if let RecoveredTask::Available { projection, .. } = &mut next_task {
+        // Published with the projection, so a reader never sees a Chat version without the
+        // Chat and fields it describes.
+        projection.chat_version = chat_version;
+    }
     projections
         .write()
         .expect("Task journal projections poisoned")

@@ -35,7 +35,7 @@ fn subscribe_to_agents(gateway: &mut RpcGateway, connection_id: &ConnectionId) {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Agents,
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),

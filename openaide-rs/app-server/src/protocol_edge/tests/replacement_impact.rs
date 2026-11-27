@@ -80,7 +80,7 @@ fn reports_other_clients_and_active_work_without_starting_a_replacement() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Projects,
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(6),

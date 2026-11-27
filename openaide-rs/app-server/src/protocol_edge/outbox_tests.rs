@@ -34,7 +34,6 @@ fn delivery(connection_id: &ConnectionId) -> Delivery {
     Delivery {
         client_instance_id: "client-1".into(),
         connection_id: connection_id.clone(),
-        request_capabilities: Vec::new(),
     }
 }
 

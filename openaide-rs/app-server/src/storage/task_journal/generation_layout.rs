@@ -115,6 +115,7 @@ fn load_projection(
         messages: snapshot.messages,
         message_meta: snapshot.message_meta,
         artifact_heads: snapshot.artifact_heads,
+        chat_version: 0,
     };
     let journal = task_dir.join(&metadata.chat_journal);
     // A crash can interrupt creation before even the first frame header. No

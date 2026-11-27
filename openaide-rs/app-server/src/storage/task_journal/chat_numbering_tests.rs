@@ -27,6 +27,12 @@ fn task_dir(root: &Path) -> PathBuf {
     root.join("task-store-v1/tasks").join(TASK)
 }
 
+/// The changes after `known`, up to the store's current Chat version.
+fn changes_since(store: &TaskJournalStore, known: u64) -> ChatChangesSince {
+    let through = store.chat_version(TASK).unwrap();
+    store.chat_changes_since(TASK, known, through).unwrap()
+}
+
 fn compact(store: &TaskJournalStore) {
     store
         .submit(TaskWrite::compaction_barrier(TASK))
@@ -95,10 +101,10 @@ fn frames_after_a_version_report_current_deltas_too_old_and_ahead() {
     let head = base + 2;
 
     assert!(matches!(
-        store.chat_changes_since(TASK, head).unwrap(),
+        changes_since(&store, head),
         ChatChangesSince::Current { version } if version == head
     ));
-    match store.chat_changes_since(TASK, base).unwrap() {
+    match changes_since(&store, base) {
         ChatChangesSince::Deltas { version, frames } => {
             assert_eq!(version, head);
             assert_eq!(
@@ -110,23 +116,23 @@ fn frames_after_a_version_report_current_deltas_too_old_and_ahead() {
         other => panic!("expected deltas, got {other:?}"),
     }
     assert!(matches!(
-        store.chat_changes_since(TASK, head + 5).unwrap(),
+        changes_since(&store, head + 5),
         ChatChangesSince::Ahead { version } if version == head
     ));
 
     // Compaction folds the frames into the snapshot: older clients reload.
     compact(&store);
     assert!(matches!(
-        store.chat_changes_since(TASK, base).unwrap(),
+        changes_since(&store, base),
         ChatChangesSince::TooOld { version } if version == head
     ));
     assert!(matches!(
-        store.chat_changes_since(TASK, head).unwrap(),
+        changes_since(&store, head),
         ChatChangesSince::Current { .. }
     ));
     accept_user_message(&store, &mut projection, "three");
     assert!(matches!(
-        store.chat_changes_since(TASK, head).unwrap(),
+        changes_since(&store, head),
         ChatChangesSince::Deltas { frames, .. } if frames.len() == 1
     ));
 
@@ -136,11 +142,11 @@ fn frames_after_a_version_report_current_deltas_too_old_and_ahead() {
     projection.message_meta.version += 1;
     replace_messages(&store, &projection);
     assert!(matches!(
-        store.chat_changes_since(TASK, head).unwrap(),
+        changes_since(&store, head),
         ChatChangesSince::TooOld { .. }
     ));
     assert!(matches!(
-        store.chat_changes_since(TASK, head + 2).unwrap(),
+        changes_since(&store, head + 2),
         ChatChangesSince::Current { .. }
     ));
     store.shutdown().unwrap();
@@ -148,11 +154,11 @@ fn frames_after_a_version_report_current_deltas_too_old_and_ahead() {
     // The answer is the same after a restart.
     let (reopened, _) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     assert!(matches!(
-        reopened.chat_changes_since(TASK, head + 2).unwrap(),
+        changes_since(&reopened, head + 2),
         ChatChangesSince::Current { .. }
     ));
     assert!(matches!(
-        reopened.chat_changes_since(TASK, head + 1).unwrap(),
+        changes_since(&reopened, head + 1),
         ChatChangesSince::TooOld { .. }
     ));
     reopened.shutdown().unwrap();

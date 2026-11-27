@@ -107,34 +107,6 @@ impl ServerRequestBroker {
         Vec::new()
     }
 
-    pub fn observe_capability_available(
-        &mut self,
-        delivery: Delivery,
-        scopes: &[ResponderScope],
-        now: AppServerTime,
-    ) -> Vec<ServerRequestDelivery> {
-        self.observe_responder_available(delivery, scopes, now)
-    }
-
-    pub fn observe_capability_unavailable(
-        &mut self,
-        client_instance_id: &ClientInstanceId,
-        scopes: &[ResponderScope],
-        _now: AppServerTime,
-    ) -> Vec<RequestLifecycleOutcome> {
-        if let Some(responder) = self.available_responders.get_mut(client_instance_id) {
-            responder.delivery.request_capabilities.clear();
-        }
-        for record in self.records.values_mut() {
-            if record.status == RequestStatus::Pending
-                && record_matches_responder(record, client_instance_id, scopes)
-            {
-                mark_responder_stale(record, client_instance_id);
-            }
-        }
-        Vec::new()
-    }
-
     pub fn observe_responder_available(
         &mut self,
         delivery: Delivery,

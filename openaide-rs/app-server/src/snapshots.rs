@@ -33,32 +33,24 @@ pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore}
 pub use worktree_repository::WorktreeRepositorySnapshotSource;
 
 pub trait SnapshotProvider {
+    /// Builds the baseline for a subscription. `known_version` is the Chat version the client
+    /// holds; only a Task scope honors it.
     fn snapshot(
         &self,
         ctx: &ClientContext,
         scope: &SubscriptionScope,
+        known_version: Option<u64>,
         token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError>;
-
-    /// Reads what a Task resume needs without building the Task snapshot, after the
-    /// same access checks as its baseline. `None` means this provider cannot resume.
-    fn task_resume_basis(
-        &self,
-        _ctx: &ClientContext,
-        _task_id: &TaskId,
-    ) -> Result<Option<TaskResumeBasis>, ProtocolError> {
-        Ok(None)
-    }
 }
 
-/// The Task's current revision and the Task state that changes without one
-/// (ADR-0073). Pending requests are added at the protocol edge, as for baselines.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskResumeBasis {
-    pub revision: u64,
-    pub history_sync: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
-    pub subagents: openaide_app_server_protocol::snapshot::SubagentOverviewSnapshot,
-    pub workspace_available: bool,
+/// A Task subscription's reply (ADR-0086): every current field, and the Chat as `chat_sync`
+/// says. See `SubscriptionSnapshot::Task`.
+#[derive(Debug, Clone)]
+pub struct TaskSubscription {
+    pub task: openaide_app_server_protocol::snapshot::TaskSnapshot,
+    pub chat_version: u64,
+    pub chat_sync: openaide_app_server_protocol::state::TaskChatSync,
 }
 
 pub trait NewTaskDefaultsSnapshotSource: Send + Sync {
@@ -288,6 +280,7 @@ impl SnapshotProvider for SnapshotBuilder {
         &self,
         ctx: &ClientContext,
         scope: &SubscriptionScope,
+        known_version: Option<u64>,
         _token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError> {
         Ok(match scope {
@@ -317,11 +310,18 @@ impl SnapshotProvider for SnapshotBuilder {
                     .task_navigation
                     .snapshot(*section, project_ids.as_deref())?,
             },
-            SubscriptionScope::Task { task_id } => SubscriptionSnapshot::Task {
-                task: self
-                    .task_snapshots
-                    .open_for_client(&ctx.client_instance_id, task_id)?,
-            },
+            SubscriptionScope::Task { task_id } => {
+                let subscription = self.task_snapshots.subscription_for_client(
+                    &ctx.client_instance_id,
+                    task_id,
+                    known_version,
+                )?;
+                SubscriptionSnapshot::Task {
+                    task: subscription.task,
+                    chat_version: subscription.chat_version,
+                    chat_sync: subscription.chat_sync,
+                }
+            }
             SubscriptionScope::SubagentCatalog { task_id } => {
                 SubscriptionSnapshot::SubagentCatalog {
                     catalog: self
@@ -357,15 +357,6 @@ impl SnapshotProvider for SnapshotBuilder {
                 }
             }
         })
-    }
-
-    fn task_resume_basis(
-        &self,
-        ctx: &ClientContext,
-        task_id: &TaskId,
-    ) -> Result<Option<TaskResumeBasis>, ProtocolError> {
-        self.task_snapshots
-            .resume_basis_for_client(&ctx.client_instance_id, task_id)
     }
 }
 

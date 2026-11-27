@@ -2206,7 +2206,7 @@ describe("app controller mounted lifecycle", () => {
     const taskBaseline = deferredValue<{
       cursor: never;
       scope: { kind: "task"; taskId: never };
-      snapshot: { kind: "task"; task: typeof readyTask };
+      snapshot: { kind: "task"; task: typeof readyTask; chatVersion: number; chatSync: { kind: "full" } };
     }>();
     const request = vi.fn(async (
       method: string,
@@ -2298,7 +2298,7 @@ describe("app controller mounted lifecycle", () => {
       taskBaseline.resolve({
         cursor: "cursor_task" as never,
         scope: { kind: "task", taskId: "task_new" as never },
-        snapshot: { kind: "task", task: readyTask },
+        snapshot: { kind: "task", task: readyTask, chatVersion: 0, chatSync: { kind: "full" } },
       });
       await taskBaseline.promise;
       await Promise.resolve();
@@ -4728,6 +4728,8 @@ function taskSubscriptionSnapshot(
     snapshot: {
       kind: "task" as const,
       task,
+      chatVersion: 0,
+      chatSync: { kind: "full" as const },
     },
   };
 }

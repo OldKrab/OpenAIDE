@@ -106,11 +106,14 @@ describe("scope-local state ingestion", () => {
         },
         sendCapability: { state: "blocked", blockers: [] },
         chat: [{ kind: "append", item }],
+        chatVersion: 9,
       },
     }));
 
     expect(result.kind).toBe("applied");
     if (result.kind !== "applied" || result.state.snapshot.kind !== "task") return;
+    // The Chat version the notification carries is the version a later resume offers.
+    expect(result.state.snapshot.chatVersion).toBe(9);
     expect(result.state.snapshot.task).toMatchObject({
       revision: 5,
       task: { status: "running", unread: true },
@@ -123,6 +126,20 @@ describe("scope-local state ingestion", () => {
       sendCapability: { state: "blocked" },
     });
     expect(result.state.snapshot.task.chat.items).toEqual([item]);
+  });
+
+  it("keeps the Chat version when a notification changes no Chat", () => {
+    const state = taskState("task-1", 4);
+    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+      kind: "taskChanged",
+      taskId: taskId("task-1"),
+      revision: 5,
+      changes: { task: { ...taskSummary("task-1"), unread: true } },
+    }));
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") return;
+    expect(result.state.snapshot.chatVersion).toBe(0);
   });
 
   it("follows the background command list through Task deltas", () => {
@@ -680,7 +697,7 @@ function taskState(id: string, revision: number) {
   return createSubscriptionIngestionState({
     scope,
     cursor: cursor("cursor-1"),
-    snapshot: { kind: "task", task: taskSnapshot(id, revision) },
+    snapshot: { kind: "task", task: taskSnapshot(id, revision), chatVersion: 0 },
   }, context());
 }
 

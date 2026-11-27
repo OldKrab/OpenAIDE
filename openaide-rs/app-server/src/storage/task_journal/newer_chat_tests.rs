@@ -320,7 +320,9 @@ fn a_rebuilt_chat_continues_the_frame_numbers_of_the_set_aside_one() {
     store.load(TASK_ID).unwrap();
     assert_eq!(store.chat_version(TASK_ID).unwrap(), before + 1);
     assert!(matches!(
-        store.chat_changes_since(TASK_ID, before).unwrap(),
+        store
+            .chat_changes_since(TASK_ID, before, before + 1)
+            .unwrap(),
         super::super::ChatChangesSince::TooOld { .. }
     ));
     store.shutdown().unwrap();

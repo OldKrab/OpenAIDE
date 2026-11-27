@@ -1349,6 +1349,7 @@ fn assert_tool_artifact(
 
 fn task_projection(task_id: &str) -> TaskProjection {
     TaskProjection {
+        chat_version: 0,
         task: TaskRecord {
             task_id: task_id.to_string(),
             title: Default::default(),

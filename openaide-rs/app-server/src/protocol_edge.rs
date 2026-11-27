@@ -470,7 +470,7 @@ impl RpcGateway {
         let (mut result, subscription_added) = match self.state_stream.subscribe_with_membership(
             &ctx,
             params.scope,
-            params.known_revision,
+            params.known_version,
             &self.snapshots,
             now,
         ) {

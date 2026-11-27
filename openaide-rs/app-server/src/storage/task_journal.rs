@@ -18,7 +18,6 @@ mod scheduler;
 mod split;
 mod store;
 
-#[allow(unused_imports)] // TODO(state-sync phase 3): the Task subscription reads these.
 pub(crate) use chat_log::{ChatChangesSince, ChatFrameChanges};
 pub(crate) use model::TaskOperation;
 pub use model::{

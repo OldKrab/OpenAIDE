@@ -8,7 +8,7 @@ use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot, ProtocolVersion
 ///
 /// Bump `minor` when adding methods, fields, or events. Bump `major` and reset
 /// `minor` for any change an older client cannot ignore.
-pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 4, minor: 2 };
+pub const APP_SERVER_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion { major: 5, minor: 0 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -283,7 +283,12 @@ pub enum ClientProtocolCapability {
     Resync,
     RequestResponses,
     StableClientRequestIds,
+    /// Read nowhere: Permission and Question requests reach clients as Task state only
+    /// (ADR-0086). Kept so clients that still send it deserialize.
+    // TODO(protocol-3): remove with the next major protocol version.
     PermissionResponses,
+    /// See `PermissionResponses`.
+    // TODO(protocol-3): remove with the next major protocol version.
     QuestionResponses,
 }
 

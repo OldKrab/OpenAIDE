@@ -34,7 +34,7 @@ fn subscribe_to_devices(gateway: &mut RpcGateway, connection_id: &ConnectionId) 
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Devices,
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
@@ -259,7 +259,7 @@ fn a_relay_that_is_slow_to_answer_does_not_hold_up_other_clients() {
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Devices,
-                known_revision: None,
+                known_version: None,
             },
         ),
         AppServerTime(2),
