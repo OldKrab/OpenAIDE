@@ -11,7 +11,7 @@ use crate::agent::{registry_handle::AgentRegistryHandle, AgentRuntime};
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::host::{HostBridge, HostRequest};
-use crate::protocol_edge::SharedRpcGateway;
+use crate::protocol_edge::{InboundProtocolMessage, SharedRpcGateway};
 use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdate, TaskUpdateReceiver};
@@ -19,6 +19,8 @@ use crate::worktree_events::WorktreeUpdateReceiver;
 
 #[cfg(test)]
 mod agent_settings_status_tests;
+#[cfg(test)]
+mod concurrent_read_tests;
 mod factory;
 #[cfg(test)]
 mod file_viewer_tests;
@@ -42,6 +44,7 @@ pub struct ProtocolEdgeStdioDispatcher {
     attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
     connection_id: ConnectionId,
     next_tick: u64,
+    concurrent_reads: crate::protocol_edge::concurrent_reads::ConcurrentReads,
     task_updates: Option<TaskUpdateReceiver>,
     worktree_updates: Option<WorktreeUpdateReceiver>,
     agent_status_updates: Option<AgentStatusUpdateReceiver>,
@@ -182,6 +185,7 @@ impl ProtocolEdgeStdioDispatcher {
             // The published local-HTTP endpoint expires clients using wall-clock
             // milliseconds, so stdio activity must use the same time domain.
             next_tick: AppServerTime::now().0,
+            concurrent_reads: Default::default(),
             task_updates: Some(output.task_updates),
             worktree_updates: Some(output.worktree_updates),
             agent_status_updates: Some(output.agent_status_updates),
@@ -269,6 +273,26 @@ impl ProtocolEdgeStdioDispatcher {
         }
     }
 
+    /// Claims `line` when it is one read-only request that may run beside the ordered
+    /// stdin loop (see `concurrent_reads` for the ordering argument). The caller runs the
+    /// claim on its own thread; every other line goes to [`Self::dispatch_line`].
+    pub fn claim_concurrent_read(&mut self, line: &str) -> Option<ConcurrentRead> {
+        let value = serde_json::from_str::<Value>(line).ok()?;
+        let method = crate::protocol_edge::concurrent_reads::request_method(&value)?;
+        if !crate::protocol_edge::concurrent_reads::is_concurrent_read(&method) {
+            return None;
+        }
+        let message = parse_inbound(value).ok()?;
+        Some(ConcurrentRead {
+            gateway: self.gateway.clone(),
+            connection_id: self.connection_id.clone(),
+            message,
+            now: self.next_time(),
+            method,
+            limiter: self.concurrent_reads.clone(),
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn handle_line(&mut self, line: &str) -> Vec<String> {
         self.dispatch_line(line);
@@ -320,6 +344,36 @@ impl ProtocolEdgeStdioDispatcher {
         let (now, next_tick) = next_stdio_time(self.next_tick, AppServerTime::now().0);
         self.next_tick = next_tick;
         now
+    }
+}
+
+/// A read-only request claimed from the stdin loop. It needs no dispatcher state, so it runs
+/// without the dispatcher lock.
+pub struct ConcurrentRead {
+    gateway: SharedRpcGateway,
+    connection_id: ConnectionId,
+    message: InboundProtocolMessage,
+    now: AppServerTime,
+    method: String,
+    limiter: crate::protocol_edge::concurrent_reads::ConcurrentReads,
+}
+
+impl ConcurrentRead {
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Runs the request on its own thread, then `after` (the caller flushes the outbound
+    /// sequence there). Waits for a slot first, so at most a bounded number of claimed reads
+    /// run at once; call it without holding the dispatcher lock.
+    pub fn start(self, after: impl FnOnce() + Send + 'static) {
+        let slot = self.limiter.acquire(&self.method);
+        std::thread::spawn(move || {
+            let _slot = slot;
+            self.gateway
+                .dispatch_inbound(self.connection_id, self.message, self.now);
+            after();
+        });
     }
 }
 

@@ -6,11 +6,12 @@ use openaide_app_server_protocol::methods::AGENT_AUTHENTICATE;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::ConnectionId;
+use crate::protocol_edge::concurrent_reads::{is_concurrent_read, request_method};
 use crate::protocol_edge::outbox::ProtocolExchange;
 use crate::protocol_edge::reliable_session::{
     AcceptClientFrame, PollError, ReliableSessionRegistry,
 };
-use crate::protocol_edge::stdio::wire::{parse_inbound, WireMessage, WireRequest, WireRequestId};
+use crate::protocol_edge::stdio::wire::{parse_inbound, WireMessage};
 
 use super::protocol::{rejection_body, valid_connection_id};
 use super::reliable_upload_chunks::AppendError as ReliableChunkError;
@@ -231,12 +232,13 @@ pub(super) fn transfer_to_session(
 }
 
 pub(super) fn is_agent_authenticate_request(message: &Value) -> bool {
-    let Ok(request) = serde_json::from_value::<WireRequest>(message.clone()) else {
-        return false;
-    };
-    request.jsonrpc == "2.0"
-        && matches!(request.id, WireRequestId::Request(_))
-        && request.method.as_deref() == Some(AGENT_AUTHENTICATE)
+    request_method(message).as_deref() == Some(AGENT_AUTHENTICATE)
+}
+
+/// Whether the frame is a request a link may run beside its ordered dispatch; see
+/// [`crate::protocol_edge::concurrent_reads`] for the ordering argument.
+pub(super) fn is_concurrent_read_request(message: &Value) -> bool {
+    request_method(message).is_some_and(|method| is_concurrent_read(&method))
 }
 
 pub(super) fn reliable_upload_rejection(

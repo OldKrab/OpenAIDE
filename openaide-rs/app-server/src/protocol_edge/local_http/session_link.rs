@@ -3,11 +3,12 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use openaide_app_server_protocol::methods::{AGENT_AUTHENTICATE, CLIENT_HEARTBEAT};
+use openaide_app_server_protocol::methods::CLIENT_HEARTBEAT;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::logging;
+use crate::protocol_edge::concurrent_reads::ConcurrentReads;
 use crate::protocol_edge::reliable_session::{
     AcceptClientFrame, AttachError, AttachedLink, PollError, ServerFrame,
 };
@@ -15,8 +16,8 @@ use crate::protocol_edge::DeliverySignal;
 
 use super::protocol::{valid_connection_id, LocalHttpProtocolHandler};
 use super::session_dispatch::{
-    dispatch_accepted_session_frame, is_agent_authenticate_request, transfer_to_session,
-    AcceptedReliableUpload,
+    dispatch_accepted_session_frame, is_agent_authenticate_request, is_concurrent_read_request,
+    transfer_to_session, AcceptedReliableUpload,
 };
 use super::{auth_status, AuthStatus};
 
@@ -73,6 +74,8 @@ pub(crate) struct SessionLink {
     /// A session carries no client until its first frame (`client/initialize`)
     /// has run, so missing liveness only means expiry after that point.
     client_frame_dispatched: AtomicBool,
+    /// Bounds the reads running beside the ordered dispatch.
+    concurrent_reads: ConcurrentReads,
 }
 
 impl LocalHttpProtocolHandler {
@@ -105,6 +108,7 @@ impl LocalHttpProtocolHandler {
             client_frame_dispatched: AtomicBool::new(attached.last_client_sequence > 0),
             protocol: self.clone(),
             attached,
+            concurrent_reads: ConcurrentReads::default(),
         })
     }
 }
@@ -160,26 +164,58 @@ impl SessionLink {
     }
 
     /// Runs an accepted frame; its replies are queued on the session.
+    ///
+    /// Frames run one at a time in arrival order, except two kinds that run on their own
+    /// thread so they cannot hold up the frames behind them:
+    /// - `agent/authenticate` can wait indefinitely for the user, and `agent/cancelAuthenticate`
+    ///   must be able to reach it.
+    /// - Read-only requests already off the protocol lock (file viewer reads, `task/image`,
+    ///   `taskNavigation/search`; see `concurrent_reads`). A slow `git status` must not delay
+    ///   `state/subscribe` or `task/open` behind it.
+    ///
+    /// Wire order (ADR-0086) holds because ordering lives in the outbox, not in the dispatch:
+    /// every reply and notification joins the connection's one sequence when it is produced,
+    /// and a state-changing request still finishes, frames before reply, before the next frame
+    /// is read. A concurrent read produces only its own reply, when its work ends, so replies
+    /// to reads may overtake or trail replies to later requests; clients match by id.
     pub(crate) fn dispatch_frame(&self, accepted: AcceptedReliableUpload) -> Result<(), LinkClose> {
         let method = accepted
             .message
             .get("method")
             .and_then(Value::as_str)
             .map(str::to_string);
-        if !is_agent_authenticate_request(&accepted.message) {
+        let off_order = is_agent_authenticate_request(&accepted.message);
+        let concurrent_read = !off_order && is_concurrent_read_request(&accepted.message);
+        if !off_order && !concurrent_read {
             let outcome = self.dispatch_logged(accepted, method.as_deref());
             self.client_frame_dispatched.store(true, Ordering::Release);
             return outcome;
         }
-        // Authentication can wait indefinitely for the user. Running it off the
-        // link's ordered dispatch lets agent/cancelAuthenticate reach it.
+        // Taken before spawning: at the cap the dispatcher waits here, which bounds threads.
+        let slot = concurrent_read.then(|| {
+            self.concurrent_reads
+                .acquire(method.as_deref().unwrap_or_default())
+        });
         let deferred = Self {
             protocol: self.protocol.clone(),
             attached: self.attached.clone(),
             client_frame_dispatched: AtomicBool::new(true),
+            concurrent_reads: self.concurrent_reads.clone(),
         };
         std::thread::spawn(move || {
-            let _ = deferred.dispatch_logged(accepted, Some(AGENT_AUTHENTICATE));
+            let _slot = slot;
+            let outcome = deferred.dispatch_logged(accepted, method.as_deref());
+            if outcome.is_err() {
+                // The ordered path would close the link; an unordered one has only the log.
+                logging::warn(
+                    "session_link_unordered_request_rejected",
+                    json!({
+                        "connection_id": deferred.attached.connection_id.as_str(),
+                        "session_id": deferred.attached.session_id,
+                        "method": method,
+                    }),
+                );
+            }
         });
         Ok(())
     }

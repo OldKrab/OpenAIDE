@@ -581,7 +581,9 @@ fn log_tool_call_status_received(notification: &SessionNotification) {
     let Some((tool_call_id, tool_status)) = status else {
         return;
     };
-    crate::logging::info(
+    // One event per tool call would flood a replayed session load (over 1600 lines for one
+    // session), so it is debug-only; `acp_session_open_completed` summarizes the load.
+    crate::logging::debug(
         "acp_tool_call_status_received",
         serde_json::json!({
             "session_id": notification.session_id.to_string(),

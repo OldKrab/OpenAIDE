@@ -59,6 +59,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[path = "adopt_native_session_tests.rs"]
+mod adopt_native_session_tests;
+
 #[path = "native_catalog_refresh_tests.rs"]
 mod native_catalog_refresh_tests;
 

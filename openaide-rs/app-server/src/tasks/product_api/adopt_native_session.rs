@@ -20,11 +20,87 @@ use crate::time::now_string;
 
 use super::{protocol_error_from_runtime, TaskProductApi};
 
+/// What the admission step decided, captured while the Native Session gate was held.
+enum Admission {
+    /// A live Task already owns this Native Session; adoption is idempotent.
+    Existing(Box<TaskSnapshot>),
+    New(Box<AdoptionPlan>),
+}
+
+/// Everything the slow load and the commit need, so neither re-reads the catalog.
+struct AdoptionPlan {
+    catalog_entry: crate::native_sessions::catalog::NativeSessionCatalogEntry,
+    reference: crate::native_sessions::catalog::NativeSessionRef,
+    project_root: String,
+    isolation: IsolationKind,
+    now: String,
+    last_activity: String,
+    task_id: String,
+    title: Option<TaskTitle>,
+}
+
+/// Start and terminal events for one adoption stage. Metadata only: ids, outcome, duration.
+struct AdoptionStage<'a> {
+    stage: &'static str,
+    params: &'a TaskAdoptNativeSessionParams,
+    started_at: std::time::Instant,
+}
+
+impl<'a> AdoptionStage<'a> {
+    fn begin(stage: &'static str, params: &'a TaskAdoptNativeSessionParams) -> Self {
+        crate::logging::info(
+            "native_session_adoption_stage_started",
+            serde_json::json!({
+                "stage": stage,
+                "agent_id": params.agent_id.as_str(),
+                "session_id": params.native_session_id.as_str(),
+            }),
+        );
+        Self {
+            stage,
+            params,
+            started_at: std::time::Instant::now(),
+        }
+    }
+
+    fn finish<T, E>(self, result: &Result<T, E>, counts: serde_json::Value) {
+        let fields = serde_json::json!({
+            "stage": self.stage,
+            "agent_id": self.params.agent_id.as_str(),
+            "session_id": self.params.native_session_id.as_str(),
+            "outcome": if result.is_ok() { "completed" } else { "failed" },
+            "duration_ms": self.started_at.elapsed().as_millis(),
+            "counts": counts,
+        });
+        if result.is_ok() {
+            crate::logging::info("native_session_adoption_stage_finished", fields);
+        } else {
+            crate::logging::warn("native_session_adoption_stage_finished", fields);
+        }
+    }
+}
+
 impl TaskProductApi {
+    /// Adopts one Native Session as a Task, or returns the Task that already owns it.
+    ///
+    /// Callers must not hold the protocol lock: the Agent `session/load`, the replay
+    /// projection and the Subagent restore take seconds. Concurrency:
+    /// - Two requests for the same (agent, session) serialize on a keyed gate held for the
+    ///   whole adoption. The second waits for the first, then finds its Task in admission and
+    ///   returns it, so one session never becomes two Tasks. (The persist step also
+    ///   re-checks ownership as a backstop.)
+    /// - Different sessions adopt in parallel; the shared Native Session mutation gate
+    ///   (`native_adoption`, also taken by archive, delete, fork and metadata edits) is held
+    ///   only for admission and for the commit, never across the Agent round-trip, so those
+    ///   requests are not stalled behind a slow load.
+    /// - Anything that changed while the Agent loaded (the catalog row removed, a deletion
+    ///   started) is re-checked at commit; the loaded session is then closed and the request
+    ///   fails without creating a Task.
     pub(super) fn adopt_native_session_as_task(
         &self,
         params: TaskAdoptNativeSessionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        let started_at = std::time::Instant::now();
         crate::logging::info(
             "native_session_adoption_started",
             serde_json::json!({
@@ -32,17 +108,168 @@ impl TaskProductApi {
                 "session_id": params.native_session_id.as_str(),
             }),
         );
-        let _adoption = self.native_adoption.lock().map_err(|_| {
+        let gate = format!(
+            "adopt:{}:{}",
+            params.agent_id.as_str(),
+            params.native_session_id
+        );
+        let result = self
+            .session_operations
+            .serialize(&gate, || self.adopt_serialized(&params));
+        let fields = serde_json::json!({
+            "agent_id": params.agent_id.as_str(),
+            "session_id": params.native_session_id.as_str(),
+            "outcome": if result.is_ok() { "completed" } else { "failed" },
+            "error_code": result.as_ref().err().map(|error| format!("{:?}", error.code)),
+            "duration_ms": started_at.elapsed().as_millis(),
+        });
+        if result.is_ok() {
+            crate::logging::info("native_session_adoption_finished", fields);
+        } else {
+            crate::logging::warn("native_session_adoption_finished", fields);
+        }
+        result
+    }
+
+    fn lock_native_adoption(&self) -> Result<std::sync::MutexGuard<'_, ()>, ProtocolError> {
+        self.native_adoption.lock().map_err(|_| {
             protocol_error_from_runtime(RuntimeError::Internal(
                 "Native Session adoption lock poisoned".to_string(),
             ))
-        })?;
-        self.require_session_not_deleting(
-            &crate::native_sessions::catalog::NativeSessionRef::new(
-                params.agent_id.as_str(),
-                &params.native_session_id,
+        })
+    }
+
+    fn adopt_serialized(
+        &self,
+        params: &TaskAdoptNativeSessionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let admission = {
+            let _gate = self.lock_native_adoption()?;
+            self.admit_adoption(params)?
+        };
+        let plan = match admission {
+            Admission::Existing(snapshot) => return Ok(*snapshot),
+            Admission::New(plan) => plan,
+        };
+        let secret_resolver = self.task_secret_resolver_for_project(
+            &plan.task_id,
+            openaide_app_server_protocol::ids::ProjectId::from(
+                plan.catalog_entry.project_id.clone(),
             ),
-        )?;
+        );
+        let stage = AdoptionStage::begin("agent_load", params);
+        let load_result = self.agent_gateway.load_session(AgentSessionLoad {
+            agent_id: params.agent_id.as_str().to_string(),
+            task_id: plan.task_id.clone(),
+            cwd: plan.catalog_entry.workspace_root.clone(),
+            model_id: None,
+            session_id: params.native_session_id.clone(),
+            cancellation: TurnCancellation::new(),
+            secret_resolver: Some(secret_resolver),
+        });
+        stage.finish(
+            &load_result,
+            match &load_result {
+                Ok(loaded) => serde_json::json!({
+                    "replayed_message_count": loaded.replayed_messages.len(),
+                    "replayed_subagent_event_count": loaded.replayed_subagents.len(),
+                }),
+                Err(_) => serde_json::Value::Null,
+            },
+        );
+        let mut loaded = match load_result {
+            Ok(loaded) => loaded,
+            Err(error @ RuntimeError::NativeSessionMissing(_)) => {
+                let _gate = self.lock_native_adoption()?;
+                if self.native_catalog.remove(&plan.reference).unwrap_or(false) {
+                    self.task_notifier
+                        .navigation_project_changed(plan.catalog_entry.project_id.clone());
+                }
+                return Err(protocol_error_from_runtime(error));
+            }
+            Err(error) => return Err(protocol_error_from_runtime(error)),
+        };
+        let mut session_start =
+            TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
+        let session_id = session_start.session_id().to_string();
+        let replayed_subagents = std::mem::take(&mut loaded.replayed_subagents);
+
+        let stage = AdoptionStage::begin("commit", params);
+        let persist_result = (|| {
+            let _gate = self.lock_native_adoption().map_err(|error| {
+                RuntimeError::Internal(format!("adoption gate unavailable: {:?}", error.code))
+            })?;
+            // The load ran without the gate: re-check what it could have changed.
+            self.require_session_not_deleting(&plan.reference)
+                .map_err(|error| RuntimeError::Conflict(error.message))?;
+            if self.native_catalog.entry(&plan.reference).is_none() {
+                return Err(RuntimeError::TaskNotFound(
+                    "Native Session is no longer available".to_string(),
+                ));
+            }
+            self.persist_adopted_session_task(
+                params,
+                &plan.catalog_entry.workspace_root,
+                &plan.project_root,
+                plan.isolation,
+                &plan.task_id,
+                &plan.now,
+                &plan.last_activity,
+                plan.title.clone(),
+                plan.catalog_entry.pinned,
+                &session_id,
+                loaded,
+            )
+        })();
+        stage.finish(&persist_result, serde_json::Value::Null);
+        let snapshot = match persist_result {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let _ = session_start.close();
+                let _ = self.fail_adopted_task_attach(&plan.task_id, &session_id, &error);
+                return Err(protocol_error_from_runtime(error));
+            }
+        };
+
+        let stage = AdoptionStage::begin("attach", params);
+        self.turn_runner.restore_replayed_subagents(
+            &plan.task_id,
+            &session_start.session().key(),
+            replayed_subagents,
+        );
+        let attached = self
+            .turn_runner
+            .attach_session_events(plan.task_id.clone(), &session_start.session().key());
+        stage.finish(&attached, serde_json::Value::Null);
+        if let Err(error) = attached {
+            let _ = session_start.close();
+            if let Err(finalize_error) =
+                self.fail_adopted_task_attach(&plan.task_id, &session_id, &error)
+            {
+                return Err(protocol_error_from_runtime(RuntimeError::Internal(format!(
+                    "{error}; failed to finalize adopted task after session event attachment failure: {finalize_error}"
+                ))));
+            }
+            return Err(protocol_error_from_runtime(error));
+        }
+        let _session = session_start.commit();
+        let stage = AdoptionStage::begin("snapshot", params);
+        let projected = self.project_task_snapshot(snapshot);
+        stage.finish(&projected, serde_json::Value::Null);
+        projected
+    }
+
+    /// Validates the request and captures what the load and commit need. Runs under the
+    /// Native Session gate.
+    fn admit_adoption(
+        &self,
+        params: &TaskAdoptNativeSessionParams,
+    ) -> Result<Admission, ProtocolError> {
+        let reference = crate::native_sessions::catalog::NativeSessionRef::new(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+        );
+        self.require_session_not_deleting(&reference)?;
         if let Some(existing) = self
             .store
             .list_all_task_records_strict()
@@ -62,16 +289,12 @@ impl TaskProductApi {
                     |_| Ok(TaskMutationResult::Unchanged),
                 )
                 .map_err(protocol_error_from_runtime)?;
-            return self.project_task_snapshot(
-                result.response_snapshot.ok_or_else(|| {
+            return self
+                .project_task_snapshot(result.response_snapshot.ok_or_else(|| {
                     super::internal_error("missing existing adopted Task snapshot")
-                })?,
-            );
+                })?)
+                .map(|snapshot| Admission::Existing(Box::new(snapshot)));
         }
-        let reference = crate::native_sessions::catalog::NativeSessionRef::new(
-            params.agent_id.as_str(),
-            &params.native_session_id,
-        );
         let catalog_entry = self.native_catalog.entry(&reference).ok_or_else(|| {
             crate::logging::info(
                 "native_session_adoption_catalog_miss",
@@ -97,43 +320,11 @@ impl TaskProductApi {
         let now = now_string();
         // Preserve the activity time shown in Native Session navigation when the row becomes a
         // Task. Adoption time is persistence metadata, not new conversation activity.
-        let last_activity = self
-            .native_catalog
-            .entry(&reference)
-            .and_then(|entry| entry.observation.last_activity)
+        let last_activity = catalog_entry
+            .observation
+            .last_activity
+            .clone()
             .unwrap_or_else(|| now.clone());
-        let task_id = format!("task_{}", Uuid::new_v4());
-        // Adoption loads the Native Session before its Task record is persisted, so carry the
-        // catalog's already-resolved project identity into MCP selection.
-        let secret_resolver = self.task_secret_resolver_for_project(
-            &task_id,
-            openaide_app_server_protocol::ids::ProjectId::from(catalog_entry.project_id.clone()),
-        );
-        let mut loaded = match self.agent_gateway.load_session(AgentSessionLoad {
-            agent_id: params.agent_id.as_str().to_string(),
-            task_id: task_id.clone(),
-            cwd: catalog_entry.workspace_root.clone(),
-            model_id: None,
-            session_id: params.native_session_id.clone(),
-            cancellation: TurnCancellation::new(),
-            secret_resolver: Some(secret_resolver),
-        }) {
-            Ok(loaded) => loaded,
-            Err(error @ RuntimeError::NativeSessionMissing(_)) => {
-                let reference = crate::native_sessions::catalog::NativeSessionRef::new(
-                    params.agent_id.as_str(),
-                    &params.native_session_id,
-                );
-                if self.native_catalog.remove(&reference).unwrap_or(false) {
-                    self.task_notifier
-                        .navigation_project_changed(catalog_entry.project_id.clone());
-                }
-                return Err(protocol_error_from_runtime(error));
-            }
-            Err(error) => return Err(protocol_error_from_runtime(error)),
-        };
-        let mut session_start =
-            TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
         let title = catalog_entry
             .user_title
             .clone()
@@ -146,56 +337,21 @@ impl TaskProductApi {
                     .or(catalog_entry.local_fallback_title.clone())
                     .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent))
             });
-        let session_id = session_start.session_id().to_string();
-        let replayed_subagents = std::mem::take(&mut loaded.replayed_subagents);
-
-        let persist_result = self.persist_adopted_session_task(
-            &params,
-            &catalog_entry.workspace_root,
-            &project.workspace_root,
-            if catalog_entry.workspace_root == project.workspace_root {
-                project.isolation
-            } else {
-                IsolationKind::GitWorktree
-            },
-            &task_id,
-            &now,
-            &last_activity,
-            title,
-            catalog_entry.pinned,
-            &session_id,
-            loaded,
-        );
-        let snapshot = match persist_result {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                let _ = session_start.close();
-                let _ = self.fail_adopted_task_attach(&task_id, &session_id, &error);
-                return Err(protocol_error_from_runtime(error));
-            }
+        let isolation = if catalog_entry.workspace_root == project.workspace_root {
+            project.isolation
+        } else {
+            IsolationKind::GitWorktree
         };
-
-        self.turn_runner.restore_replayed_subagents(
-            &task_id,
-            &session_start.session().key(),
-            replayed_subagents,
-        );
-        if let Err(error) = self
-            .turn_runner
-            .attach_session_events(task_id.clone(), &session_start.session().key())
-        {
-            let _ = session_start.close();
-            if let Err(finalize_error) =
-                self.fail_adopted_task_attach(&task_id, &session_id, &error)
-            {
-                return Err(protocol_error_from_runtime(RuntimeError::Internal(format!(
-                    "{error}; failed to finalize adopted task after session event attachment failure: {finalize_error}"
-                ))));
-            }
-            return Err(protocol_error_from_runtime(error));
-        }
-        let _session = session_start.commit();
-        self.project_task_snapshot(snapshot)
+        Ok(Admission::New(Box::new(AdoptionPlan {
+            reference,
+            project_root: project.workspace_root.clone(),
+            isolation,
+            now,
+            last_activity,
+            task_id: format!("task_{}", Uuid::new_v4()),
+            title,
+            catalog_entry,
+        })))
     }
 
     #[allow(clippy::too_many_arguments)]

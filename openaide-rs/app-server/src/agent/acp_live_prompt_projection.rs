@@ -488,7 +488,8 @@ impl LivePromptProjection {
             event
         });
         if status_changed {
-            logging::info(
+            // Per tool call, so debug-only; see `acp_session_open_completed` for load totals.
+            logging::debug(
                 "acp_tool_call_status_projected",
                 json!({
                     "agent_id": self.agent_id.as_str(),

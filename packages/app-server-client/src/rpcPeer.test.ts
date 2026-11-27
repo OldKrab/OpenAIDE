@@ -52,6 +52,33 @@ describe("RpcPeer", () => {
 
     await expect(pending).rejects.toThrow("App Server generation ended");
   });
+
+  // App Server answers read-only requests (file viewer reads, task/image) when their work
+  // ends, so a reply may arrive after the replies of requests sent later.
+  it("matches replies to requests by id when they arrive out of request order", async () => {
+    const sent: RpcMessage[] = [];
+    let deliver: (message: RpcMessage) => void = () => undefined;
+    const peer = createRpcPeer<Requests, Notifications, Requests, Notifications>({
+      send: (message) => sent.push(message),
+      subscribe: (receive) => {
+        deliver = receive;
+        return () => undefined;
+      },
+    });
+    const settled: number[] = [];
+    const first = peer.request("math/add", { left: 1, right: 1 }).then((value) => settled.push(value));
+    const second = peer.request("math/add", { left: 2, right: 2 }).then((value) => settled.push(value));
+    const third = peer.request("math/add", { left: 3, right: 3 }).then((value) => settled.push(value));
+    const [a, b, c] = sent.map((message) => ("id" in message ? message.id : undefined));
+    if (a === undefined || b === undefined || c === undefined) throw new Error("requests were not sent");
+
+    deliver({ jsonrpc: "2.0", id: c, result: 6 });
+    deliver({ jsonrpc: "2.0", id: a, result: 2 });
+    deliver({ jsonrpc: "2.0", id: b, result: 4 });
+    await Promise.all([first, second, third]);
+
+    expect(settled).toEqual([6, 2, 4]);
+  });
 });
 
 function subscribe(
