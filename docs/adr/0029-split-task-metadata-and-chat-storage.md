@@ -1,10 +1,12 @@
 # Split Task Metadata And Chat Storage
 
-Status: accepted
+Status: accepted; Chat generations and the byte-length checkpoint are superseded by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md)
 
 This ADR supersedes ADR-0028's rule that one Task journal owns complete durable
 Task state. Durable Task Metadata and Chat have separate authorities so live
 Agent catalogs and repeated Task snapshots cannot dominate Chat storage.
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): one `chat.log` per Task replaces the generation files and pointer described in this paragraph. Frame numbers never restart, and compaction renames a new single-snapshot file over the old one._
 
 An atomically replaced `task.json` owns Durable Task Metadata and points to the
 current Chat snapshot and delta generations. Durable metadata includes title, Archive
@@ -33,6 +35,8 @@ leaves an invisible artifact; a crash after the frame but before `task.json`
 rolls forward both Chat and those Task facts. Process-owned active state is
 recovered as interrupted or inactive rather than restored as live. Independent
 metadata facts are changed by atomic file replacement.
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): the checkpoint is a Chat frame number, and a stale one triggers a one-time scan of that Task._
 
 Task metadata records the committed Chat journal byte length. Startup checks this
 small checkpoint and replays only Tasks with additional journal bytes before
@@ -85,6 +89,8 @@ Storage compatibility is forward-only. An older App Server must reject a newer
 unsupported storage version without modifying its bytes; reinstalling a
 compatible newer build restores access. OpenAIDE does not dual-write old formats
 or retain downgrade copies.
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): compaction keeps frame numbering instead of resetting the journal._
 
 At safe prompt or idle boundaries, committed Chat deltas are merged into a new
 validated snapshot and the delta journal is reset. Cold Task opening therefore

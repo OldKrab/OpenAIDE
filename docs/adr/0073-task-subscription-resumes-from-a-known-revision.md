@@ -1,10 +1,12 @@
 # Task Subscription Resumes From a Known Revision
 
-Status: accepted
+Status: accepted; the revision, retention, restart, and presence rules are superseded by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md)
 
 A Frontend that returns to a Task it has already seen tells `state/subscribe` the Task revision of its cached copy. The App Server then replies that the copy is current, sends only the Task changes after that revision, or falls back to a complete baseline. Without this, every Task switch serializes, sends, and maps the whole Task snapshot, so switching cost grows with history size even when nothing changed. This amends [ADR-0023](0023-task-state-publication-and-replica-recovery.md): a Task subscription no longer always returns a complete baseline.
 
 ## Choice
+
+_Superseded in part by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): a subscription offers a known content version (the Task's last Chat frame number) instead of a Task revision; fields are always resent; missed changes are read from Chat frames rather than an in-memory change log; a copy may resume across an App Server restart when it comes from the same state root; and a subscription no longer means the Task is open. The current, missed-changes, and baseline outcomes stand._
 
 - **Request.** For a Task scope, `state/subscribe` may carry a known revision. Frontend sends one only for a cached Task copy installed in the current replica epoch; a copy from an earlier App Server generation or replaced transport session is never offered. Other scopes keep their small baselines.
 - **Reply.** The App Server answers with exactly one outcome:

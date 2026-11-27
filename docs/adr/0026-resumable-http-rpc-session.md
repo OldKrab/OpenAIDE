@@ -1,8 +1,10 @@
 # Resumable HTTP RPC Session
 
-Status: accepted
+Status: accepted; notifications and outbound ordering amended by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md)
 
 OpenAIDE presents one transport-independent peer API to Frontend and App Server code. Either peer may send a typed request or notification. A request handler's return value is its response; product code does not inspect envelopes or call a separate `respond()` operation. App events are notifications. Permission and Question decisions are ordinary typed client requests with atomic first-wins resolution in App Server.
+
+_Amended by [ADR-0086](0086-state-sync-global-state-navigation-views-and-entity-subscriptions.md): App Server accepts client notifications, each app event is its own typed notification method, and every outbound reply, notification, and server request joins the session's one outbound sequence when it is produced._
 
 The browser transport is a logical session whose first carrier is finite HTTP, which works on networks that reject WebSockets. A client opens a session, serializes sequenced JSON-RPC frames through `POST`, and receives the single ordered server-to-client stream through held `GET` polls. Upload responses are transport acknowledgements only and never carry JSON-RPC messages.
 
