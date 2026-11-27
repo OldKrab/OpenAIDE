@@ -188,7 +188,7 @@ export function SidebarNativeSessionRow({
         </form>
       ) : archived ? (
         <div className="task-open" aria-label={`Archived Native Session: ${title}`}>
-          <SessionContent />
+          {sessionContent()}
         </div>
       ) : (
         <button
@@ -199,7 +199,7 @@ export function SidebarNativeSessionRow({
           onClick={openSession}
           type="button"
         >
-          <SessionContent />
+          {sessionContent()}
         </button>
       )}
       {lifecycle.dialog}
@@ -284,7 +284,11 @@ export function SidebarNativeSessionRow({
     </div>
   );
 
-  function SessionContent() {
+  // Called, not mounted as a component: a component type declared in render is new on every
+  // render, so each render would replace the row's DOM. Under a resting pointer the browser then
+  // re-fires pointer events on the new nodes, which re-enters the hover preview, which
+  // re-renders the row; and a click whose mousedown node was replaced is never dispatched.
+  function sessionContent() {
     return <>
       <span aria-label={`Agent: ${nativeSessionAgentName}`} className="task-agent-icon" role="img" title={nativeSessionAgentName}>
         <AgentIcon agentId={nativeSessionAgentId} agentName={nativeSessionAgentName} icon={agentIcon} size={12} />
