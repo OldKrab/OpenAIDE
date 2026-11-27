@@ -43,15 +43,21 @@ struct AdoptionPlan {
 struct AdoptionStage<'a> {
     stage: &'static str,
     params: &'a TaskAdoptNativeSessionParams,
+    task_id: &'a str,
     started_at: std::time::Instant,
 }
 
 impl<'a> AdoptionStage<'a> {
-    fn begin(stage: &'static str, params: &'a TaskAdoptNativeSessionParams) -> Self {
+    fn begin(
+        stage: &'static str,
+        params: &'a TaskAdoptNativeSessionParams,
+        task_id: &'a str,
+    ) -> Self {
         crate::logging::info(
             "native_session_adoption_stage_started",
             serde_json::json!({
                 "stage": stage,
+                "task_id": task_id,
                 "agent_id": params.agent_id.as_str(),
                 "session_id": params.native_session_id.as_str(),
             }),
@@ -59,6 +65,7 @@ impl<'a> AdoptionStage<'a> {
         Self {
             stage,
             params,
+            task_id,
             started_at: std::time::Instant::now(),
         }
     }
@@ -66,6 +73,7 @@ impl<'a> AdoptionStage<'a> {
     fn finish<T, E>(self, result: &Result<T, E>, counts: serde_json::Value) {
         let fields = serde_json::json!({
             "stage": self.stage,
+            "task_id": self.task_id,
             "agent_id": self.params.agent_id.as_str(),
             "session_id": self.params.native_session_id.as_str(),
             "outcome": if result.is_ok() { "completed" } else { "failed" },
@@ -157,7 +165,7 @@ impl TaskProductApi {
                 plan.catalog_entry.project_id.clone(),
             ),
         );
-        let stage = AdoptionStage::begin("agent_load", params);
+        let stage = AdoptionStage::begin("agent_load", params, &plan.task_id);
         let load_result = self.agent_gateway.load_session(AgentSessionLoad {
             agent_id: params.agent_id.as_str().to_string(),
             task_id: plan.task_id.clone(),
@@ -194,11 +202,15 @@ impl TaskProductApi {
         let session_id = session_start.session_id().to_string();
         let replayed_subagents = std::mem::take(&mut loaded.replayed_subagents);
 
-        let stage = AdoptionStage::begin("commit", params);
+        let replayed_message_count = loaded.replayed_messages.len();
+        let stage = AdoptionStage::begin("commit", params, &plan.task_id);
+        let mut gate_wait_ms = 0_u64;
         let persist_result = (|| {
+            let gate_wait = std::time::Instant::now();
             let _gate = self.lock_native_adoption().map_err(|error| {
                 RuntimeError::Internal(format!("adoption gate unavailable: {:?}", error.code))
             })?;
+            gate_wait_ms = gate_wait.elapsed().as_millis() as u64;
             // The load ran without the gate: re-check what it could have changed.
             self.require_session_not_deleting(&plan.reference)
                 .map_err(|error| RuntimeError::Conflict(error.message))?;
@@ -221,7 +233,14 @@ impl TaskProductApi {
                 loaded,
             )
         })();
-        stage.finish(&persist_result, serde_json::Value::Null);
+        // The Task's own `task_create_*` events (same Task id) break the commit down further.
+        stage.finish(
+            &persist_result,
+            serde_json::json!({
+                "message_count": replayed_message_count,
+                "gate_wait_ms": gate_wait_ms,
+            }),
+        );
         let snapshot = match persist_result {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -231,31 +250,38 @@ impl TaskProductApi {
             }
         };
 
-        let stage = AdoptionStage::begin("attach", params);
-        self.turn_runner.restore_replayed_subagents(
-            &plan.task_id,
-            &session_start.session().key(),
-            replayed_subagents,
-        );
+        // Attaching only subscribes the Task's sink to the session. The replayed Subagents
+        // are restored in the background after the reply's snapshot exists: the Chat does
+        // not need them, and they reach clients as ordinary Subagent notifications.
+        let stage = AdoptionStage::begin("attach", params, &plan.task_id);
         let attached = self
             .turn_runner
             .attach_session_events(plan.task_id.clone(), &session_start.session().key());
         stage.finish(&attached, serde_json::Value::Null);
-        if let Err(error) = attached {
-            let _ = session_start.close();
-            if let Err(finalize_error) =
-                self.fail_adopted_task_attach(&plan.task_id, &session_id, &error)
-            {
-                return Err(protocol_error_from_runtime(RuntimeError::Internal(format!(
-                    "{error}; failed to finalize adopted task after session event attachment failure: {finalize_error}"
-                ))));
+        let sink = match attached {
+            Ok(sink) => sink,
+            Err(error) => {
+                let _ = session_start.close();
+                if let Err(finalize_error) =
+                    self.fail_adopted_task_attach(&plan.task_id, &session_id, &error)
+                {
+                    return Err(protocol_error_from_runtime(RuntimeError::Internal(format!(
+                        "{error}; failed to finalize adopted task after session event attachment failure: {finalize_error}"
+                    ))));
+                }
+                return Err(protocol_error_from_runtime(error));
             }
-            return Err(protocol_error_from_runtime(error));
-        }
+        };
         let _session = session_start.commit();
-        let stage = AdoptionStage::begin("snapshot", params);
+        let stage = AdoptionStage::begin("snapshot", params, &plan.task_id);
         let projected = self.project_task_snapshot(snapshot);
         stage.finish(&projected, serde_json::Value::Null);
+        // The Task and its session are committed whether or not the reply's snapshot built.
+        self.turn_runner.restore_replayed_subagents_in_background(
+            &plan.task_id,
+            sink,
+            replayed_subagents,
+        );
         projected
     }
 

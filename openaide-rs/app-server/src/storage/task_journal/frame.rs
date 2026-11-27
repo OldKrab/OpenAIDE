@@ -7,6 +7,10 @@ use std::sync::Mutex;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+mod deferred_creates;
+
+pub(in crate::storage::task_journal) use deferred_creates::DeferredCreates;
+
 use crate::protocol::errors::RuntimeError;
 
 pub(super) const MAGIC: &[u8; 8] = b"OAIDETJ\0";

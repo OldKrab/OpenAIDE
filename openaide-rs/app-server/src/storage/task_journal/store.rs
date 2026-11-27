@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::time::Instant;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
@@ -327,6 +328,7 @@ fn commit_batch(
             )
         })
         .count();
+    let batch_started = Instant::now();
     let mut reduced = reduce_batch(batch);
     let compaction = compaction::requested_compaction(batch);
     recovery::ensure_task_loaded(
@@ -542,6 +544,9 @@ fn commit_batch(
     let chat_text_appends =
         chat_changes::committed_chat_text_appends(&frame.operations, next_projection)?;
     let mut artifact_changes = Vec::new();
+    let artifact_started = Instant::now();
+    let artifact_count = planned_artifacts.len();
+    let mut artifact_creates = super::frame::DeferredCreates::default();
     for (artifact_id, committed_head, operations) in planned_artifacts {
         let mut artifact_heads = artifact_heads
             .lock()
@@ -567,6 +572,7 @@ fn commit_batch(
             reconciled_head,
             operations,
             faults,
+            &mut artifact_creates,
         ) {
             Ok(change) => change,
             Err(error) => {
@@ -584,6 +590,13 @@ fn commit_batch(
         }
         artifact_changes.push(change);
     }
+    let created_artifact_count = artifact_creates.file_count();
+    if let Err(error) = artifact_creates.sync(super::frame::JournalKind::Artifact, faults) {
+        quarantine_or_abort(tasks_root, task_id);
+        return Err(freeze_shared_task(projections, task_id, error));
+    }
+    let artifacts_ms = artifact_started.elapsed().as_millis() as u64;
+    let split_started = Instant::now();
     let chat_version = maintenance::persist_split_commit(
         journal.parent().expect("Task journal path has a parent"),
         &next_task,
@@ -599,10 +612,29 @@ fn commit_batch(
             return Err(freeze_shared_task(projections, task_id, error));
         }
     };
+    let split_ms = split_started.elapsed().as_millis() as u64;
+    let catalog_started = Instant::now();
     if let Err(error) = recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)
     {
         quarantine_or_abort(tasks_root, task_id);
         return Err(freeze_shared_task(projections, task_id, error));
+    }
+    if sequence == 1 {
+        // A creating commit (a Native Session adoption replays its whole history into one)
+        // is where cost grows with the history: say where it went.
+        crate::logging::info(
+            "task_journal_create_committed",
+            serde_json::json!({
+                "task_id": task_id,
+                "artifact_count": artifact_count,
+                "created_artifact_file_count": created_artifact_count,
+                "plan_ms": (artifact_started - batch_started).as_millis() as u64,
+                "artifacts_ms": artifacts_ms,
+                "chat_and_task_files_ms": split_ms,
+                "catalog_ms": catalog_started.elapsed().as_millis() as u64,
+                "total_ms": batch_started.elapsed().as_millis() as u64,
+            }),
+        );
     }
     let mut next_task = next_task;
     if let RecoveredTask::Available { projection, .. } = &mut next_task {

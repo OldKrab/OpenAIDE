@@ -371,15 +371,28 @@ pub(super) fn publish_initial(
     storage_sequence: u64,
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
+    let started = Instant::now();
     fs::create_dir_all(task_dir)?;
-    chat_log::publish_snapshot(
+    let chat_log_bytes = chat_log::publish_snapshot(
         task_dir,
         0,
         &snapshot_of(projection),
         JournalKind::Task,
         faults,
     )?;
-    publish_task(task_dir, &projection.task, storage_sequence, 0, faults)
+    let chat_log_ms = started.elapsed().as_millis() as u64;
+    publish_task(task_dir, &projection.task, storage_sequence, 0, faults)?;
+    crate::logging::info(
+        "task_initial_files_published",
+        serde_json::json!({
+            "task_id": projection.task.task_id,
+            "message_count": projection.messages.len(),
+            "chat_log_bytes": chat_log_bytes,
+            "chat_log_ms": chat_log_ms,
+            "task_file_ms": started.elapsed().as_millis() as u64 - chat_log_ms,
+        }),
+    );
+    Ok(())
 }
 
 /// Appends only Chat-affecting operations, then publishes compact Task

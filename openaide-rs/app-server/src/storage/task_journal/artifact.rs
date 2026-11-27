@@ -51,7 +51,8 @@ pub(super) fn prepare_with_faults(
 ) -> Result<CommittedArtifactChange, RuntimeError> {
     let path = artifact_path(tasks_root, task_id, artifact_id)?;
     let reconciled_head = path.exists().then_some(committed_head);
-    prepare_reconciled_with_faults(
+    let mut creates = frame::DeferredCreates::default();
+    let change = prepare_reconciled_with_faults(
         tasks_root,
         task_id,
         artifact_id,
@@ -59,9 +60,18 @@ pub(super) fn prepare_with_faults(
         reconciled_head,
         operations,
         faults,
-    )
+        &mut creates,
+    )?;
+    creates
+        .sync(JournalKind::Artifact, faults)
+        .map_err(|error| artifact_frame_error("prepare_create", task_id, artifact_id, error))?;
+    Ok(change)
 }
 
+/// Appends to an existing artifact durably, or creates a new one into `creates`: a created
+/// file is durable only after the caller runs `creates.sync(..)`, which must happen before
+/// any Task frame references it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_reconciled_with_faults(
     tasks_root: &Path,
     task_id: &str,
@@ -70,6 +80,7 @@ pub(super) fn prepare_reconciled_with_faults(
     reconciled_head: Option<u64>,
     operations: Vec<ArtifactOperation>,
     faults: &FaultInjector,
+    creates: &mut frame::DeferredCreates,
 ) -> Result<CommittedArtifactChange, RuntimeError> {
     let sequence = committed_head
         .checked_add(1)
@@ -97,7 +108,8 @@ pub(super) fn prepare_reconciled_with_faults(
         frame::append_with_faults(&path, &artifact_frame, JournalKind::Artifact, faults)
             .map_err(|error| artifact_frame_error("prepare_append", task_id, artifact_id, error))?;
     } else if sequence == 1 {
-        frame::create_with_faults(&path, &artifact_frame, JournalKind::Artifact, faults)
+        creates
+            .create(&path, &artifact_frame, JournalKind::Artifact, faults)
             .map_err(|error| artifact_frame_error("prepare_create", task_id, artifact_id, error))?;
     } else {
         return Err(RuntimeError::Storage(format!(

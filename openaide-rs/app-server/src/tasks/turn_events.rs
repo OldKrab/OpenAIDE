@@ -115,6 +115,10 @@ pub(crate) struct TaskSessionEventSink {
 }
 
 impl TaskSessionEventSink {
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
     pub(crate) fn new(
         mutations: TaskMutations,
         task_id: String,

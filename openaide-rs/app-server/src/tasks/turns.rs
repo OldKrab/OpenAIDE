@@ -1,9 +1,13 @@
 mod background_command;
 mod queue_settlement;
+mod subagent_restore;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+#[cfg(test)]
+pub(crate) use subagent_restore::BackgroundJob;
+use subagent_restore::{spawn_on_thread, BackgroundSpawner};
 
 use crate::agent::{
     AgentPrompt, AgentRuntime, AgentSession, AgentSessionEventSink, AgentSessionKey,
@@ -30,6 +34,7 @@ pub struct TurnRunner {
     agent_statuses: crate::agent::status_cache::AgentStatusCache,
     cancel_grace_period: Arc<Mutex<Duration>>,
     turn_acceptance: TurnAcceptanceCoordinator,
+    background: BackgroundSpawner,
     #[cfg(test)]
     settlement_pause: Arc<(Mutex<TestSettlementPause>, Condvar)>,
 }
@@ -62,6 +67,7 @@ impl TurnRunner {
             agent_statuses: crate::agent::status_cache::AgentStatusCache::default(),
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
             turn_acceptance: TurnAcceptanceCoordinator::default(),
+            background: Arc::new(spawn_on_thread),
             #[cfg(test)]
             settlement_pause: Arc::new((
                 Mutex::new(TestSettlementPause::default()),

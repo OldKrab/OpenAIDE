@@ -1274,6 +1274,56 @@ fn durability_sync_metric_counts_exercised_file_syncs() {
 }
 
 #[test]
+fn a_creating_commit_syncs_its_artifacts_as_one_batch() {
+    // An adopted Native Session creates one artifact per replayed Tool call. Each file
+    // needs its own fsync, but the directory anchors and the parent checks are shared, so
+    // the sync count grows by one per artifact, not three.
+    const ARTIFACTS: usize = 20;
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open journal");
+    let artifacts = (0..ARTIFACTS)
+        .map(
+            |index| crate::storage::task_journal::model::ToolArtifactReplacement {
+                artifact_id: format!("artifact_{index}"),
+                details: crate::protocol::model::ActivityToolDetails {
+                    locations: Vec::new(),
+                    content: vec![crate::protocol::model::ActivityToolContent::Text {
+                        text: format!("output {index}"),
+                    }],
+                    input: None,
+                    output: None,
+                },
+            },
+        )
+        .collect();
+    let baseline = store.durability_sync_calls();
+    store
+        .submit(TaskWrite::barrier_create_with_artifacts(
+            task_projection("task_1"),
+            artifacts,
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let syncs = store.durability_sync_calls() - baseline;
+    assert!(
+        syncs < ARTIFACTS as u64 * 2,
+        "{syncs} syncs for {ARTIFACTS} artifacts"
+    );
+    for index in 0..ARTIFACTS {
+        let loaded = store
+            .load_tool_artifact("task_1", &format!("artifact_{index}"))
+            .unwrap();
+        assert!(matches!(
+            &loaded.details.unwrap().content[0],
+            crate::protocol::model::ActivityToolContent::Text { text } if *text == format!("output {index}")
+        ));
+    }
+    store.shutdown().unwrap();
+}
+
+#[test]
 fn replacing_a_large_message_history_completes_without_quadratic_delay() {
     let root = TempDir::new().expect("create state root");
     let (store, _commits) =
