@@ -122,6 +122,7 @@ pub const TASK_ATTENTION_WAIT: &str = "taskAttention/wait";
 pub const NAVIGATION_SUBSCRIBE: &str = "navigation/subscribe";
 pub const NAVIGATION_UPDATE: &str = "navigation/update";
 pub const NAVIGATION_UNSUBSCRIBE: &str = "navigation/unsubscribe";
+pub const TASK_NAVIGATION_SEARCH: &str = "taskNavigation/search";
 pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
 pub const NATIVE_SESSION_SET_TITLE: &str = "nativeSession/setTitle";
 pub const NATIVE_SESSION_SET_PINNED: &str = "nativeSession/setPinned";
@@ -254,6 +255,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     NAVIGATION_SUBSCRIBE,
     NAVIGATION_UPDATE,
     NAVIGATION_UNSUBSCRIBE,
+    TASK_NAVIGATION_SEARCH,
     TASK_ATTENTION_WAIT,
     NATIVE_SESSION_ARCHIVE,
     NATIVE_SESSION_SET_TITLE,

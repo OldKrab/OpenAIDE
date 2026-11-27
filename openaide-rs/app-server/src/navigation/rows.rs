@@ -163,7 +163,7 @@ impl SortKey {
 
 /// Rows the user may need to act on now, which the history limit never hides: pinned rows,
 /// unread, running, background, stopping or waiting Tasks, and Tasks with an attention event.
-fn live_by_state(entry: &TaskNavigationEntry) -> bool {
+pub(crate) fn live_by_state(entry: &TaskNavigationEntry) -> bool {
     match entry {
         TaskNavigationEntry::Task { task } => {
             task.pinned

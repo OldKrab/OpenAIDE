@@ -73,10 +73,11 @@ use crate::task::{
     TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams,
     TaskClosePlanResult, TaskImageParams, TaskImageResult, TaskListParams, TaskListResult,
     TaskMarkReadParams, TaskMarkReadResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskQueueAppendParams,
-    TaskQueueAppendResult, TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams,
-    TaskQueueRemoveResult, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
+    TaskNavigationRefreshResult, TaskNavigationSearchParams, TaskNavigationSearchResult,
+    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
+    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
+    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
     TaskResolveConfigPreferencesParams, TaskResolveConfigPreferencesResult, TaskRestoreParams,
     TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
     TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
@@ -558,6 +559,12 @@ protocol_method!(
     TASK_NAVIGATION_REFRESH,
     TaskNavigationRefreshParams,
     TaskNavigationRefreshResult
+);
+protocol_method!(
+    TaskNavigationSearch,
+    TASK_NAVIGATION_SEARCH,
+    TaskNavigationSearchParams,
+    TaskNavigationSearchResult
 );
 protocol_method!(
     NativeSessionArchive,

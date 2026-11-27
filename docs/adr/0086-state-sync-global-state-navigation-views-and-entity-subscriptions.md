@@ -58,7 +58,7 @@ State now travels in three shapes, chosen by what the data is like, on a transpo
 
 ### Search
 
-`search` takes text and optional Project ids and returns matching rows from both the open and the archived sections. Each result names its section, the matching message id, and at most one best snippet whose window and highlight ranges App Server computes; a title-only match has no snippet. It is one-shot, not live. While open, its results replace the Navigation list; the Navigation view is untouched. Selecting a result opens the Task at that message. OpenAIDE Tasks match on full text, Native Sessions on title only.
+`search` takes text and optional Project ids and returns matching rows from both the open and the archived sections. Each result names its section, the matching message id, and at most one best snippet whose window and highlight ranges App Server computes; a title-only match has no snippet. It is one-shot, not live. While open, its results replace the Navigation list; the Navigation view is untouched. Selecting a result opens the Task at that message. OpenAIDE Tasks match on full text, Native Sessions on title only. The request is `taskNavigation/search`. Matching is a case-insensitive literal phrase over titles and over the User messages and Agent answers of a Task's Chat; the snippet comes from the first matching message in Chat order. Rows with a matching title rank before rows matching only in Chat text, each group newest activity first. App Server bounds a request by result count and by bytes of Chat text scanned, and says when a bound cut the result short. Highlight ranges count UTF-16 code units.
 
 ### Chat storage
 

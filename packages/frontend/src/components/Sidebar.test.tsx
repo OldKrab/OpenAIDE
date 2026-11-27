@@ -9,66 +9,9 @@ import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
-import { sidebarViewModel } from "./sidebarViewModel";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-});
-
-describe("sidebarViewModel", () => {
-  it("filters loaded rows by title and agent metadata outside archive mode", () => {
-    const group = navigationGroup("project_1", "Project", [
-      taskRow(task({ task_id: "task_1", title: "Refactor plan" })),
-      sessionRow(nativeSession({ session_id: "session_1", title: "Release notes" })),
-    ]);
-    const model = sidebarViewModel({
-      groups: [group],
-      loading: false,
-      nativeSessionAgentName: "Codex",
-      searchQuery: "  release  ",
-      showArchived: false,
-    });
-
-    expect(model.visibleGroups.map((entry) => entry.rows.map((row) => row.kind))).toEqual([["session"]]);
-    expect(model.visibleCount).toBe(1);
-  });
-
-  it("keeps every row, in server order, without a search", () => {
-    const group = navigationGroup("project_1", "Project", [
-      taskRow(task({ task_id: "task_b", title: "B" })),
-      taskRow(task({ task_id: "task_a", title: "A" })),
-    ]);
-    const model = sidebarViewModel({
-      groups: [group],
-      loading: false,
-      nativeSessionAgentName: "Codex",
-      searchQuery: "",
-      showArchived: false,
-    });
-
-    expect(model.visibleGroups[0]?.rows.map((row) => row.kind === "task" && row.task.task_id)).toEqual(["task_b", "task_a"]);
-    expect(model.visibleCount).toBe(2);
-  });
-
-  it("keeps loading and search empty states distinct", () => {
-    const loading = sidebarViewModel({
-      groups: [],
-      loading: true,
-      nativeSessionAgentName: "Codex",
-      searchQuery: "",
-      showArchived: false,
-    });
-    const searching = sidebarViewModel({
-      groups: [],
-      loading: false,
-      nativeSessionAgentName: "Codex",
-      searchQuery: "missing",
-      showArchived: false,
-    });
-
-    expect(loading.emptyMessage).toBe("Loading tasks.");
-    expect(searching.emptyMessage).toBe("No matching tasks.");
-  });
 });
 
 describe("SidebarTaskRow", () => {
@@ -1013,7 +956,7 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
-  it("offers a clear action and identifies filtered task results", () => {
+  it("offers a clear action and identifies search results", () => {
     const onSearchChange = vi.fn();
     const tree = render(
       <TestSidebar
@@ -1027,11 +970,64 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByProps({ className: "task-section-title" }).children.join("")).toBe("Search results");
-    expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Task search results");
 
     act(() => tree.root.findByProps({ "aria-label": "Clear task search" }).props.onClick());
 
     expect(onSearchChange).toHaveBeenCalledWith("");
+  });
+
+  it("replaces the list with server search results while the field has text", () => {
+    const search = vi.fn(async () => ({ hits: [], truncated: false }));
+    const tree = render(
+      <TestSidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchNavigation={search}
+        searchQuery="release"
+        showArchived={false}
+        tasks={[task()]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ "aria-label": "Search results" }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByType(SidebarTaskRow)).toHaveLength(0);
+  });
+
+  it("keeps the normal list while server search has no text to answer", () => {
+    const tree = render(
+      <TestSidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchNavigation={vi.fn()}
+        searchQuery="   "
+        showArchived={false}
+        tasks={[task()]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ "aria-label": "Search results" })).toHaveLength(0);
+  });
+
+  it("clears the search on Escape from the field", () => {
+    const onSearchChange = vi.fn();
+    const preventDefault = vi.fn();
+    const tree = render(
+      <TestSidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onSearchChange={onSearchChange}
+        searchQuery="release"
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Search tasks" }).props.onKeyDown({ key: "Escape", preventDefault }));
+    expect(onSearchChange).toHaveBeenCalledWith("");
+
+    onSearchChange.mockClear();
+    act(() => tree.root.findByProps({ "aria-label": "Search tasks" }).props.onKeyDown({ key: "a", preventDefault }));
+    expect(onSearchChange).not.toHaveBeenCalled();
   });
 
   it("hides the clear action and restores the task-list label without a query", () => {
@@ -1049,7 +1045,7 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Tasks");
   });
 
-  it("identifies and clears filtered archive results", () => {
+  it("identifies and clears archive search results", () => {
     const onSearchChange = vi.fn();
     const tree = render(
       <TestSidebar
@@ -1063,7 +1059,7 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByType("small").children).toEqual(["Search results"]);
-    expect(tree.root.findByProps({ className: "task-list" }).props["aria-label"]).toBe("Archive search results");
+    expect(tree.root.findAllByProps({ "aria-label": "Search results" }).length).toBeGreaterThan(0);
 
     act(() => tree.root.findByProps({ "aria-label": "Clear archive search" }).props.onClick());
     expect(onSearchChange).toHaveBeenCalledWith("");
@@ -1559,93 +1555,6 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "project-task-group-new" })).toHaveLength(0);
   });
 
-  it("filters empty project groups by project label while searching", () => {
-    const tree = render(
-      <TestSidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
-        projects={[
-          { projectId: "project_1", label: "OpenAIDE" },
-          { projectId: "project_2", label: "Receipt Splitter" },
-        ]}
-        searchQuery="receipt"
-        showArchived={false}
-        tasks={[]}
-      />,
-    );
-
-    expect(
-      tree.root.findAllByProps({ className: "project-task-group" }).map((group) => group.props["aria-label"]),
-    ).toEqual(["Receipt Splitter"]);
-    expect(tree.root.findAllByProps({ className: "empty-list" })).toHaveLength(0);
-  });
-
-  it("shows matching task rows while a project group is collapsed during search", () => {
-    const tree = render(
-      <TestSidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "QA smoke test",
-          }),
-        ]}
-      />,
-    );
-
-    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
-
-    act(() => tree.update(
-      <TestSidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        searchQuery="qa smoke"
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "QA smoke test",
-          }),
-        ]}
-      />,
-    ));
-
-    expect(taskRows(tree).map((row) => row.findByProps({ className: "task-title" }).children.join(""))).toEqual([
-      "QA smoke test",
-    ]);
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(true);
-
-    act(() => tree.update(
-      <TestSidebar
-        {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
-        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
-        showArchived={false}
-        tasks={[
-          task({
-            task_id: "task_1",
-            project_id: "project_1",
-            project_label: "OpenAIDE",
-            title: "QA smoke test",
-          }),
-        ]}
-      />,
-    ));
-
-    expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
-  });
-
   it("renders native sessions inside the selected project group in grouped mode", () => {
     const tree = render(
       <TestSidebar
@@ -1817,18 +1726,6 @@ describe("Sidebar Navigation view", () => {
     expect(rowTitles(tree)).toEqual(["Open"]);
   });
 
-  it("filters only the loaded rows while searching", () => {
-    const group = navigationGroup("project_1", "OpenAIDE", [
-      taskRow(task({ task_id: "task_a", title: "Release plan" })),
-      taskRow(task({ task_id: "task_b", title: "Other" })),
-    ], { hidden: 4, total: 6 });
-    const tree = render(
-      <Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} searchQuery="release" showArchived={false} />,
-    );
-
-    expect(rowTitles(tree)).toEqual(["Release plan"]);
-  });
-
   it("shows a refreshing state for a group still being discovered", () => {
     const group = navigationGroup("project_1", "OpenAIDE", [], { undiscovered: true, discovery: "loading" });
     const tree = render(<Sidebar {...sidebarCallbacks()} nativeSessions={navigationState([group])} showArchived={false} />);
@@ -1938,6 +1835,7 @@ function sidebarCallbacks() {
     onRestoreTask: vi.fn(),
     onRestoreNativeSession: vi.fn(),
     onSearchChange: vi.fn(),
+    onSearchNavigation: vi.fn(async () => ({ hits: [], truncated: false })),
     onSettings: vi.fn(),
     onToggleArchived: vi.fn(),
     searchQuery: "",

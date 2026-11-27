@@ -127,6 +127,18 @@ impl Store {
         self.page_from_projection(&projection, start, end)
     }
 
+    /// Reads a Task's Chat in place under the store's read lock, without cloning it. The
+    /// callback must be short and must not call back into storage. Hydrates the Task when
+    /// this process has not loaded it.
+    pub(crate) fn inspect_messages<T>(
+        &self,
+        task_id: &str,
+        inspect: impl FnOnce(&[StoredMessage]) -> T,
+    ) -> Result<T, RuntimeError> {
+        self.task_journal()
+            .inspect_projection(task_id, |projection| inspect(&projection.messages))
+    }
+
     pub fn read_messages(&self, task_id: &str) -> Result<Vec<StoredMessage>, RuntimeError> {
         #[cfg(test)]
         self.inner

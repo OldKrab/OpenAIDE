@@ -18,8 +18,6 @@ type SidebarProjectTaskGroupProps = {
   collapsed: boolean;
   /** The Project's rows as App Server sent them, in its order and window. */
   group: NavigationGroupState;
-  /** The group's rows that match the search; all of them when not searching. */
-  rows: NavigationRowState[];
   workspaceRoot?: string;
   /** History rows App Server shows beside live rows, which no limit hides. */
   historyLimit: number;
@@ -28,8 +26,6 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionAgentName: string;
   nativeSessionMutations: import("../state/store").AppState["nativeSessionMutations"];
   nativeSessionsAdoptingSessionId?: string;
-  /** The rows are search matches, so revealing more extends the search rather than the list. */
-  searching?: boolean;
   canManageWorktrees: boolean;
   forkableAgentIds?: ReadonlySet<string>;
   deletableAgentIds?: ReadonlySet<string>;
@@ -69,7 +65,6 @@ export function SidebarProjectTaskGroup({
   agentIcons,
   collapsed,
   group,
-  rows,
   workspaceRoot,
   historyLimit,
   pageSize,
@@ -77,7 +72,6 @@ export function SidebarProjectTaskGroup({
   nativeSessionAgentName,
   nativeSessionMutations,
   nativeSessionsAdoptingSessionId,
-  searching = false,
   canManageWorktrees,
   forkableAgentIds = new Set(),
   deletableAgentIds = new Set(),
@@ -125,13 +119,14 @@ export function SidebarProjectTaskGroup({
   const loading = group.discovery === "loading";
   const isLive = (row: NavigationRowState) =>
     row.live || (row.kind === "task" && row.task.task_id === activeTaskId);
+  const { rows } = group;
   const liveRows = rows.filter(isLive);
   // More exists when App Server's window hides rows or the Project's sessions are not all read.
   const hasMore = group.hidden > 0 || group.undiscovered;
-  const shownCount = searching ? rows.length : group.total;
+  const shownCount = group.total;
   const countSummary = loading
     ? "Loading…"
-    : projectGroupCountSummary(shownCount, searching && hasMore);
+    : projectGroupCountSummary(shownCount);
   // A settled count renders its unit separately so phones can show the bare number.
   const countLabel = !loading && countSummary === plainCountSummary(shownCount)
     ? <>{shownCount}<span className="project-task-group-counts-unit">{` ${shownCount === 1 ? "task" : "tasks"}`}</span></>
@@ -290,7 +285,7 @@ export function SidebarProjectTaskGroup({
               }}
               type="button"
             >
-              {searching ? "Search more tasks" : loadMoreLabel(group.hidden, pageSize)}
+              {loadMoreLabel(group.hidden, pageSize)}
             </button>
           ) : null}
         </div>
@@ -304,14 +299,8 @@ function loadMoreLabel(hiddenCount: number, pageSize: number) {
   return hiddenCount > 0 ? `Show ${Math.min(pageSize, hiddenCount)} more` : "Show more";
 }
 
-function projectGroupCountSummary(totalCount: number, partialSearch: boolean) {
-  if (!totalCount) {
-    return "";
-  }
-  // An unfinished search has matched only the rows loaded so far; a bare count reads as final.
-  return partialSearch
-    ? `${totalCount} found so far`
-    : plainCountSummary(totalCount);
+function projectGroupCountSummary(totalCount: number) {
+  return totalCount ? plainCountSummary(totalCount) : "";
 }
 
 function plainCountSummary(totalCount: number) {

@@ -1656,6 +1656,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         changeSearch: vi.fn(),
         refreshNavigation: vi.fn(),
         setProjectHistoryLimit: vi.fn(),
+        searchNavigation: vi.fn(),
         openNativeSession: vi.fn(),
         openNewTask: vi.fn(),
         openSettings: vi.fn(),

@@ -473,6 +473,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
           onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
           onSearchChange={callbacks.navigation.changeSearch}
+          onSearchNavigation={callbacks.navigation.searchNavigation}
           onSettings={() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "general" : undefined)}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
@@ -631,6 +632,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onSetNativeSessionPinned={callbacks.navigation.setNativeSessionPinned}
         onSetNativeSessionTitle={callbacks.navigation.setNativeSessionTitle}
         onSearchChange={callbacks.navigation.changeSearch}
+          onSearchNavigation={callbacks.navigation.searchNavigation}
         onSettings={closeAfter(() => callbacks.navigation.openSettings(undefined, undefined, undefined, updateAvailable ? "general" : undefined))}
         onToggleArchived={callbacks.navigation.toggleArchived}
         projects={navigation.projects}

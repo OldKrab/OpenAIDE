@@ -110,6 +110,11 @@ pub(super) fn gateway(
         .native_session_catalog()
         .discovery()
         .clone();
+    let task_navigation = Arc::new(task_navigation);
+    let navigation_search = Arc::new(crate::navigation_search::NavigationSearch::new(
+        task_navigation.clone(),
+        store.clone(),
+    ));
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),
         task_product_api.history_sync_snapshots(),
@@ -180,10 +185,11 @@ pub(super) fn gateway(
         task_product_api.clone(),
     )
     .with_navigation(crate::navigation::NavigationOwner::new(
-        Arc::new(task_navigation),
+        task_navigation,
         navigation_dirty,
         navigation_discovery,
     ))
+    .with_navigation_search(navigation_search)
     .with_task_storage_maintenance(task_product_api)
     .with_new_task_defaults(new_task_defaults)
     .with_remote_devices(crate::remote_devices::RemoteDevices::open(

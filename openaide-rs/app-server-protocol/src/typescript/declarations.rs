@@ -161,7 +161,7 @@ use crate::task::{
     NativeSessionForkParams, NativeSessionForkResult, NativeSessionForkSource,
     NativeSessionRestoreParams, NativeSessionRestoreResult, NativeSessionSetPinnedParams,
     NativeSessionSetPinnedResult, NativeSessionSetTitleParams, NativeSessionSetTitleResult,
-    TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    SearchSnippet, TakenQueuedMessage, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
     TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskArchiveOlderCutoff, TaskArchiveOlderParams,
     TaskArchiveOlderProtectedNativeSession, TaskArchiveOlderProtectedReason,
@@ -170,13 +170,14 @@ use crate::task::{
     TaskChatPageParams, TaskChatPageResult, TaskClosePlanParams, TaskClosePlanResult,
     TaskImageParams, TaskImageResult, TaskImageVariant, TaskLifecycleChanged, TaskListLifecycle,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSection,
-    TaskOpenParams, TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult,
-    TaskQueueMoveParams, TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult,
-    TaskQueueSendSelection, TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams,
-    TaskReleaseResult, TaskReloadNativeSessionParams, TaskReloadNativeSessionResult,
-    TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSearchHit,
+    TaskNavigationSearchParams, TaskNavigationSearchResult, TaskNavigationSection, TaskOpenParams,
+    TaskOpenResult, TaskQueueAppendParams, TaskQueueAppendResult, TaskQueueMoveParams,
+    TaskQueueMoveResult, TaskQueueRemoveParams, TaskQueueRemoveResult, TaskQueueSendSelection,
+    TaskQueueTakeParams, TaskQueueTakeResult, TaskReleaseParams, TaskReleaseResult,
+    TaskReloadNativeSessionParams, TaskReloadNativeSessionResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
     TaskSetPermissionPolicyParams, TaskSetPermissionPolicyResult, TaskSetPinnedParams,
     TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskStopBackgroundCommandParams,
     TaskStopBackgroundCommandResult, TaskStopSubagentParams, TaskStopSubagentResult,
@@ -634,6 +635,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationSection>(output, config);
     push_decl::<TaskNavigationRefreshParams>(output, config);
     push_decl::<TaskNavigationRefreshResult>(output, config);
+    push_decl::<TaskNavigationSearchParams>(output, config);
+    push_decl::<TaskNavigationSearchResult>(output, config);
+    push_decl::<TaskNavigationSearchHit>(output, config);
+    push_decl::<SearchSnippet>(output, config);
     push_decl::<NativeSessionArchiveParams>(output, config);
     push_decl::<NativeSessionArchiveResult>(output, config);
     push_decl::<NativeSessionSetTitleParams>(output, config);

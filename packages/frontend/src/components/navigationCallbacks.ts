@@ -1,4 +1,6 @@
 import { requestSessionDeletion } from "../intents/sessionDeletionIntent";
+import { requestNavigationSearch } from "../intents/navigationSearchIntent";
+import { recordFrontendLifecycleEvent } from "../services/frontendLifecycleTelemetry";
 import {
   openNewTaskSurface,
   openNativeSessionSurface,
@@ -129,6 +131,12 @@ export function createNavigationCallbacks({
         return;
       }
       dispatch({ type: "tasks:error", message: "App Server connection unavailable." });
+    },
+    searchNavigation: (text) => {
+      if (!backendConnection?.request) return Promise.reject(new Error("App Server connection unavailable."));
+      const connection = backendConnection as Required<Pick<NonNullable<typeof backendConnection>, "request">>;
+      return requestNavigationSearch(connection, text, (event, fields) =>
+        recordFrontendLifecycleEvent(connection, event, fields));
     },
     openNativeSession: (session) => {
       // A pending adoption blocks only its own row; navigating elsewhere supersedes its surface.

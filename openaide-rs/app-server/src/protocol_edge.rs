@@ -94,6 +94,7 @@ pub struct RpcGateway {
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
     pub(crate) file_viewer: crate::file_viewer::FileViewerRegistry,
     pub(crate) chat_image_previews: crate::chat_image_previews::ChatImagePreviews,
+    pub(crate) navigation_search: Arc<dyn crate::navigation_search::NavigationSearchWorkflow>,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
     /// Serves every client's Navigation views. Only the protocol lock holder reaches it, so
@@ -227,6 +228,7 @@ impl RpcGateway {
             shell_file_reveals,
             file_viewer: crate::file_viewer::FileViewerRegistry::new(),
             chat_image_previews: Default::default(),
+            navigation_search: Arc::new(crate::navigation_search::NoNavigationSearch),
             snapshots: snapshots.with_terminals(terminals.clone()),
             task_snapshots,
             navigation: crate::navigation::NavigationOwner::empty(),
@@ -291,6 +293,14 @@ impl RpcGateway {
     /// The service the network edge attaches to, when this gateway has one.
     pub(crate) fn remote_device_service(&self) -> Option<crate::remote_devices::RemoteDevices> {
         self.remote_device_service.clone()
+    }
+
+    pub(crate) fn with_navigation_search(
+        mut self,
+        workflow: Arc<dyn crate::navigation_search::NavigationSearchWorkflow>,
+    ) -> Self {
+        self.navigation_search = workflow;
+        self
     }
 
     pub(crate) fn with_task_storage_maintenance(

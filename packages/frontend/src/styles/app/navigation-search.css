@@ -1,0 +1,110 @@
+/* Server-side search results in the sidebar, and the brief mark on a revealed Chat message. */
+.search-results {
+  gap: 2px;
+}
+
+.search-hit {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: var(--oa-raised);
+}
+
+.search-hit.selected {
+  background: color-mix(in oklch, var(--oa-selected) 36%, transparent);
+}
+
+.search-hit .task-agent-icon {
+  margin-top: 1px;
+}
+
+.search-hit-body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.search-hit-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-hit-title .task-title {
+  flex: 1 1 auto;
+}
+
+.search-hit-section {
+  flex: 0 0 auto;
+  color: var(--oa-muted);
+  display: inline-grid;
+  place-items: center;
+}
+
+.search-hit-snippet {
+  min-width: 0;
+  color: var(--oa-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.search-hit mark {
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--oa-warning) 30%, transparent);
+  color: var(--oa-text);
+}
+
+.search-status {
+  color: var(--oa-muted);
+}
+
+.search-truncated {
+  margin: 6px 8px;
+  font-size: 12px;
+}
+
+.search-retry {
+  border: 0;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@keyframes reveal-fade {
+  from { background: color-mix(in oklch, var(--oa-warning) 22%, transparent); }
+  to { background: transparent; }
+}
+
+.message-list-virtual-row[data-reveal-target="true"] {
+  animation: reveal-fade 2.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-list-virtual-row[data-reveal-target="true"] {
+    animation: none;
+    background: color-mix(in oklch, var(--oa-warning) 14%, transparent);
+  }
+}

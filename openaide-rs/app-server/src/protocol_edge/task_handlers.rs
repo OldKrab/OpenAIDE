@@ -22,6 +22,7 @@ use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, Rp
 
 mod archive_older;
 mod chat_image;
+mod navigation_search;
 pub(super) mod publication;
 
 impl RpcGateway {

@@ -6,7 +6,6 @@ import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
 import { taskNavigationPageSize } from "../state/taskNavigationPolicy";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
-import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
 import { usePullToRefresh } from "./usePullToRefresh";
@@ -18,6 +17,8 @@ import type { ComputersSnapshot } from "../services/computers";
 import type { ComputerSwitch } from "../services/computerSwitch";
 import type { AgentDisableOutcome } from "../intents/agentSettingsIntents";
 import { agentIntegrationInstallingLabel } from "./agentActivityPresentation";
+import { SidebarSearchResults } from "./SidebarSearchResults";
+import type { RunNavigationSearch } from "./useNavigationSearch";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -72,6 +73,8 @@ type SidebarProps = {
     title: { kind: "user"; value: string } | { kind: "automatic" },
   ) => Promise<void>;
   onSearchChange: (query: string) => void;
+  /** Runs App Server's one-shot search; while the field has text its results replace the list. */
+  onSearchNavigation: RunNavigationSearch;
   onSettings: () => void;
   onToggleArchived: () => void;
   searchQuery: string;
@@ -134,6 +137,7 @@ export const Sidebar = memo(function Sidebar({
   onSetTaskPinned,
   onSetTaskTitle,
   onSearchChange,
+  onSearchNavigation,
   onSettings,
   onToggleArchived,
   searchQuery,
@@ -159,19 +163,14 @@ export const Sidebar = memo(function Sidebar({
   // appear here too; a Settings-only error would be invisible where the user clicked.
   const { cancelDisable, confirmDisable, pendingDisable, requestDisable } = useAgentDisableConfirmation();
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
-  const viewModel = sidebarViewModel({
-    groups: nativeSessions.groups,
-    loading: loadingTasks || nativeSessions.loading,
-    nativeSessionAgentName,
-    searchQuery,
-    showArchived,
-  });
-  const groupSearchQuery = searchQuery.trim().toLowerCase();
+  // App Server owns the groups, their order, the window and the counts; typing in the field
+  // leaves this list for the search results below rather than filtering it.
+  const groups = nativeSessions.groups;
   const hasSearchInput = searchQuery.length > 0;
-  const hasSearchQuery = groupSearchQuery.length > 0;
-  const projectPageSize = taskNavigationPageSize(viewModel.visibleGroups.length);
-  const projectCollapsed = (projectKey: string) => !groupSearchQuery && collapsedProjectKeys.has(projectKey);
-  const showEmptyState = !taskListError && !installingAgentLabel && viewModel.visibleGroups.length === 0;
+  const hasSearchQuery = searchQuery.trim().length > 0;
+  const projectPageSize = taskNavigationPageSize(groups.length);
+  const projectCollapsed = (projectKey: string) => collapsedProjectKeys.has(projectKey);
+  const showEmptyState = !taskListError && !installingAgentLabel && groups.length === 0;
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && !showWorkspaceSetup;
   const noProjects = projects.length === 0;
@@ -212,6 +211,12 @@ export const Sidebar = memo(function Sidebar({
             aria-label={showArchived ? "Search archive" : "Search tasks"}
             disabled={noProjects}
             onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && hasSearchInput) {
+                event.preventDefault();
+                onSearchChange("");
+              }
+            }}
             placeholder={showArchived ? "Search archive" : "Search"}
             ref={searchInputRef}
             value={searchQuery}
@@ -252,7 +257,16 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
-      <SidebarTaskPreviewProvider><div
+      {hasSearchQuery ? (
+        <SidebarSearchResults
+          activeTaskId={activeTaskId}
+          agentIcons={agentIcons}
+          onOpenNativeSession={onOpenNativeSession}
+          onOpenTask={onOpenTask}
+          query={searchQuery}
+          search={onSearchNavigation}
+        />
+      ) : <SidebarTaskPreviewProvider><div
         className="task-list-shell"
         data-more-above={String(taskListOverflow.moreAbove)}
         data-more-below={String(taskListOverflow.moreBelow)}
@@ -269,9 +283,7 @@ export const Sidebar = memo(function Sidebar({
       ) : null}<div
         className="task-list"
         role="list"
-        aria-label={hasSearchQuery
-          ? showArchived ? "Archive search results" : "Task search results"
-          : showArchived ? "Archived tasks" : "Tasks"}
+        aria-label={showArchived ? "Archived tasks" : "Tasks"}
         onScroll={taskListOverflow.onScroll}
         {...pullToRefresh.handlers}
         ref={taskListRef}
@@ -281,7 +293,7 @@ export const Sidebar = memo(function Sidebar({
           ? <WorkspaceSetupPrompt compact onOpenFolder={onOpenWorkspaceFolder} />
           : null}
         {!showWorkspaceSetup && showEmptyState
-          ? <p className="empty-list">{viewModel.emptyMessage}</p>
+          ? <p className="empty-list">{emptyListMessage({ loading: loadingTasks || nativeSessions.loading, showArchived })}</p>
           : null}
         {!showWorkspaceSetup && !showArchived && nativeSessions.error ? (
           <div className="native-session-recovery" role="status">
@@ -318,7 +330,7 @@ export const Sidebar = memo(function Sidebar({
             </span>
           </div>
         ) : null}
-        {!showWorkspaceSetup && viewModel.visibleGroups.map(({ group, rows }) => {
+        {!showWorkspaceSetup && groups.map((group) => {
           const projectId = group.projectId;
           const project = projects.find((candidate) => candidate.projectId === projectId);
           return (
@@ -328,7 +340,6 @@ export const Sidebar = memo(function Sidebar({
               collapsed={projectCollapsed(projectId)}
               group={group}
               key={projectId}
-              rows={rows}
               workspaceRoot={project?.workspaceRoot}
               historyLimit={historyLimitOverrides[projectId] ?? historyLimit}
               pageSize={projectPageSize}
@@ -336,7 +347,6 @@ export const Sidebar = memo(function Sidebar({
               nativeSessionAgentName={nativeSessionAgentName}
               nativeSessionMutations={nativeSessionMutations}
               nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-              searching={hasSearchQuery}
               canManageWorktrees={Boolean(project?.worktreeRepositoryId)}
               forkableAgentIds={forkableAgentIds}
               deletableAgentIds={deletableAgentIds}
@@ -383,7 +393,7 @@ export const Sidebar = memo(function Sidebar({
             />
           );
         })}
-      </div></div></SidebarTaskPreviewProvider>
+      </div></div></SidebarTaskPreviewProvider>}
       <div className="sidebar-footer">
         {!showArchived && onAddProject ? (
           <button className="add-project-button" onClick={onAddProject} type="button">
@@ -438,6 +448,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.onDeleteSession === next.onDeleteSession &&
     prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
+    prev.onSearchNavigation === next.onSearchNavigation &&
     prev.settingsStatus === next.settingsStatus &&
     prev.computers === next.computers &&
     prev.computerLink === next.computerLink &&
@@ -453,4 +464,9 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.projects === next.projects &&
     prev.loadingTasks === next.loadingTasks &&
     prev.installingAgentLabel === next.installingAgentLabel;
+}
+
+function emptyListMessage({ loading, showArchived }: { loading: boolean; showArchived: boolean }) {
+  if (showArchived) return "Archive is empty. Archived Tasks and Native Sessions will appear here.";
+  return loading ? "Loading tasks." : "No tasks yet.";
 }

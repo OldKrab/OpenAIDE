@@ -5,6 +5,7 @@ export type AppControllerDerivedState = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
   hasActiveTask: boolean;
+  /** The Tasks of the Navigation view; search is App Server's, in its own result list. */
   visibleTasks: AppState["tasks"];
 };
 
@@ -14,7 +15,6 @@ export function appControllerDerivedStateDeps(
 ) {
   return [
     state.activeTaskId,
-    state.searchQuery,
     state.tasks,
     state.snapshot,
     navigationFocusedTaskId,
@@ -40,15 +40,6 @@ export function deriveAppControllerState(
     activeTask,
     activeNavigationTaskId: navigationTaskShouldStayVisible ? navigationTask.task_id : undefined,
     hasActiveTask: activeTask !== undefined,
-    visibleTasks: visibleTasks(state.tasks, state.searchQuery),
+    visibleTasks: state.tasks,
   };
-}
-
-export function visibleTasks(tasks: AppState["tasks"], searchQuery: string): AppState["tasks"] {
-  // TODO(state-sync phase 7): Search is server-side; until then it filters the rows the view loaded.
-  const query = searchQuery.trim().toLowerCase();
-  if (!query) return tasks;
-  return tasks.filter((task) =>
-    [task.title, task.agent_name, task.status].some((value) => value.toLowerCase().includes(query)),
-  );
 }

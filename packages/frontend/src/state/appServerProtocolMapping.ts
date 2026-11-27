@@ -2,6 +2,7 @@ import type {
   AgentSummary,
   ProjectSummary,
   NavigationReplica,
+  NavigationRow as ProtocolNavigationRow,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskStatus as ProtocolTaskStatus,
   TaskSummary as ProtocolTaskSummary,
@@ -101,27 +102,9 @@ export function mapProtocolTaskNavigation(
     projectId: group.projectId,
     label: group.projectLabel,
     rows: navigationGroupRows(group).map((row): NavigationRowState => {
-      const { entry } = row;
-      if (entry.kind === "task") {
-        const mapped = mapProtocolTaskSummaryWithWarnings(entry.task, 0, context);
-        warnings.push(...mapped.warnings);
-        return { kind: "task", task: mapped.task, live: row.live };
-      }
-      return {
-        kind: "session",
-        live: row.live,
-        session: {
-          agent_id: entry.session.reference.agentId,
-          agent_name: context.agents?.find((agent) => agent.agentId === entry.session.reference.agentId)?.label
-            ?? entry.session.reference.agentId,
-          session_id: entry.session.reference.sessionId,
-          project_id: entry.session.projectId,
-          cwd: entry.session.workspaceRoot,
-          title: entry.session.title ?? undefined,
-          pinned: entry.session.pinned,
-          last_activity: entry.session.lastActivity ?? undefined,
-        },
-      };
+      const mapped = mapProtocolNavigationRow(row, context);
+      warnings.push(...mapped.warnings);
+      return mapped.row;
     }),
     total: group.total,
     hidden: group.hidden,
@@ -137,6 +120,39 @@ export function mapProtocolTaskNavigation(
     ...navigationRecovery(groups, context),
     warnings,
     requiresNativeSurface: false,
+  };
+}
+
+/**
+ * Maps one Navigation row body, the shape a Navigation frame and a search hit share, to its
+ * presentation row. The one place a protocol Native Session becomes an `AgentListedSession`.
+ */
+export function mapProtocolNavigationRow(
+  row: ProtocolNavigationRow,
+  context: ProtocolMappingContext = {},
+): { row: NavigationRowState; warnings: ProtocolMappingWarning[] } {
+  const { entry } = row;
+  if (entry.kind === "task") {
+    const mapped = mapProtocolTaskSummaryWithWarnings(entry.task, 0, context);
+    return { row: { kind: "task", task: mapped.task, live: row.live }, warnings: mapped.warnings };
+  }
+  return {
+    warnings: [],
+    row: {
+      kind: "session",
+      live: row.live,
+      session: {
+        agent_id: entry.session.reference.agentId,
+        agent_name: context.agents?.find((agent) => agent.agentId === entry.session.reference.agentId)?.label
+          ?? entry.session.reference.agentId,
+        session_id: entry.session.reference.sessionId,
+        project_id: entry.session.projectId,
+        cwd: entry.session.workspaceRoot,
+        title: entry.session.title ?? undefined,
+        pinned: entry.session.pinned,
+        last_activity: entry.session.lastActivity ?? undefined,
+      },
+    },
   };
 }
 

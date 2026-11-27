@@ -49,6 +49,7 @@ import { keepTextEntryFocusOnBlankTap } from "./mobileComposerBehavior";
 import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 import { TaskMessageQueueView } from "./TaskMessageQueue";
 import { buildTaskChatTimelineRows, TaskChatTimeline } from "./TaskChatTimeline";
+import { useChatMessageReveal } from "./useChatMessageReveal";
 import { useCurrentCallback } from "./useCurrentCallback";
 import { installTaskQueueOverlayClearance } from "./taskQueueOverlayClearance";
 import { TaskSessionReloadNotice } from "./TaskSessionReloadNotice";
@@ -434,6 +435,9 @@ export function TaskView({
     workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
   };
   const loadChatPage = useCurrentCallback(onLoadChatPage);
+  const scrollTaskId = subagents.selected
+    ? `${snapshot.task.task_id}:${subagents.selected.subagentId}`
+    : snapshot.task.task_id;
   const chatScroll = useTaskChatScroll({
     beforeCursor: chat.beforeCursor,
     hasEarlier: chat.hasBefore,
@@ -446,10 +450,22 @@ export function TaskView({
     onScrollState: subagents.selected ? discardSubagentScroll : intents.recordScroll,
     pendingPrepend: chat.pending,
     savedScrollState: subagents.selected ? undefined : savedScrollState,
-    taskId: subagents.selected
-      ? `${snapshot.task.task_id}:${subagents.selected.subagentId}`
-      : snapshot.task.task_id,
+    taskId: scrollTaskId,
     userMessageAnchors,
+  });
+  const scrollToRevealedRow = useCallback((index: number) => {
+    chatScroll.virtualizer.scrollToIndex(index, { align: "center" });
+  }, [chatScroll.virtualizer]);
+  // A search hit's message is revealed in the Task's own Chat, never in a Subagent's.
+  const revealedMessageId = useChatMessageReveal({
+    beforeCursor: chat.beforeCursor,
+    hasEarlier: chat.hasBefore,
+    loadEarlier: chatScroll.loadEarlier,
+    pauseFollowing: chatScroll.pauseFollowing,
+    pending: chat.pending,
+    rows: timelineRows,
+    scrollToIndex: scrollToRevealedRow,
+    taskId: scrollTaskId,
   });
   const loadToolImagePreview = useCurrentCallback(onLoadToolImagePreview ?? unavailableToolImagePreview);
   const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
@@ -574,6 +590,7 @@ export function TaskView({
           canRestoreTask={onRestoreTask !== undefined}
           chat={chat}
           chatScroll={chatScroll}
+          revealedMessageId={revealedMessageId}
           headerActionsTarget={overflowTarget}
           commandCatalog={snapshot.agent_commands}
           items={chatItems}

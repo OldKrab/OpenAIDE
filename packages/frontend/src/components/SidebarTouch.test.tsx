@@ -125,6 +125,7 @@ function renderSidebar(onRefreshNavigation: () => void) {
         onSearchChange={vi.fn()}
         onSettings={vi.fn()}
         onToggleArchived={vi.fn()}
+        onSearchNavigation={vi.fn()}
         searchQuery=""
         showArchived={false}
         historyLimit={20}

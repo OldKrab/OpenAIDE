@@ -13,7 +13,7 @@ mod view;
 
 pub(crate) use dirty::NavigationDirty;
 pub(crate) use owner::{FlushedFrames, NavigationOwner};
-pub(crate) use rows::{NavigationSource, SourceGroup};
+pub(crate) use rows::{live_by_state, NavigationSource, SourceGroup};
 
 #[cfg(test)]
 mod tests;
