@@ -796,7 +796,6 @@ pub enum TaskArchiveOlderProtectedReason {
     Active,
     Queued,
     PendingRequest,
-    OpenElsewhere,
     Changed,
 }
 

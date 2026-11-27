@@ -2113,16 +2113,9 @@ fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
 }
 
 #[test]
-fn task_subscription_delivers_pending_server_request() {
+fn task_subscription_lists_pending_request_without_resending_it() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
-    let opened = gateway.open_server_request(task_secret_request("task-1"), AppServerTime(2));
-    assert!(matches!(
-        opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.is_empty()
-    ));
+    gateway.open_server_request(task_server_request("task-1"), AppServerTime(2));
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("conn-1"),
@@ -2144,8 +2137,7 @@ fn task_subscription_delivers_pending_server_request() {
         value["result"]["snapshot"]["task"]["pendingRequests"][0]["requestId"],
         "server-request-1"
     );
-    assert_eq!(server_requests.len(), 1);
-    assert_eq!(server_requests[0].envelope.method, "secret/read");
+    assert!(server_requests.is_empty());
 }
 
 #[test]
@@ -2182,12 +2174,18 @@ fn task_request_waits_when_subscribed_client_lacks_response_capability() {
 }
 
 #[test]
-fn task_request_opened_after_subscription_is_delivered_immediately() {
+fn secret_read_goes_to_the_client_that_declared_the_key_not_to_a_subscriber() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    );
+    // client-1 has the Task open; client-2 holds the key and has nothing open.
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
         request(
-            "2",
+            "3",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
                 scope: SubscriptionScope::Task {
@@ -2196,8 +2194,15 @@ fn task_request_opened_after_subscription_is_delivered_immediately() {
                 known_version: None,
             },
         ),
-        AppServerTime(2),
+        AppServerTime(3),
     );
+    let declared = gateway.handle_client_notification(
+        ConnectionId::new("conn-2"),
+        openaide_app_server_protocol::methods::CLIENT_SECRET_KEYS_CHANGED.to_string(),
+        json!({ "keyIds": ["agent.secret"] }),
+        AppServerTime(4),
+    );
+    assert_eq!(declared, GatewayOutcome::Noop);
 
     let opened = gateway
         .server_requests
@@ -2205,17 +2210,42 @@ fn task_request_opened_after_subscription_is_delivered_immediately() {
             TaskId::from("task-1"),
             "agent.secret".to_string(),
             Some("Agent secret".to_string()),
-            AppServerTime(3),
+            AppServerTime(5),
         )
-        .expect("open task secret request");
+        .expect("a connected client holds the key");
+
     assert_eq!(opened.deliveries.len(), 1);
-    assert_eq!(opened.deliveries[0].envelope.request_id, opened.request_id);
+    assert_eq!(
+        opened.deliveries[0].delivery.client_instance_id,
+        ClientInstanceId::from("client-2")
+    );
     assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
+}
 
-    let server_requests = gateway
-        .drain_server_requests_for_connection(&ConnectionId::new("conn-1"), AppServerTime(4));
+#[test]
+fn any_client_may_answer_a_pending_permission_without_the_task_open() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.open_server_request(task_server_request("task-1"), AppServerTime(2));
 
-    assert!(server_requests.is_empty());
+    let outcome = gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            openaide_app_server_protocol::methods::PENDING_REQUEST_RESOLVE,
+            json!({
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }),
+        ),
+        AppServerTime(3),
+    );
+
+    let (value, _) = response_value_and_server_requests(outcome);
+    assert!(value.get("error").is_none(), "{value}");
+    assert!(gateway
+        .server_requests
+        .pending_for_task(&TaskId::from("task-1"))
+        .is_empty());
 }
 
 #[test]
@@ -5277,17 +5307,6 @@ fn task_question_request(task_id: &str) -> ServerRequestDraft {
         method: openaide_app_server_protocol::server_requests::QUESTION_REQUEST.to_string(),
         title: "Question".to_string(),
         params: json!({ "message": "Choose a test seam.", "fields": [] }),
-    }
-}
-
-fn task_secret_request(task_id: &str) -> ServerRequestDraft {
-    ServerRequestDraft {
-        scope: PendingRequestScope::Task {
-            task_id: TaskId::from(task_id),
-        },
-        method: "secret/read".to_string(),
-        title: "Secret needed".to_string(),
-        params: json!({ "key": "agent.secret" }),
     }
 }
 

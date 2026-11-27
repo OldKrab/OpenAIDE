@@ -61,3 +61,15 @@ export type SecretTransactionResultMessage = {
     | { ok: false; error: string }
   );
 };
+
+/** Asks the shell which secure-storage key ids it holds, so the client can declare them (ADR-0086). */
+export type SecretKeysRequestMessage = {
+  type: "secret.keys.request";
+  payload: { requestId: string };
+};
+
+/** Key ids only, never values. `unknownHolder`: the shell may hold secrets it cannot list. */
+export type SecretKeysResultMessage = {
+  type: "secret.keys.result";
+  payload: { requestId: string; keyIds: string[]; unknownHolder: boolean };
+};

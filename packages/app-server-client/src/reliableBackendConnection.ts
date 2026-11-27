@@ -241,6 +241,10 @@ function createReliableHttpBackendConnection(
         return active.connection.request(method, params, meta);
       }
     },
+    notify(method, params) {
+      if (closed || terminalError) return;
+      active.connection.notify?.(method, params);
+    },
     handleRequest(method, handler) {
       let unsubscribe = active.connection.handleRequest(method, handler);
       const registration = {

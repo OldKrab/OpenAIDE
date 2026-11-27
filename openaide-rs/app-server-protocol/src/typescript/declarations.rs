@@ -41,10 +41,11 @@ use crate::client::{
     ClientCapabilitiesChangedResult, ClientDetachParams, ClientDetachResult, ClientHeartbeatParams,
     ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams, ClientProbeResult,
     ClientProtocolCapability, ClientReplacementImpactParams, ClientReplacementImpactResult,
-    ClientRole, ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface,
-    SettingsSection, ShellCapability, ShellDescriptor, ShellKind, UpdateShutdownAbortParams,
-    UpdateShutdownAbortResult, UpdateShutdownBlockedReason, UpdateShutdownCommitParams,
-    UpdateShutdownCommitResult, UpdateShutdownPrepareParams, UpdateShutdownPrepareResult,
+    ClientRole, ClientSecretKeysChangedParams, ClientWorkspaceRoot, InitializeParams,
+    InitializeResult, RequestedSurface, SettingsSection, ShellCapability, ShellDescriptor,
+    ShellKind, UpdateShutdownAbortParams, UpdateShutdownAbortResult, UpdateShutdownBlockedReason,
+    UpdateShutdownCommitParams, UpdateShutdownCommitResult, UpdateShutdownPrepareParams,
+    UpdateShutdownPrepareResult,
 };
 use crate::devices::{
     DeviceCollectionSnapshot, DevicesCancelInviteParams, DevicesCancelInviteResult,
@@ -253,6 +254,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<UpdateShutdownCommitResult>(output, config);
     push_decl::<UpdateShutdownAbortParams>(output, config);
     push_decl::<UpdateShutdownAbortResult>(output, config);
+    push_decl::<ClientSecretKeysChangedParams>(output, config);
     push_decl::<ClientReplacementImpactParams>(output, config);
     push_decl::<ClientReplacementImpactResult>(output, config);
     push_decl::<AttachedClientSummary>(output, config);

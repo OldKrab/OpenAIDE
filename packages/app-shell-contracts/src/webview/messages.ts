@@ -1,4 +1,6 @@
 import type {
+  SecretKeysRequestMessage,
+  SecretKeysResultMessage,
   SecretTransactionMessage,
   SecretTransactionResultMessage,
 } from "./secrets.js";
@@ -43,6 +45,7 @@ export type WebviewToHostMessage =
   | { type: "webview.telemetry"; payload: WebviewTelemetryPayload }
   | AppServerServerRequestMessage
   | SecretTransactionMessage
+  | SecretKeysRequestMessage
   | { type: "diagnostics.snapshot" }
   | { type: "diagnostics.export" }
   | { type: "workspace.roots" }
@@ -67,6 +70,7 @@ export type WebviewToHostMessage =
 export type HostToWebviewMessage =
   | AppServerServerRequestResultMessage
   | SecretTransactionResultMessage
+  | SecretKeysResultMessage
   | { type: "appServer.connectionChanged"; payload: { connection: WebviewAppServerConnection } }
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }

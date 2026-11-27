@@ -27,6 +27,12 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
         },
       });
       return;
+    case "secret.keys.request":
+      output.post({
+        type: "secret.keys.result",
+        payload: { requestId: message.payload.requestId, keyIds: [], unknownHolder: false },
+      });
+      return;
     case "workspace.roots":
       output.post({ type: "workspace.roots.result", payload: { roots: data.workspaceRoots() } });
       return;

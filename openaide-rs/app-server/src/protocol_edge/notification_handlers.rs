@@ -1,6 +1,8 @@
 //! Client-to-server notifications (ADR-0086, "Two primitives"). A notification is never
 //! answered; whatever its handler publishes joins the outbound sequences like any other change.
 
+use openaide_app_server_protocol::client::ClientSecretKeysChangedParams;
+use openaide_app_server_protocol::methods::CLIENT_SECRET_KEYS_CHANGED;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ClientContext, ConnectionId};
@@ -14,7 +16,30 @@ type ClientNotificationHandler =
     fn(&mut RpcGateway, &ClientContext, Value, AppServerTime) -> GatewayOutcome;
 
 /// Register a client notification by adding `(METHOD, handler)` here.
-const CLIENT_NOTIFICATION_HANDLERS: &[(&str, ClientNotificationHandler)] = &[];
+const CLIENT_NOTIFICATION_HANDLERS: &[(&str, ClientNotificationHandler)] =
+    &[(CLIENT_SECRET_KEYS_CHANGED, handle_secret_keys_changed)];
+
+/// Replaces the secure-storage keys the client holds; `secret/read` is routed by them.
+fn handle_secret_keys_changed(
+    gateway: &mut RpcGateway,
+    context: &ClientContext,
+    params: Value,
+    _now: AppServerTime,
+) -> GatewayOutcome {
+    match serde_json::from_value::<ClientSecretKeysChangedParams>(params) {
+        Ok(params) => gateway.server_requests.declare_secret_holding(
+            context.client_instance_id.clone(),
+            params.key_ids,
+            params.unknown_holder,
+        ),
+        Err(_) => log_rejected(
+            &context.connection_id,
+            CLIENT_SECRET_KEYS_CHANGED,
+            "invalid_params",
+        ),
+    }
+    GatewayOutcome::Noop
+}
 
 fn client_notification_handler(method: &str) -> Option<ClientNotificationHandler> {
     CLIENT_NOTIFICATION_HANDLERS

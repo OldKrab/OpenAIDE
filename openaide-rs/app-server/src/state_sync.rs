@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, EventCursor, StateRootId, TaskId};
 use openaide_app_server_protocol::state::{
@@ -33,62 +30,6 @@ pub struct StateEventDelivery {
     pub event: AppServerEvent,
 }
 
-/// Shares current Task-view presence with App Server workflows without exposing
-/// transport or client-subscription details to product logic.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct TaskSubscriptionPresence {
-    subscribers: Arc<Mutex<HashMap<TaskId, HashSet<ClientInstanceId>>>>,
-}
-
-impl TaskSubscriptionPresence {
-    fn observe_subscribed(&self, client_instance_id: ClientInstanceId, task_id: TaskId) {
-        self.subscribers
-            .lock()
-            .expect("Task subscription presence poisoned")
-            .entry(task_id)
-            .or_default()
-            .insert(client_instance_id);
-    }
-
-    fn observe_unsubscribed(&self, client_instance_id: &ClientInstanceId, task_id: &TaskId) {
-        let mut subscribers = self
-            .subscribers
-            .lock()
-            .expect("Task subscription presence poisoned");
-        if let Some(task_subscribers) = subscribers.get_mut(task_id) {
-            task_subscribers.remove(client_instance_id);
-            if task_subscribers.is_empty() {
-                subscribers.remove(task_id);
-            }
-        }
-    }
-
-    fn observe_client_expired(&self, client_instance_id: &ClientInstanceId) {
-        self.subscribers
-            .lock()
-            .expect("Task subscription presence poisoned")
-            .retain(|_, subscribers| {
-                subscribers.remove(client_instance_id);
-                !subscribers.is_empty()
-            });
-    }
-
-    pub(crate) fn has_subscribers(&self, task_id: &str) -> bool {
-        self.subscribers
-            .lock()
-            .expect("Task subscription presence poisoned")
-            .iter()
-            .any(|(candidate, subscribers)| {
-                candidate.as_str() == task_id && !subscribers.is_empty()
-            })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn subscribe_for_test(&self, client_instance_id: ClientInstanceId, task_id: TaskId) {
-        self.observe_subscribed(client_instance_id, task_id);
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StateStream {
     state_root_id: StateRootId,
@@ -96,23 +37,14 @@ pub struct StateStream {
     /// every value is unique and a baseline is ordered against every event.
     cursors: CursorSequencer,
     subscriptions: Vec<SubscriptionRecord>,
-    task_subscription_presence: TaskSubscriptionPresence,
 }
 
 impl StateStream {
     pub fn new(state_root_id: StateRootId) -> Self {
-        Self::with_task_subscription_presence(state_root_id, TaskSubscriptionPresence::default())
-    }
-
-    pub(crate) fn with_task_subscription_presence(
-        state_root_id: StateRootId,
-        task_subscription_presence: TaskSubscriptionPresence,
-    ) -> Self {
         Self {
             state_root_id,
             cursors: CursorSequencer::new(),
             subscriptions: Vec::new(),
-            task_subscription_presence,
         }
     }
 
@@ -148,12 +80,6 @@ impl StateStream {
             scope.clone(),
             token.cursor().clone(),
         );
-        if subscription_added {
-            if let SubscriptionScope::Task { task_id } = &scope {
-                self.task_subscription_presence
-                    .observe_subscribed(ctx.client_instance_id.clone(), task_id.clone());
-            }
-        }
         Ok((
             StateSubscribeResult {
                 cursor: token.cursor().clone(),
@@ -189,16 +115,9 @@ impl StateStream {
         scope: SubscriptionScope,
         _now: AppServerTime,
     ) -> StateUnsubscribeResult {
-        let removed = self.subscriptions.len();
         self.subscriptions.retain(|subscription| {
             subscription.client_instance_id != ctx.client_instance_id || subscription.scope != scope
         });
-        if self.subscriptions.len() != removed {
-            if let SubscriptionScope::Task { task_id } = &scope {
-                self.task_subscription_presence
-                    .observe_unsubscribed(&ctx.client_instance_id, task_id);
-            }
-        }
         StateUnsubscribeResult { scope }
     }
 
@@ -263,17 +182,7 @@ impl StateStream {
             | SubscriptionScope::ToolDetail { task_id: t, .. } => !task_scope && t == task_id,
             _ => false,
         };
-        let ended: Vec<ClientInstanceId> = self
-            .subscriptions
-            .iter()
-            .filter(|s| task_scope && ends(&s.scope))
-            .map(|s| s.client_instance_id.clone())
-            .collect();
         self.subscriptions.retain(|s| !ends(&s.scope));
-        for client in ended {
-            self.task_subscription_presence
-                .observe_unsubscribed(&client, task_id);
-        }
     }
 
     pub fn subscribers_for_scope(&self, scope: &SubscriptionScope) -> Vec<ClientInstanceId> {
@@ -298,8 +207,6 @@ impl StateStream {
     pub fn drop_client_subscriptions(&mut self, client_instance_id: &ClientInstanceId) {
         self.subscriptions
             .retain(|subscription| &subscription.client_instance_id != client_instance_id);
-        self.task_subscription_presence
-            .observe_client_expired(client_instance_id);
     }
 
     pub fn subscription_count(&self) -> usize {

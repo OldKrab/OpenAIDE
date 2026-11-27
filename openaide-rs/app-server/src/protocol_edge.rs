@@ -421,7 +421,6 @@ impl RpcGateway {
                 self.client_hub
                     .delivery_for(&context.client_instance_id)
                     .expect("initialized client must have a delivery"),
-                &self.responder_scopes(&context),
                 now,
             );
         let token = self
@@ -487,25 +486,7 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.add_pending_to_subscription_snapshot(&mut result.snapshot);
-        let server_requests = match &result.scope {
-            openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {
-                self.server_requests.observe_subscription_added(
-                    self.client_hub
-                        .delivery_for(&ctx.client_instance_id)
-                        .expect("subscribed client must have a delivery"),
-                    task_id.clone(),
-                    now,
-                )
-            }
-            _ => Vec::new(),
-        };
-        self.result_with_server_requests::<StateSubscribeResult>(
-            connection_id,
-            id,
-            meta,
-            result,
-            server_requests,
-        )
+        self.result::<StateSubscribeResult>(connection_id, id, meta, result)
     }
 
     fn handle_unsubscribe(
@@ -530,15 +511,7 @@ impl RpcGateway {
                 responses::not_initialized(STATE_UNSUBSCRIBE.to_string()),
             );
         };
-        let scope = params.scope.clone();
         let result = self.state_stream.unsubscribe(&ctx, params.scope, now);
-        if let openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } = &scope {
-            self.server_requests.observe_subscription_removed(
-                &ctx.client_instance_id,
-                task_id,
-                now,
-            );
-        }
         self.result::<StateUnsubscribeResult>(connection_id, id, meta, result)
     }
 

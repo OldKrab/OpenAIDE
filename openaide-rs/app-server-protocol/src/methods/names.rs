@@ -12,6 +12,8 @@ pub const CLIENT_UPDATE_SHUTDOWN_PREPARE: &str = "client/updateShutdownPrepare";
 pub const CLIENT_UPDATE_SHUTDOWN_COMMIT: &str = "client/updateShutdownCommit";
 pub const CLIENT_UPDATE_SHUTDOWN_ABORT: &str = "client/updateShutdownAbort";
 pub const CLIENT_REPLACEMENT_IMPACT: &str = "client/replacementImpact";
+/// Client notification: the secure-storage keys the client holds changed.
+pub const CLIENT_SECRET_KEYS_CHANGED: &str = "client/secretKeysChanged";
 pub const PENDING_REQUEST_RESOLVE: &str = "pendingRequest/resolve";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";

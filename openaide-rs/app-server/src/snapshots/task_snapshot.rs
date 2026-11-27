@@ -70,6 +70,14 @@ pub trait TaskSnapshotSource: Send + Sync {
         cursor: Option<&TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError>;
 
+    /// The Project a Task belongs to, or `None` when the Task is unknown. Authorization for
+    /// answering a Permission or Question uses it (a VS Code client only answers its Projects').
+    fn project_of(&self, task_id: &TaskId) -> Option<ProjectId> {
+        self.open_internal(task_id)
+            .ok()
+            .map(|snapshot| snapshot.task.project_id)
+    }
+
     /// Reads a Task for internal publication after its audience is already established.
     fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
 
@@ -238,6 +246,13 @@ impl TaskSnapshotStore {
 }
 
 impl TaskSnapshotSource for TaskSnapshotStore {
+    fn project_of(&self, task_id: &TaskId) -> Option<ProjectId> {
+        self.store
+            .read_task(task_id.as_str())
+            .ok()
+            .map(|task| project_task_summary(task).project_id)
+    }
+
     fn list(
         &self,
         lifecycle: TaskListLifecycle,

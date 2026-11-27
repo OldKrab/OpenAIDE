@@ -85,6 +85,19 @@ pub struct UpdateShutdownAbortParams {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateShutdownAbortResult {}
 
+/// Client notification (no reply): every secure-storage key id the client holds now, replacing
+/// the previous set. `secret/read` goes only to a connected client that declared the key
+/// (ADR-0086). Key ids are storage names such as `openaide.agent.<agent>.env.<name>`, never values.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientSecretKeysChangedParams {
+    pub key_ids: Vec<String>,
+    /// The client may also hold secrets it cannot list (stored before it kept a key index). The
+    /// App Server asks such a client only when no client declared the key.
+    #[serde(default)]
+    pub unknown_holder: bool,
+}
+
 /// Asks what replacing this App Server with another version would affect now. A client
 /// that installed a different version shows the answer before the user confirms the
 /// replacement (ADR-0069).

@@ -85,9 +85,3 @@ pub enum RequestLifecycleOutcome {
         scope: PendingRequestScope,
     },
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResponderScope {
-    Client(ClientInstanceId),
-    Task(openaide_app_server_protocol::ids::TaskId),
-}

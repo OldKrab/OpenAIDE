@@ -4,6 +4,8 @@ import type {
   ClientProbeResult,
   InitializeParams,
   InitializeResult,
+  ClientNotificationMethod,
+  ClientNotificationParamsByMethod,
   NavigationViewParams,
   ProtocolMethod,
   RequestId,
@@ -106,6 +108,15 @@ export interface BackendConnection {
     params: RequestParamsByMethod[M],
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]>;
+  /**
+   * Sends a client notification: no reply, no retry of its own. A lost notification is made good
+   * by the sender re-sending its current state after the session is re-initialized. Absent on
+   * connections that cannot carry one (an App Shell bridge).
+   */
+  notify?<M extends ClientNotificationMethod>(
+    method: M,
+    params: ClientNotificationParamsByMethod[M],
+  ): void;
   /** Registers a typed inbound request handler; its return value is the protocol response. */
   handleRequest<M extends ServerRequestMethod>(
     method: M,

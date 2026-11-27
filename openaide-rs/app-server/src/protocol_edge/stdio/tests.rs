@@ -1724,7 +1724,7 @@ fn corrupt_last_byte(path: &std::path::Path) {
 }
 
 #[test]
-fn task_subscription_emits_pending_server_request_over_stdio() {
+fn task_subscription_lists_pending_request_as_task_state_over_stdio() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1733,68 +1733,141 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
-    let opened = dispatcher.gateway.open_server_request(
-        task_secret_request("task-1"),
+    dispatcher.gateway.open_server_request(
+        task_permission_request("task-1"),
         crate::client_lifecycle::AppServerTime(2),
     );
-    assert!(matches!(
-        opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.is_empty()
-    ));
 
     let responses = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
             "method": STATE_SUBSCRIBE,
-            "params": {
-                "scope": {
-                    "kind": "task",
-                    "taskId": "task-1"
-                }
-            }
+            "params": { "scope": { "kind": "task", "taskId": "task-1" } }
         })
         .to_string(),
     );
 
-    // The deliverable server request precedes the subscribe reply that lists it.
-    assert_eq!(responses.len(), 2);
-    let subscribe_response = response(&responses[1]);
+    // Pending requests are Task state: nothing is resent as a server request on subscribe.
+    assert_eq!(responses.len(), 1);
+    let subscribe_response = response(&responses[0]);
     assert_eq!(subscribe_response["id"], "2");
-    assert_eq!(
-        subscribe_response["result"]["result"]["snapshot"]["task"]["task"]["title"],
-        serde_json::json!({ "value": "Task", "source": "user" })
-    );
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["pendingRequests"][0]
             ["requestId"],
         "server-request-1"
     );
-    let server_request = response(&responses[0]);
-    assert_eq!(server_request["jsonrpc"], "2.0");
-    assert_eq!(server_request["id"], "server-request-1");
-    assert_eq!(server_request["method"], "secret/read");
-    assert_eq!(server_request["params"]["key"], "agent.secret");
 
-    let updates = dispatcher.handle_line(
+    let resolved = resolve_pending_permission(
+        &mut dispatcher,
+        &json!({ "requestId": "server-request-1" }),
+        "allow-once",
+    );
+
+    assert!(resolved.iter().any(|line| {
+        let update = response(line);
+        update["params"]["payload"]["kind"] == "taskRequestsUpdated"
+            && update["params"]["payload"]["requests"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+    }));
+    assert!(dispatcher
+        .gateway
+        .pending_server_requests_for_task(&TaskId::from("task-1"))
+        .is_empty());
+    drop(temp);
+}
+
+fn vscode_init_request(client_id: &str, workspace_root: &str) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": "init",
+        "method": CLIENT_INITIALIZE,
+        "params": {
+            "clientInstanceId": client_id,
+            "shell": { "kind": "vscodeExtension" },
+            "requestedSurface": { "kind": "home" },
+            "workspaceRoots": [{ "path": workspace_root }]
+        }
+    })
+    .to_string()
+}
+
+fn answer_error_code(lines: &[String]) -> Option<String> {
+    lines
+        .iter()
+        .map(|line| response(line))
+        .find(|message| message["id"] == "resolve")
+        .and_then(|message| {
+            message["error"]["error"]["code"]
+                .as_str()
+                .map(str::to_string)
+        })
+}
+
+fn dispatcher_with_pending_permission(temp: &tempfile::TempDir) -> ProtocolEdgeStdioDispatcher {
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("task-1")).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    dispatcher.gateway.open_server_request(
+        task_permission_request("task-1"),
+        crate::client_lifecycle::AppServerTime(2),
+    );
+    dispatcher
+}
+
+#[test]
+fn a_vscode_client_answers_only_tasks_of_its_projects() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let mut dispatcher = dispatcher_with_pending_permission(&temp);
+    // client-1 (web) never opened the Task; the VS Code client works in another Project.
+    dispatcher.handle_line(&vscode_init_request(
+        "vscode-other",
+        "/tmp/openaide-stdio-workspace/other",
+    ));
+    let denied = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
-            "id": "server-request-1",
-            "result": { "decision": "allow" }
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }
         })
         .to_string(),
     );
+    // The stdio dispatcher serves one connection, the latest initialized client.
+    assert_eq!(answer_error_code(&denied).as_deref(), Some("unauthorized"));
+    assert_eq!(
+        dispatcher
+            .gateway
+            .pending_server_requests_for_task(&TaskId::from("task-1"))
+            .len(),
+        1
+    );
 
-    assert_eq!(updates.len(), 1);
-    let update = response(&updates[0]);
-    assert_eq!(update["method"], "app/event");
-    assert_eq!(update["params"]["payload"]["kind"], "taskRequestsUpdated");
-    assert!(update["params"]["payload"]["requests"]
-        .as_array()
-        .is_some_and(Vec::is_empty));
+    dispatcher.handle_line(&vscode_init_request(
+        "vscode-same",
+        "/tmp/openaide-stdio-workspace/a",
+    ));
+    let accepted = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "resolve",
+            "method": PENDING_REQUEST_RESOLVE,
+            "params": {
+                "requestId": "server-request-1",
+                "resolution": { "kind": "permission", "optionId": "allow-once" }
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(answer_error_code(&accepted), None);
     assert!(dispatcher
         .gateway
         .pending_server_requests_for_task(&TaskId::from("task-1"))
@@ -2739,6 +2812,55 @@ fn task_archive_older_previews_then_archives_only_safe_tasks_in_the_cutoff_proje
 }
 
 #[test]
+fn task_archive_older_archives_a_task_open_in_a_view() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut old = task_record("task-old");
+        old.last_activity = "2026-01-01T00:00:00.000Z".to_string();
+        let mut cutoff = task_record("task-cutoff");
+        cutoff.last_activity = "2026-01-03T00:00:00.000Z".to_string();
+        for task in [old, cutoff] {
+            store.write_task(&task).unwrap();
+        }
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    // A subscription is only "send me this data": it protects nothing.
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe",
+            "method": STATE_SUBSCRIBE,
+            "params": { "scope": { "kind": "task", "taskId": "task-old" } }
+        })
+        .to_string(),
+    );
+
+    let archived = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "archive-older",
+            "method": "task/archiveOlder",
+            "params": { "cutoff": { "kind": "task", "taskId": "task-cutoff" }, "preview": false }
+        })
+        .to_string(),
+    );
+
+    let result = archived
+        .iter()
+        .map(|line| response(line))
+        .find(|message| message["id"] == "archive-older")
+        .expect("archiveOlder reply");
+    assert_eq!(
+        result["result"]["result"]["archivedTaskIds"],
+        json!(["task-old"])
+    );
+    assert_eq!(result["result"]["result"]["protected"], json!([]));
+}
+
+#[test]
 fn task_archive_older_completes_large_project_cleanup_promptly() {
     const OLDER_SESSION_COUNT: usize = 800;
     let temp = tempfile::TempDir::new().expect("temp dir");
@@ -3161,6 +3283,21 @@ fn task_record(task_id: &str) -> TaskRecord {
         model_id: None,
         supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
+    }
+}
+
+fn task_permission_request(task_id: &str) -> ServerRequestDraft {
+    ServerRequestDraft {
+        scope: PendingRequestScope::Task {
+            task_id: TaskId::from(task_id),
+        },
+        method: "permission/request".to_string(),
+        title: "Permission needed".to_string(),
+        params: json!({
+            "title": "Run a command",
+            "toolCall": { "id": "call-1", "title": "Run" },
+            "options": [{ "optionId": "allow-once", "name": "Allow", "kind": "allowOnce" }]
+        }),
     }
 }
 

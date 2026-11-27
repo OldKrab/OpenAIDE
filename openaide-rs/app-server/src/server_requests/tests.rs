@@ -161,14 +161,8 @@ fn task_request_survives_disconnect_and_is_redelivered_after_reconnect() {
 
     assert!(outcomes.is_empty());
 
-    let deliveries = broker.observe_responder_available(
-        delivery("client-1", "conn-2"),
-        &[
-            ResponderScope::Client(ClientInstanceId::from("client-1")),
-            ResponderScope::Task(TaskId::from("task-1")),
-        ],
-        AppServerTime(4),
-    );
+    let deliveries =
+        broker.observe_responder_available(delivery("client-1", "conn-2"), AppServerTime(4));
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].envelope.request_id, request_id);
     assert_eq!(broker.pending_count(), 1);
@@ -194,11 +188,8 @@ fn responder_available_does_not_redeliver_existing_pending_request() {
         AppServerTime(1),
     );
 
-    let deliveries = broker.observe_responder_available(
-        delivery("client-1", "conn-2"),
-        &[ResponderScope::Task(TaskId::from("task-1"))],
-        AppServerTime(2),
-    );
+    let deliveries =
+        broker.observe_responder_available(delivery("client-1", "conn-2"), AppServerTime(2));
 
     assert!(deliveries.is_empty());
 }
@@ -270,10 +261,10 @@ fn invalid_response_does_not_resolve_request() {
 }
 
 #[test]
-fn unauthorized_client_cannot_answer() {
+fn only_the_target_client_can_answer_a_client_scoped_request() {
     let mut broker = ServerRequestBroker::new();
     let opened = broker.open(
-        task_request("task-1"),
+        client_request("client-1"),
         vec![delivery("client-1", "conn-1")],
         AppServerTime(1),
     );
@@ -283,7 +274,7 @@ fn unauthorized_client_cannot_answer() {
         broker.handle_response(
             ClientInstanceId::from("client-2"),
             request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
+            ServerRequestAnswer::Result(json!({ "revealed": true })),
             AppServerTime(2),
         ),
         ResponseOutcome::UnauthorizedResponder {
@@ -294,35 +285,28 @@ fn unauthorized_client_cannot_answer() {
 }
 
 #[test]
-fn unauthorized_client_cannot_observe_resolved_request_state() {
+fn any_client_can_answer_a_task_request_and_a_late_answer_is_already_resolved() {
     let mut broker = ServerRequestBroker::new();
-    let opened = broker.open(
-        task_request("task-1"),
-        vec![delivery("client-1", "conn-1")],
-        AppServerTime(1),
-    );
+    let opened = broker.open(permission_request("task-1"), Vec::new(), AppServerTime(1));
     let request_id = opened_request_id(opened);
 
     assert!(matches!(
         broker.handle_response(
-            ClientInstanceId::from("client-1"),
+            ClientInstanceId::from("client-2"),
             request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
+            ServerRequestAnswer::Result(json!({ "optionId": "allow-once" })),
             AppServerTime(2),
         ),
         ResponseOutcome::Accepted { .. }
     ));
     assert_eq!(
         broker.handle_response(
-            ClientInstanceId::from("client-2"),
+            ClientInstanceId::from("client-3"),
             request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "deny" })),
+            ServerRequestAnswer::Result(json!({ "optionId": "reject-once" })),
             AppServerTime(3),
         ),
-        ResponseOutcome::UnauthorizedResponder {
-            request_id,
-            responder: ClientInstanceId::from("client-2")
-        }
+        ResponseOutcome::AlreadyResolved { request_id }
     );
 }
 
@@ -467,11 +451,8 @@ fn repeated_responder_available_does_not_duplicate_delivery() {
         AppServerTime(1),
     );
 
-    let deliveries = broker.observe_responder_available(
-        delivery("client-1", "conn-1"),
-        &[ResponderScope::Task(TaskId::from("task-1"))],
-        AppServerTime(2),
-    );
+    let deliveries =
+        broker.observe_responder_available(delivery("client-1", "conn-1"), AppServerTime(2));
 
     assert!(deliveries.is_empty());
 }
