@@ -2248,12 +2248,23 @@ fn a_mutation_queues_the_changed_rows_navigation_frame_before_its_reply() {
         .to_string(),
     );
 
-    let (reply, events) = messages.split_last().unwrap();
+    // The subscription's background discovery may still land a frame after the reply, so the
+    // reply is found by id and only the lines ahead of it are inspected.
+    let reply_index = messages
+        .iter()
+        .position(|line| response(line)["id"] == "pin")
+        .expect("pin reply");
+    let (events, reply) = (&messages[..reply_index], &messages[reply_index]);
     assert_eq!(response(reply)["result"]["result"]["task"]["pinned"], true);
     let frame = events
         .iter()
-        .find(|line| event_payload_kind(line, "navigationFrame"))
-        .expect("navigation frame ahead of the reply");
+        .find(|line| {
+            event_payload_kind(line, "navigationFrame")
+                && !response(line)["params"]["payload"]["frame"]["groups"][0]["rows"]
+                    ["task:task-existing"]
+                    .is_null()
+        })
+        .expect("navigation frame with the changed row ahead of the reply");
     assert_eq!(
         response(frame)["params"]["payload"]["frame"]["groups"][0]["rows"]["task:task-existing"]
             ["entry"]["task"]["pinned"],
